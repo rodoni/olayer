@@ -148,10 +148,10 @@ fn test_view_projection_matrix_with_rotation() {
     let multiply_vector = |v: &[f32; 4]| -> [f32; 4] {
         let mut out = [0.0; 4];
         for row in 0..4 {
-            out[row] = m_rot_arr[0 * 4 + row] * v[0]
-                + m_rot_arr[1 * 4 + row] * v[1]
-                + m_rot_arr[2 * 4 + row] * v[2]
-                + m_rot_arr[3 * 4 + row] * v[3];
+            out[row] = m_rot_arr[row] * v[0]
+                + m_rot_arr[4 + row] * v[1]
+                + m_rot_arr[8 + row] * v[2]
+                + m_rot_arr[12 + row] * v[3];
         }
         out
     };
@@ -188,7 +188,7 @@ fn test_matrix4_multiply_correctness() {
     let trans = Matrix4::translation(1.0, 2.0, 3.0);
     let rot = Matrix4::rotation_z(std::f32::consts::FRAC_PI_2);
 
-    let combined = &rot * &trans;
+    let combined = rot * trans;
     let m = combined.as_slice();
 
     // The rotation matrix for PI/2 around Z:
@@ -235,10 +235,10 @@ fn test_view_projection_matrix() {
     let multiply_vector = |v: &[f32; 4]| -> [f32; 4] {
         let mut out = [0.0; 4];
         for row in 0..4 {
-            out[row] = m_arr[0 * 4 + row] * v[0]
-                + m_arr[1 * 4 + row] * v[1]
-                + m_arr[2 * 4 + row] * v[2]
-                + m_arr[3 * 4 + row] * v[3];
+            out[row] = m_arr[row] * v[0]
+                + m_arr[4 + row] * v[1]
+                + m_arr[8 + row] * v[2]
+                + m_arr[12 + row] * v[3];
         }
         out
     };

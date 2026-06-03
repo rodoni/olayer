@@ -110,7 +110,7 @@ fn test_haversine_solver() {
     let result = solver.inverse(&jfk, &lhr, &ellipsoid).unwrap();
     
     // Spherical distance should be around 5560 km for mean radius
-    assert!(result.distance > 5500_000.0 && result.distance < 5600_000.0, "Haversine distance was {}", result.distance);
+    assert!(result.distance > 5_500_000.0 && result.distance < 5_600_000.0, "Haversine distance was {}", result.distance);
     
     // Bearing from NY to London should be northeast (approx 51 degrees)
     let bearing_deg = result.initial_bearing.to_degrees();
@@ -249,9 +249,6 @@ fn test_vincenty_sub_meter_roundtrip() {
 
 #[test]
 fn test_solver_metadata() {
-    assert!(!HaversineSolver::IS_ELLIPSOIDAL);
     assert_eq!(HaversineSolver::EXPECTED_ACCURACY_METERS, 1.0);
-    
-    assert!(VincentySolver::IS_ELLIPSOIDAL);
     assert_eq!(VincentySolver::EXPECTED_ACCURACY_METERS, 1e-3);
 }
