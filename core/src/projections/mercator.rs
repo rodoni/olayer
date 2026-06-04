@@ -1,3 +1,5 @@
+#![allow(clippy::unreadable_literal)]
+
 use crate::geodesy::coords::LatLon;
 use crate::geodesy::ellipsoid::Ellipsoid;
 use crate::geodesy::math::normalize_longitude;
@@ -37,7 +39,7 @@ impl WebMercator {
 impl Projection for WebMercator {
     #[inline]
     fn project(&self, lla: &LatLon) -> Result<(f64, f64), ProjectionError> {
-        debug_assert!(lla.validate().is_ok(), "Invalid LLA in WebMercator::project: {:?}", lla);
+        debug_assert!(lla.validate().is_ok(), "Invalid LLA in WebMercator::project: {lla:?}");
 
         let lat = lla.lat;
         let lon = lla.lon;

@@ -14,10 +14,10 @@ pub enum TerrainError {
 impl fmt::Display for TerrainError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            TerrainError::InvalidHeader(err) => write!(f, "Invalid DTED header: {}", err),
-            TerrainError::MalformedData(err) => write!(f, "Corrupted DTED data: {}", err),
+            TerrainError::InvalidHeader(err) => write!(f, "Invalid DTED header: {err}"),
+            TerrainError::MalformedData(err) => write!(f, "Corrupted DTED data: {err}"),
             TerrainError::TileNotLoaded(lat, lon) => {
-                write!(f, "DTED tile not loaded for coordinate ({}, {})", lat, lon)
+                write!(f, "DTED tile not loaded for coordinate ({lat}, {lon})")
             }
         }
     }

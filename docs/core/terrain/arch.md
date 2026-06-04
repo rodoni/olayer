@@ -64,8 +64,8 @@ classDiagram
         +origin_lon: i32
         +num_rows: usize
         +num_cols: usize
-        +lat_spacing_rad: f64
-        +lon_spacing_rad: f64
+        +lat_spacing_arcsec: u32
+        +lon_spacing_arcsec: u32
         +elevations: Vec~i16~
         +get_cell_elevation(row: usize, col: usize) i16
     }
@@ -81,7 +81,6 @@ classDiagram
         InvalidHeader
         MalformedData
         TileNotLoaded
-        CoordinatesOutOfBounds
     }
 
     TerrainEngine "1" *-- "*" DtedTile : armazena

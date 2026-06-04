@@ -12,8 +12,8 @@ pub enum SldError {
 impl fmt::Display for SldError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            SldError::XmlError(err) => write!(f, "XML error: {}", err),
-            SldError::InvalidValue(detail) => write!(f, "Invalid value: {}", detail),
+            SldError::XmlError(err) => write!(f, "XML error: {err}"),
+            SldError::InvalidValue(detail) => write!(f, "Invalid value: {detail}"),
         }
     }
 }

@@ -103,10 +103,10 @@ fn apply_sld_style(mut symbol: ResolvedSymbol, style: &StyleRegistry) -> Resolve
                                 if let Some(ref mut stroke_val) = stroke {
                                     stroke_val.color = sld_color.clone();
                                     stroke_val.width = sld_stroke.width;
-                                    stroke_val.dash_array = sld_stroke.dash_array.clone();
+                                    stroke_val.dash_array.clone_from(&sld_stroke.dash_array);
                                 }
                             }
-                            _ => {}
+                            SymbolPrimitive::Text { .. } => {}
                         }
                     }
                 }
@@ -122,7 +122,7 @@ fn apply_sld_style(mut symbol: ResolvedSymbol, style: &StyleRegistry) -> Resolve
                                     *fill_val = sld_color.clone();
                                 }
                             }
-                            _ => {}
+                            SymbolPrimitive::Text { .. } => {}
                         }
                     }
                 }

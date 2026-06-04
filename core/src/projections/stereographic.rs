@@ -50,7 +50,7 @@ impl Stereographic {
 impl Projection for Stereographic {
     #[inline]
     fn project(&self, lla: &LatLon) -> Result<(f64, f64), ProjectionError> {
-        debug_assert!(lla.validate().is_ok(), "Invalid LLA in Stereographic::project: {:?}", lla);
+        debug_assert!(lla.validate().is_ok(), "Invalid LLA in Stereographic::project: {lla:?}");
 
         let lat = lla.lat;
         let lon = lla.lon;

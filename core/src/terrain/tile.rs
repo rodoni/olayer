@@ -36,11 +36,11 @@ impl DtedTile {
         let lat_str = String::from_utf8_lossy(&data[12..20]);
 
         let parsed_lon = parse_uhl_lon(&lon_str).map_err(|e| {
-            TerrainError::InvalidHeader(format!("Failed to parse origin longitude '{}': {}", lon_str, e))
+            TerrainError::InvalidHeader(format!("Failed to parse origin longitude '{lon_str}': {e}"))
         })?;
 
         let parsed_lat = parse_uhl_lat(&lat_str).map_err(|e| {
-            TerrainError::InvalidHeader(format!("Failed to parse origin latitude '{}': {}", lat_str, e))
+            TerrainError::InvalidHeader(format!("Failed to parse origin latitude '{lat_str}': {e}"))
         })?;
 
         let origin_lon = parsed_lon.floor() as i32;
@@ -51,11 +51,11 @@ impl DtedTile {
         let num_rows_str = String::from_utf8_lossy(&data[51..55]);
 
         let num_cols = num_cols_str.trim().parse::<usize>().map_err(|e| {
-            TerrainError::InvalidHeader(format!("Invalid column count '{}': {}", num_cols_str, e))
+            TerrainError::InvalidHeader(format!("Invalid column count '{num_cols_str}': {e}"))
         })?;
 
         let num_rows = num_rows_str.trim().parse::<usize>().map_err(|e| {
-            TerrainError::InvalidHeader(format!("Invalid row count '{}': {}", num_rows_str, e))
+            TerrainError::InvalidHeader(format!("Invalid row count '{num_rows_str}': {e}"))
         })?;
 
         // Parse grid spacing (arc-seconds)
@@ -63,11 +63,11 @@ impl DtedTile {
         let lon_spacing_str = String::from_utf8_lossy(&data[24..28]);
 
         let lat_spacing_arcsec = lat_spacing_str.trim().parse::<u32>().map_err(|e| {
-            TerrainError::InvalidHeader(format!("Invalid latitude spacing '{}': {}", lat_spacing_str, e))
+            TerrainError::InvalidHeader(format!("Invalid latitude spacing '{lat_spacing_str}': {e}"))
         })?;
 
         let lon_spacing_arcsec = lon_spacing_str.trim().parse::<u32>().map_err(|e| {
-            TerrainError::InvalidHeader(format!("Invalid longitude spacing '{}': {}", lon_spacing_str, e))
+            TerrainError::InvalidHeader(format!("Invalid longitude spacing '{lon_spacing_str}': {e}"))
         })?;
 
         // Each data column: 1 sentinel + 3 lon idx + 3 lat idx + num_rows * 2 bytes + 4 checksum
@@ -92,8 +92,7 @@ impl DtedTile {
             // Block sentinel
             if data[offset] != 0xAA {
                 return Err(TerrainError::MalformedData(format!(
-                    "Block sentinel 0xAA not found at column {}",
-                    c
+                    "Block sentinel 0xAA not found at column {c}"
                 )));
             }
 
@@ -144,7 +143,7 @@ fn parse_uhl_lon(s: &str) -> Result<f64, String> {
     } else if num_part.len() >= 3 {
         num_part.parse::<f64>().map_err(|e| e.to_string())?
     } else {
-        return Err(format!("Invalid number format: {}", num_part));
+        return Err(format!("Invalid number format: {num_part}"));
     };
     if dir == "W" || dir == "S" {
         Ok(-val)
@@ -170,7 +169,7 @@ fn parse_uhl_lat(s: &str) -> Result<f64, String> {
     } else if num_part.len() >= 2 {
         num_part.parse::<f64>().map_err(|e| e.to_string())?
     } else {
-        return Err(format!("Invalid number format: {}", num_part));
+        return Err(format!("Invalid number format: {num_part}"));
     };
     if dir == "W" || dir == "S" {
         Ok(-val)

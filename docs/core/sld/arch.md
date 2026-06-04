@@ -77,7 +77,6 @@ classDiagram
     class SldError {
         <<enumeration>>
         XmlError
-        MissingRequiredTag
         InvalidValue
     }
 

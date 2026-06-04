@@ -361,7 +361,7 @@ impl SymbologyProvider for DeclarativeProvider {
     }
 
     fn resolve(&self, code: &str, _style: &StyleRegistry) -> Result<ResolvedSymbol, SymbologyError> {
-        self.symbols.get(code).cloned().ok_or(SymbologyError::NotFound)
+        self.symbols.get(code).cloned().ok_or(SymbologyError::SymbolNotFound(code.to_string()))
     }
 }
 ```

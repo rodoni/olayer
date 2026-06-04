@@ -1,3 +1,5 @@
+#![allow(clippy::unreadable_literal)]
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Ellipsoid {
     pub a: f64,          // Semi-major axis in meters

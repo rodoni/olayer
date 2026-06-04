@@ -33,7 +33,7 @@ fn path_matches(path: &[String], prefix: &[&str], last_is_param: bool) -> bool {
     if path.is_empty() {
         return false;
     }
-    let expected_len = prefix.len() + if last_is_param { 1 } else { 0 };
+    let expected_len = prefix.len() + usize::from(last_is_param);
     if path.len() < expected_len {
         return false;
     }
@@ -57,7 +57,7 @@ fn parse_dash_array(val: &str) -> Result<Vec<f32>, SldError> {
         let trimmed = part.trim();
         if !trimmed.is_empty() {
             let num = trimmed.parse::<f32>().map_err(|e| {
-                SldError::InvalidValue(format!("Invalid dash_array value '{}': {}", trimmed, e))
+                SldError::InvalidValue(format!("Invalid dash_array value '{trimmed}': {e}"))
             })?;
             result.push(num);
         }
@@ -192,14 +192,14 @@ impl SldParser {
         } else if path_matches(&self.path, &["Rule", "MinScaleDenominator"], false) {
             if let Some(ref mut rule) = self.current_rule {
                 let val = text_val.parse::<f64>().map_err(|err| {
-                    SldError::InvalidValue(format!("Invalid MinScaleDenominator '{}': {}", text_val, err))
+                    SldError::InvalidValue(format!("Invalid MinScaleDenominator '{text_val}': {err}"))
                 })?;
                 rule.min_scale = Some(val);
             }
         } else if path_matches(&self.path, &["Rule", "MaxScaleDenominator"], false) {
             if let Some(ref mut rule) = self.current_rule {
                 let val = text_val.parse::<f64>().map_err(|err| {
-                    SldError::InvalidValue(format!("Invalid MaxScaleDenominator '{}': {}", text_val, err))
+                    SldError::InvalidValue(format!("Invalid MaxScaleDenominator '{text_val}': {err}"))
                 })?;
                 rule.max_scale = Some(val);
             }
@@ -216,7 +216,7 @@ impl SldParser {
         } else if path_matches(&self.path, &["TextSymbolizer", "Font"], true) {
             self.apply_font_param(&text_val)?;
         } else if path_matches(&self.path, &["TextSymbolizer", "Fill"], true) {
-            self.apply_text_fill_param(&text_val)?;
+            self.apply_text_fill_param(&text_val);
         } else if path_matches(&self.path, &["PointSymbolizer", "Graphic", "Mark", "WellKnownName"], false) {
             if let Some(ref mut rule) = self.current_rule {
                 if let Some(ref mut point) = rule.point {
@@ -224,14 +224,14 @@ impl SldParser {
                 }
             }
         } else if path_matches(&self.path, &["PointSymbolizer", "Graphic", "Mark", "Fill"], true) {
-            self.apply_point_fill_param(&text_val)?;
+            self.apply_point_fill_param(&text_val);
         } else if path_matches(&self.path, &["PointSymbolizer", "Graphic", "Mark", "Stroke"], true) {
             self.apply_point_stroke_param(&text_val)?;
         } else if path_matches(&self.path, &["PointSymbolizer", "Graphic", "Size"], false) {
             if let Some(ref mut rule) = self.current_rule {
                 if let Some(ref mut point) = rule.point {
                     let s = text_val.parse::<f32>().map_err(|err| {
-                        SldError::InvalidValue(format!("Invalid Point size '{}': {}", text_val, err))
+                        SldError::InvalidValue(format!("Invalid Point size '{text_val}': {err}"))
                     })?;
                     point.size = s;
                 }
@@ -249,7 +249,7 @@ impl SldParser {
                         "stroke" => stroke.color = text_val.to_string(),
                         "stroke-width" => {
                             stroke.width = text_val.parse::<f32>().map_err(|err| {
-                                SldError::InvalidValue(format!("Invalid stroke-width '{}': {}", text_val, err))
+                                SldError::InvalidValue(format!("Invalid stroke-width '{text_val}': {err}"))
                             })?;
                         }
                         "stroke-dasharray" => {
@@ -271,7 +271,7 @@ impl SldParser {
                         "fill" => fill.color = text_val.to_string(),
                         "fill-opacity" => {
                             fill.opacity = text_val.parse::<f32>().map_err(|err| {
-                                SldError::InvalidValue(format!("Invalid fill-opacity '{}': {}", text_val, err))
+                                SldError::InvalidValue(format!("Invalid fill-opacity '{text_val}': {err}"))
                             })?;
                         }
                         _ => {}
@@ -290,7 +290,7 @@ impl SldParser {
                         "font-family" => text.font_family = text_val.to_string(),
                         "font-size" => {
                             text.font_size = text_val.parse::<f32>().map_err(|err| {
-                                SldError::InvalidValue(format!("Invalid font-size '{}': {}", text_val, err))
+                                SldError::InvalidValue(format!("Invalid font-size '{text_val}': {err}"))
                             })?;
                         }
                         _ => {}
@@ -301,7 +301,7 @@ impl SldParser {
         Ok(())
     }
 
-    fn apply_text_fill_param(&mut self, text_val: &str) -> Result<(), SldError> {
+    fn apply_text_fill_param(&mut self, text_val: &str) {
         if let Some(ref mut rule) = self.current_rule {
             if let Some(ref mut text) = rule.text {
                 if let Some(ref param) = self.current_param_name {
@@ -311,10 +311,9 @@ impl SldParser {
                 }
             }
         }
-        Ok(())
     }
 
-    fn apply_point_fill_param(&mut self, text_val: &str) -> Result<(), SldError> {
+    fn apply_point_fill_param(&mut self, text_val: &str) {
         if let Some(ref mut rule) = self.current_rule {
             if let Some(ref mut point) = rule.point {
                 if let Some(ref param) = self.current_param_name {
@@ -324,7 +323,6 @@ impl SldParser {
                 }
             }
         }
-        Ok(())
     }
 
     fn apply_point_stroke_param(&mut self, text_val: &str) -> Result<(), SldError> {
@@ -335,7 +333,7 @@ impl SldParser {
                         "stroke" => point.stroke_color = Some(text_val.to_string()),
                         "stroke-width" => {
                             let w = text_val.parse::<f32>().map_err(|err| {
-                                SldError::InvalidValue(format!("Invalid Point stroke-width '{}': {}", text_val, err))
+                                SldError::InvalidValue(format!("Invalid Point stroke-width '{text_val}': {err}"))
                             })?;
                             point.stroke_width = Some(w);
                         }

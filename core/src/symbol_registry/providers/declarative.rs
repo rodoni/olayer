@@ -29,7 +29,7 @@ impl DeclarativeProvider {
     #[inline]
     pub fn from_json(json_content: &str) -> Result<Self, SymbologyError> {
         let lib: DeclarativeLibraryDto = serde_json::from_str(json_content).map_err(|e| {
-            SymbologyError::InvalidFormat(format!("Failed to parse JSON library: {}", e))
+            SymbologyError::InvalidFormat(format!("Failed to parse JSON library: {e}"))
         })?;
 
         let mut symbols = HashMap::new();

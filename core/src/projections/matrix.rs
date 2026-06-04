@@ -1,3 +1,5 @@
+#![allow(clippy::return_self_not_must_use)]
+
 use std::ops::Mul;
 
 /// A 4×4 matrix in column-major order, suitable for GLSL/WGSL uniform buffers.

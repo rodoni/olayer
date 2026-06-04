@@ -127,7 +127,7 @@ impl TerrainEngine {
             let p2 = &route[i + 1];
 
             let res = solver.inverse(p1, p2, &ellipsoid).map_err(|e| {
-                TerrainError::MalformedData(format!("Failed to compute route distance: {}", e))
+                TerrainError::MalformedData(format!("Failed to compute route distance: {e}"))
             })?;
 
             let segment_dist = res.distance;
@@ -136,7 +136,7 @@ impl TerrainEngine {
             for s in 0..num_steps {
                 let d = s as f64 * step_meters;
                 let pt = solver.direct(p1, res.initial_bearing, d, &ellipsoid).map_err(|e| {
-                    TerrainError::MalformedData(format!("Failed to interpolate route point: {}", e))
+                    TerrainError::MalformedData(format!("Failed to interpolate route point: {e}"))
                 })?;
 
                 let elev = self.get_elevation(pt.lat.to_degrees(), pt.lon.to_degrees())?;

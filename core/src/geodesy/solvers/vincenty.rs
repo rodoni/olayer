@@ -1,3 +1,5 @@
+#![allow(clippy::many_single_char_names)]
+
 use crate::geodesy::coords::LatLon;
 use crate::geodesy::errors::GeodesyError;
 use crate::geodesy::ellipsoid::Ellipsoid;
@@ -20,8 +22,8 @@ impl GeodeticSolver for VincentySolver {
 
     #[inline]
     fn inverse(&self, p1: &LatLon, p2: &LatLon, ellipsoid: &Ellipsoid) -> Result<GeodeticResult, GeodesyError> {
-        debug_assert!(p1.validate().is_ok(), "Invalid start coordinate in Vincenty::inverse: {:?}", p1);
-        debug_assert!(p2.validate().is_ok(), "Invalid end coordinate in Vincenty::inverse: {:?}", p2);
+        debug_assert!(p1.validate().is_ok(), "Invalid start coordinate in Vincenty::inverse: {p1:?}");
+        debug_assert!(p2.validate().is_ok(), "Invalid end coordinate in Vincenty::inverse: {p2:?}");
 
         let lat1 = p1.lat;
         let lon1 = p1.lon;
@@ -153,7 +155,7 @@ impl GeodeticSolver for VincentySolver {
 
     #[inline]
     fn direct(&self, p1: &LatLon, bearing_rad: f64, distance_meters: f64, ellipsoid: &Ellipsoid) -> Result<LatLon, GeodesyError> {
-        debug_assert!(p1.validate().is_ok(), "Invalid start coordinate in Vincenty::direct: {:?}", p1);
+        debug_assert!(p1.validate().is_ok(), "Invalid start coordinate in Vincenty::direct: {p1:?}");
 
         if distance_meters.abs() < 1e-12 {
             return Ok(*p1);
