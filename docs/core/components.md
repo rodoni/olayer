@@ -35,7 +35,7 @@ graph TB
         terrain["⛰️ Terrain Engine (DTED)<br>[Component]<br>Indexador espacial O(1) de altitude e perfil 2.5D."]:::core
         sld_parser["📄 SLD Parser<br>[Component]<br>Parser XML de estilização Styled Layer Descriptor (OGC)."]:::core
         symbol_registry["🎖️ Symbol Registry<br>[Component]<br>Decodificador e montador de símbolos táticos (NATO/ICAO)."]:::core
-        interpolator["⏱️ Target Interpolator<br>[Component]<br>Predição de estado e Dead Reckoning de aeronaves."]:::core
+        interpolator["⏱️ Target Interpolator<br>[Component]<br>Predição de estado e Dead Reckoning de alvos dinâmicos geodésicos."]:::core
     end
 
     %% Relacionamentos de Entrada
@@ -366,37 +366,27 @@ impl SymbologyProvider for DeclarativeProvider {
 }
 ```
 
-O usuário pode simplesmente carregar o arquivo em memória na aplicação host e registrar o `DeclarativeProvider` gerado:
-```rust
-let provider = DeclarativeProvider::from_json(json_file_content)?;
-registry.register_provider(Box::new(provider));
-```
-
-
 ### ⏱️ 2.6 Target Interpolator (`core::interpolator`)
-O módulo dinâmico encarregado de sincronizar e suavizar o rastreamento das aeronaves através de *Dead Reckoning*.
+O módulo dinâmico encarregado de sincronizar e suavizar o rastreamento de alvos dinâmicos no espaço tridimensional geodésico através de *Dead Reckoning*.
 * **Responsabilidades:**
-  * Manter uma tabela dinâmica em memória com os estados físicos reais recebidos dos sensores para cada aeronave.
-  * Computar a posição interpolada em tempo de execução com base no tempo de simulação atual e na taxa de frames do cliente (15 a 60 FPS).
-  * Projetar os pontos interpolados diretamente em coordenadas 2D de tela $(X,Y)$ de acordo com a projeção cartográfica ativa, fornecendo profundidade para buffers de visualização.
+  * Manter uma tabela dinâmica em memória com os estados físicos reais recebidos dos sensores para cada alvo (aeronaves, veículos terrestres, etc.).
+  * Computar a posição e rumo interpolados no elipsoide em 3D em tempo de execução com base no tempo de simulação atual e na taxa de frames do cliente (15 a 60 FPS).
+  * Manter a representação física 3D desacoplada da projeção para a tela, permitindo que a posição interpolada seja usada tanto em projeções 2D, perfil vertical 2.5D ou renderização direta 3D (ECEF).
 * **Interfaces e Estruturas de Dados:**
   ```rust
   pub struct TargetState {
       pub id: String,
-      pub last_position: LatLon,
-      pub speed_knots: f64,
-      pub track_heading: f64, // Rumo em graus (0-360)
-      pub vertical_rate: f64,  // Pés por minuto
-      pub last_ping_time: f64, // Timestamp do sensor
+      pub last_position: LatLon,   // Lat/Lon em radianos, altitude em metros
+      pub speed_mps: f64,          // Velocidade horizontal em metros por segundo
+      pub track_heading_rad: f64,  // Rumo do alvo em radianos [0, 2π)
+      pub vertical_rate_mps: f64,  // Velocidade vertical em metros por segundo
+      pub last_ping_time: f64,     // Timestamp do sensor (segundos)
   }
 
   pub struct InterpolatedTarget {
       pub id: String,
-      pub screen_x: f32,
-      pub screen_y: f32,
-      pub altitude_feet: f32,
-      pub interpolated_lat_lon: LatLon,
-      pub projected_heading: f32,
+      pub position: LatLon,        // Posição 3D interpolada no elipsoide
+      pub heading_rad: f64,        // Rumo interpolado em radianos
   }
 
   pub struct InterpolationEngine {
@@ -404,23 +394,19 @@ O módulo dinâmico encarregado de sincronizar e suavizar o rastreamento das aer
   }
 
   impl InterpolationEngine {
-      pub fn update_target(&mut self, state: TargetState);
-      pub fn interpolate_all(
-          &self,
-          current_time: f64,
-          projection: &dyn Projection,
-          camera: &CameraState
-      ) -> Vec<InterpolatedTarget>;
+      pub fn new() -> Self;
+      pub fn update_target(&mut self, state: TargetState) -> Result<(), InterpolatorError>;
+      pub fn interpolate_all(&self, current_time: f64) -> Result<Vec<InterpolatedTarget>, InterpolatorError>;
   }
   ```
-* **Dependências:** `Geodesy Engine` (para extrapolar vetores de velocidade/rumo) e `Projections Engine` (para transformar as coordenadas interpoladas em posições de tela).
+* **Dependências:** `Geodesy Engine` (para extrapolação geodésica direta de rumo, distância e variação vertical de altitude).
 
 ---
 
 ## 3. Fluxos de Dados Críticos do Core
 
 ### 3.1 Pipeline de Projeção e Desenho de Alvos
-Este fluxo ilustra como as coordenadas de voo WGS84 são processadas internamente e transformadas em coordenadas pixel-perfect de tela a cada frame (loop de renderização dinâmico).
+Este fluxo ilustra como os estados de movimento são interpolados tridimensionalmente no globo e posteriormente projetados pela SDK cliente:
 
 ```mermaid
 sequenceDiagram
@@ -430,16 +416,17 @@ sequenceDiagram
     participant Geo as Geodesy Engine
     participant Proj as Projections Engine
     
-    SDK->>Inter: interpolate_all(time, projection, camera)
-    loop Para cada aeronave registrada
-        Inter->>Geo: project_destination(last_pos, heading, speed, dt)
+    SDK->>Inter: interpolate_all(time)
+    loop Para cada alvo registrado
+        Inter->>Geo: direct(last_pos, heading, speed * dt)
         Geo-->>Inter: Pos_Interpolada (LatLon WGS84)
-        Inter->>Proj: project(Pos_Interpolada)
-        Proj->>Geo: Conversões geodésicas baseadas no elipsoide
-        Geo-->>Proj: Coordenadas ECEF / Globais
-        Proj-->>Inter: Coordenadas de Tela (X, Y)
+        Inter->>Inter: Atualiza altitude (last_alt + vertical_rate * dt)
     end
-    Inter-->>SDK: Lista de Alvos Projetados [id, X, Y, heading]
+    Inter-->>SDK: Lista de Alvos Interpolados [id, LatLon, heading]
+    
+    Note over SDK, Proj: A SDK projeta as posições conforme as necessidades de renderização (2D ou 3D)
+    SDK->>Proj: project(LatLon)
+    Proj-->>SDK: Coordenadas de Tela (X, Y)
 ```
 
 ### 3.2 Processamento de Alerta Verticais (MSAW)

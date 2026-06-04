@@ -118,6 +118,7 @@ A organização do código-fonte em Rust para o componente segue o princípio de
 core/src/geodesy/
 ├── mod.rs               # Facade pública do módulo (re-exports do módulo geodesy)
 ├── coords.rs            # Definição das structs LatLon, Ecef e Enu
+├── errors.rs            # Enum de erros (GeodesyError) e formatação
 ├── ellipsoid.rs         # Parâmetros e constantes elipsoidais (WGS84)
 ├── conversions.rs       # Algoritmos de conversão entre LLA, ECEF e ENU
 └── solvers/             # Estratégias de cálculo geodésico

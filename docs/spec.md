@@ -64,9 +64,9 @@ Para otimizar o balanço entre performance gráfica de larga escala e precisão 
 
 ### B. Canal de Vértices Projetados (Orientado à CPU)
 
-* **Uso:** Renderização de plotas de radar, etiquetas de dados (*data blocks*), vetores de rumo e símbolos de aeronaves.
-* **Mecanismo:** O Core processa a posição de cada aeronave e entrega coordenadas de tela prontas $(X, Y)$ e profundidade $(Z\_depth)$.
-* **Vantagem Operacional:** Evita distorções de perspectiva nos símbolos em visualizações 3D (efeito *Billboard* automático) e permite a execução de algoritmos de anti-sobreposição (*anti-cluttering*) de etiquetas na CPU de forma estável.
+* **Uso:** Renderização de plotas de radar, etiquetas de dados (*data blocks*), vetores de rumo e símbolos de alvos dinâmicos.
+* **Mecanismo:** A interpolação física dos alvos (Dead Reckoning) ocorre estritamente em coordenadas geodésicas 3D no elipsoide WGS84. Para a renderização, a SDK do cliente (TypeScript ou Native) consulta as posições geodésicas interpoladas (`LatLon`) e as converte em coordenadas de tela $(X, Y)$ e profundidade utilizando o resolvedor de projeção ativo (Projections Engine) do Olayer Core.
+* **Vantagem Operacional:** Mantém a lógica cinemática completamente agnóstica de exibição, evita distorções de perspectiva nos símbolos em visualizações 3D (efeito *Billboard* automático na renderização) e permite a execução de algoritmos de anti-sobreposição (*anti-cluttering*) de etiquetas na CPU de forma estável.
 
 ### C. Estrutura de Renderização Baseada em Camadas (Layer Stack)
 
@@ -119,8 +119,8 @@ O sistema deve desacoplar rigidamente o recebimento de dados do sensor (tipicame
 
 ### 6.1 Interpolação Preditiva (Dead Reckoning)
 
-As aeronaves serão registradas no Core Rust através de um **Vetor de Estado**, contendo a posição elipsoidal do último *ping*, rumo (*heading*), velocidade horizontal e o *timestamp* da captura.
-Quando a aplicação *Host* solicitar a renderização de um frame, ela passará o *timestamp* atual do sistema. O Core computará a posição estimada da aeronave de forma linear e suave entre as atualizações de 1 segundo do sensor.
+Os alvos dinâmicos serão registrados no Core Rust através de um **Vetor de Estado** (`TargetState`), contendo a posição elipsoidal do último *ping* (WGS84 `LatLon`), rumo real em radianos, velocidade horizontal em metros/segundo, velocidade vertical em metros/segundo e o *timestamp* da captura.
+Quando a aplicação *Host* solicitar a renderização de um frame, ela passará o *timestamp* atual do sistema. O Core computará a posição estimada do alvo (3D geodésico) de forma linear e suave (utilizando o elipsoide de referência e as funções do `Geodesy Engine`) entre as atualizações de sensor, sem acoplamento com projeções.
 
 ### 6.2 Gerenciamento de FPS
 

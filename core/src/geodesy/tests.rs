@@ -1,5 +1,6 @@
 use super::conversions::{ecef_to_lla, lla_to_ecef, lla_to_enu, enu_to_lla};
-use super::coords::{GeodesyError, LatLon};
+use super::coords::LatLon;
+use super::errors::GeodesyError;
 use super::ellipsoid::Ellipsoid;
 use super::solvers::{GeodeticSolver, HaversineSolver, VincentySolver};
 

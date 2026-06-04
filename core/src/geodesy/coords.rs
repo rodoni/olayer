@@ -1,21 +1,7 @@
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum GeodesyError {
-    LatitudeOutOfRange(f64),
-    LongitudeOutOfRange(f64),
-}
+use crate::geodesy::errors::GeodesyError;
+use serde::{Serialize, Deserialize};
 
-impl std::fmt::Display for GeodesyError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::LatitudeOutOfRange(val) => write!(f, "Latitude is out of range [-90, 90] degrees: {} degrees", val),
-            Self::LongitudeOutOfRange(val) => write!(f, "Longitude is out of range [-180, 180] degrees: {} degrees", val),
-        }
-    }
-}
-
-impl std::error::Error for GeodesyError {}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct LatLon {
     pub lat: f64,    // Latitude in radians
     pub lon: f64,    // Longitude in radians

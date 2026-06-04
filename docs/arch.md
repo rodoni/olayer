@@ -163,7 +163,7 @@ graph TB
         terrain["⛰️ Terrain Engine (DTED)<br>Índice espacial & Altitude O(1)"]:::coreComponent
         sld_parser["📄 SLD Parser<br>Parser XML e estilos de símbolos"]:::coreComponent
         symbol_registry["🎖️ Symbol Registry<br>Registro e resolução de simbologias agnósticas"]:::coreComponent
-        interpolator["⏱️ Target Interpolator<br>Dead Reckoning de aeronaves"]:::coreComponent
+        interpolator["⏱️ Target Interpolator<br>Dead Reckoning de alvos dinâmicos"]:::coreComponent
     end
 
     %% Relações SDK TS
@@ -221,7 +221,7 @@ graph TB
 * **[Terrain Engine (DTED)](file:///c:/Users/rafae/projects/rust/olayer/core/src/terrain):** Gerencia arquivos DTED em memória. Constrói um índice espacial 2D simplificado (Grid) onde cada célula aponta para os bytes de elevação carregados. Permite que consultas de altitude em coordenadas arbitrárias rodem em tempo constante $O(1)$.
 * **[SLD Parser](file:///c:/Users/rafae/projects/rust/olayer/core/src/sld):** Analisador sintático (Parser) de XML que converte o padrão OGC SLD (Styled Layer Descriptor) em metadados de estilo estruturados.
 * **[Symbol Registry](file:///c:/Users/rafae/projects/rust/olayer/core/src/symbol_registry):** Registro unificado e agnóstico de simbologia que aceita a importação de símbolos customizados nos formatos **SVG** ou **PNG**, além de delegar a decodificação de códigos de símbolos para provedores específicos (como NATO APP-6 ou ICAO civil), retornando primitivas vetoriais estruturadas ou buffers de pixel prontos para o Atlas de Texturas.
-* **[Target Interpolator](file:///c:/Users/rafae/projects/rust/olayer/core/src/interpolator):** Mantém a tabela de estado das aeronaves. Para cada aeronave, registra o último vetor conhecido de movimento físico. Computa aproximações de posição via física cinemática simples (Dead Reckoning) ao receber novos timestamps do frame do cliente.
+* **[Target Interpolator](file:///c:/Users/rafae/projects/rust/olayer/core/src/interpolator):** Mantém a tabela de estado de alvos dinâmicos no espaço geodésico 3D. Para cada alvo, registra o último vetor de estado conhecido. Computa posições interpoladas via Dead Reckoning tridimensional baseada no tempo do sistema (WGS84 LatLon e heading), de forma totalmente desacoplada da projeção de tela.
 
 #### 2. Componentes da SDK TypeScript (Web Client)
 * **TS Controller:** Controla o loop de animação da tela no navegador utilizando `requestAnimationFrame` e gerencia a modulação dinâmica de FPS (15 FPS ocioso / 60 FPS ativo).
@@ -259,8 +259,8 @@ sequenceDiagram
 
     Note over Host, Core: 1. Ingestão de Dados de Sensores (Assíncrono ~1 Hz)
     Host->>SDK: updateTarget(id, latitude, longitude, altitude, heading, speed, timestamp)
-    SDK->>Core: update_target_state(id, lat, lon, alt, heading, speed, ts) (Via WASM ou Link Nativo)
-    Core->>Core: Salva no vetor de estados (Interpolator)
+    SDK->>Core: update_target(TargetState) (Via WASM ou Link Nativo)
+    Core->>Core: Salva no registro de estados (Interpolator)
 
     Note over Host, GPU: 2. Loop de Renderização (Dinâmico: 15 FPS ocioso / 60 FPS ativo)
     Host->>SDK: renderFrame(currentSystemTime, cameraState)
@@ -275,10 +275,11 @@ sequenceDiagram
 
     rect rgb(255, 245, 230)
         Note over SDK, Core: Canal de Vértices Projetados (Orientado à CPU - Alvos e Símbolos)
-        SDK->>Core: interpolate_and_project_targets(currentSystemTime, cameraState)
-        Core->>Core: Calcula Dead Reckoning de todos os alvos (cinemática linear)
-        Core->>Core: Aplica projeção ativa (ex: LCC) 3D/Geodésico -> Tela
-        Core-->>SDK: Lista de alvos [id, screen_x, screen_y, symbol_id, state]
+        SDK->>Core: interpolate_all(currentSystemTime)
+        Core->>Core: Calcula Dead Reckoning em 3D geodésico (elipsoide WGS84)
+        Core-->>SDK: Lista de alvos interpolados [id, LatLon, heading_rad]
+        SDK->>Core: project(LatLon) (Para cada alvo)
+        Core-->>SDK: Coordenadas de Tela (X, Y)
         SDK->>SDK: Resolve símbolos no Atlas de Texturas (ICAO/NATO) e executa Anti-cluttering
         SDK->>GPU: Renderiza símbolos (Billboards e Instanced sprites) e textos
     end

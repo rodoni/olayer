@@ -1,7 +1,8 @@
 pub mod haversine;
 pub mod vincenty;
 
-use super::coords::{GeodesyError, LatLon};
+use super::coords::LatLon;
+use super::errors::GeodesyError;
 use super::ellipsoid::Ellipsoid;
 
 pub use haversine::HaversineSolver;

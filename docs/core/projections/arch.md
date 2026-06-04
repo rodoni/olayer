@@ -88,6 +88,7 @@ A divisão do código segue a estrutura física abaixo:
 ```text
 core/src/projections/
 ├── mod.rs               # Facade do módulo (Trait Projection, CameraState, re-exports)
+├── errors.rs            # Enum de erros (ProjectionError) e formatação
 ├── lcc.rs               # Implementação da Lambert Conformal Conic
 ├── stereographic.rs     # Implementação da Estereográfica Azimutal
 ├── mercator.rs          # Implementação da Web Mercator

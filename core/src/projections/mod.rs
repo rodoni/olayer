@@ -6,35 +6,14 @@ pub mod stereographic;
 #[cfg(test)]
 mod tests;
 
+pub mod errors;
+
 use crate::geodesy::coords::LatLon;
 
 pub use lcc::LambertConformalConic;
 pub use mercator::WebMercator;
 pub use stereographic::Stereographic;
-
-/// Errors that can occur during projection operations.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum ProjectionError {
-    /// Camera state contains invalid parameters (e.g., zoom <= 0).
-    InvalidCameraState,
-    /// The point maps to a singularity in the projection (e.g., antipodal to
-    /// the center of a stereographic projection).
-    Singularity,
-    /// Iterative solver inside unproject did not converge.
-    ConvergenceFailed,
-}
-
-impl std::fmt::Display for ProjectionError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::InvalidCameraState => write!(f, "Invalid camera state"),
-            Self::Singularity => write!(f, "Projection singularity encountered"),
-            Self::ConvergenceFailed => write!(f, "Iterative unprojection failed to converge"),
-        }
-    }
-}
-
-impl std::error::Error for ProjectionError {}
+pub use errors::ProjectionError;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CameraState {

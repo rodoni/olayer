@@ -1,4 +1,5 @@
-use crate::geodesy::coords::{GeodesyError, LatLon};
+use crate::geodesy::coords::LatLon;
+use crate::geodesy::errors::GeodesyError;
 use crate::geodesy::ellipsoid::Ellipsoid;
 use crate::geodesy::math::{normalize_bearing, normalize_longitude};
 use crate::geodesy::solvers::{GeodeticResult, GeodeticSolver};

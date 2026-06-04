@@ -7,6 +7,14 @@ pub struct StyleRegistry {
 }
 
 impl StyleRegistry {
+    /// Creates a new empty `StyleRegistry`.
+    #[inline]
+    pub fn new() -> Self {
+        Self {
+            layers: HashMap::new(),
+        }
+    }
+
     /// Returns the rules for a given layer whose scale range contains `scale_denominator`.
     #[inline]
     pub fn get_applicable_rules(&self, layer_name: &str, scale_denominator: f64) -> Vec<RuleStyle> {
