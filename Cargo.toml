@@ -2,4 +2,6 @@
 resolver = "2"
 members = [
     "core",
+    "bindings/wasm",
+    "bindings/c_ffi",
 ]
