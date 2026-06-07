@@ -15,49 +15,7 @@ pub use mercator::WebMercator;
 pub use stereographic::Stereographic;
 pub use errors::ProjectionError;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct CameraState {
-    pub center: LatLon,
-    pub zoom: f64,
-    pub rotation: f64,             // In radians (bearing)
-    pub aspect_ratio: f64,         // Width / Height of viewport
-    pub viewport_base_meters: f64, // Base scale factor in meters (e.g., 100_000.0)
-}
-
-impl CameraState {
-    /// Creates a new camera state.
-    #[inline]
-    pub const fn new(
-        center: LatLon,
-        zoom: f64,
-        rotation: f64,
-        aspect_ratio: f64,
-        viewport_base_meters: f64,
-    ) -> Self {
-        Self {
-            center,
-            zoom,
-            rotation,
-            aspect_ratio,
-            viewport_base_meters,
-        }
-    }
-
-    /// Validates camera parameters.
-    #[inline]
-    pub fn validate(&self) -> Result<(), ProjectionError> {
-        if self.zoom <= 0.0 {
-            return Err(ProjectionError::InvalidCameraState);
-        }
-        if self.aspect_ratio <= 0.0 {
-            return Err(ProjectionError::InvalidCameraState);
-        }
-        if self.viewport_base_meters <= 0.0 {
-            return Err(ProjectionError::InvalidCameraState);
-        }
-        Ok(())
-    }
-}
+pub use crate::camera::CameraState;
 
 /// Trait for cartographic projections.
 pub trait Projection {
@@ -73,7 +31,7 @@ pub trait Projection {
     /// projections may override it if they require a specialized matrix pipeline.
     #[inline]
     fn get_view_proj_matrix(&self, camera: &CameraState) -> Result<[f32; 16], ProjectionError> {
-        camera.validate()?;
+        camera.validate().map_err(|_| ProjectionError::InvalidCameraState)?;
         let (cx, cy) = self.project(&camera.center)?;
 
         let view_trans = matrix::Matrix4::translation(-cx as f32, -cy as f32, 0.0);

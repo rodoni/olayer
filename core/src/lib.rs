@@ -16,6 +16,7 @@
 //! | `interpolator` | Dead-reckoning target interpolation for sensor fusion |
 
 pub mod geodesy;
+pub mod camera;
 pub mod projections;
 pub mod sld;
 pub mod symbol_registry;

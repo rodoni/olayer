@@ -31,6 +31,7 @@ graph TB
 
         %% Componentes Internos
         geodesy["📐 Geodesy Engine<br>[Component]<br>Cálculos elipsoidais WGS84 e conversões ECEF."]:::core
+        camera["📷 Camera Engine<br>[Component]<br>Gerenciamento de CameraState e matrizes View-Proj para 2D/2.5D/3D."]:::core
         projections["🗺️ Projections Engine<br>[Component]<br>Matrizes cartográficas e projeções LCC, Estereográfica e Mercator."]:::core
         terrain["⛰️ Terrain Engine (DTED)<br>[Component]<br>Indexador espacial O(1) de altitude e perfil 2.5D."]:::core
         sld_parser["📄 SLD Parser<br>[Component]<br>Parser XML de estilização Styled Layer Descriptor (OGC)."]:::core
@@ -43,26 +44,28 @@ graph TB
     native_sdk -->|Invoca nativamente / FFI| ffi_bridge
 
     %% Conexões da Bridge WASM
-    wasm_bridge -->|Invoca| projections
+    wasm_bridge -->|Invoca / Controla| camera
     wasm_bridge -->|Injeta binário / Consulta| terrain
     wasm_bridge -->|Injeta XML / Configura| sld_parser
     wasm_bridge -->|Consulta SIDC| symbol_registry
     wasm_bridge -->|Registra / Interpola| interpolator
 
     %% Conexões da Bridge FFI
-    ffi_bridge -->|Invoca| projections
+    ffi_bridge -->|Invoca / Controla| camera
     ffi_bridge -->|Injeta binário / Consulta| terrain
     ffi_bridge -->|Injeta XML / Configura| sld_parser
     ffi_bridge -->|Consulta SIDC| symbol_registry
     ffi_bridge -->|Registra / Interpola| interpolator
 
     %% Dependências Internas do Core
+    camera -->|Requer projeções| projections
+    camera -->|Requer modelos de Terra| geodesy
     projections -->|Requer modelos de Terra| geodesy
     terrain -->|Requer conversão LLA-ECEF| geodesy
     interpolator -->|Requer cálculo de distância/rumo| geodesy
     symbol_registry -->|Requer regras parsed| sld_parser
 
-    linkStyle 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15 stroke:#555,stroke-width:1.5px;
+    linkStyle 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17 stroke:#555,stroke-width:1.5px;
 ```
 
 ---
@@ -98,13 +101,11 @@ O componente central de matemática geodésica. Toda a precisão métrica de seg
 * **Dependências:** Sem dependências internas. Componente folha do Core.
 
 ### 🗺️ 2.2 Projections Engine (`core::projections`)
-Responsável pelas equações cartográficas de projeção e a geração das matrizes de visualização consumidas pelas pipelines de GPU.
 * **Responsabilidades:**
   * Projetar pontos geodésicos em planos 2D para as projeções suportadas:
     * **Lambert Conformal Conic (LCC):** Definida por dois paralelos padrão, latitude de origem e meridiano central. Ideal para rotas En-Route.
     * **Estereográfica Azimutal:** Definida por um ponto de origem central (geralmente a antena do radar da TMA). Ideal para áreas terminais.
     * **Web Mercator (EPSG:3857):** Compatibilidade com mapas base de mercado.
-  * Computar a matriz de Projeção e Visualização (View-Projection Matrix) $4 \times 4$ com base no estado da câmera (centro, rotação, zoom) e projeção ativa.
 * **Interfaces e Estruturas de Dados:**
   ```rust
   pub enum ProjectionType {
@@ -113,22 +114,46 @@ Responsável pelas equações cartográficas de projeção e a geração das mat
       WebMercator,
   }
 
-  pub struct CameraState {
-      pub center: LatLon,
-      pub zoom: f64,
-      pub rotation: f64, // em radianos
-      pub aspect_ratio: f64,
-  }
-
   pub trait Projection {
-      fn project(&self, lla: &LatLon) -> (f64, f64);
-      fn unproject(&self, x: f64, y: f64) -> LatLon;
-      fn get_view_proj_matrix(&self, camera: &CameraState) -> [f32; 16];
+      fn project(&self, lla: &LatLon) -> Result<(f64, f64), ProjectionError>;
+      fn unproject(&self, x: f64, y: f64) -> Result<LatLon, ProjectionError>;
+      fn get_view_proj_matrix(&self, camera: &CameraState) -> Result<[f32; 16], ProjectionError>;
   }
   ```
 * **Dependências:** `Geodesy Engine` (para conversões espaciais e escalas de deformação).
 
-### ⛰️ 2.3 Terrain Engine (`core::terrain`)
+### 📷 2.3 Camera Engine (`core::camera`)
+Componente encarregado do gerenciamento do estado de navegação geográfica e atitude da câmera, além da geração das matrizes View-Projection 2D, 2.5D e 3D.
+* **Responsabilidades:**
+  * Armazenar o estado da câmera (`CameraState`) incluindo posição de centro, zoom, bearing/rotação (yaw), inclinação (pitch/tilt) e rolagem (roll).
+  * Computar as matrizes View-Projection $4 \times 4$ de forma unificada:
+    * **2D:** Projeção ortográfica rotacionada.
+    * **2.5D:** Projeção perspectiva sobre o plano do mapa com pitch dinâmico.
+    * **3D:** Projeção perspectiva orbital em relação ao elipsoide terrestre.
+* **Interfaces e Estruturas de Dados:**
+  ```rust
+  pub struct CameraState {
+      pub center: LatLon,
+      pub zoom: f64,
+      pub rotation: f64, // bearing/yaw em radianos
+      pub pitch: f64,    // inclinação em radianos (nadir = 0)
+      pub roll: f64,     // rolagem lateral em radianos
+      pub aspect_ratio: f64,
+      pub viewport_base_meters: f64,
+  }
+
+  impl CameraState {
+      pub const fn new(center: LatLon, zoom: f64, rotation: f64, aspect_ratio: f64, viewport_base_meters: f64) -> Self;
+      pub const fn with_attitude(center: LatLon, zoom: f64, rotation: f64, pitch: f64, roll: f64, aspect_ratio: f64, viewport_base_meters: f64) -> Self;
+      pub fn validate(&self) -> Result<(), ProjectionError>;
+      pub fn get_2d_view_proj_matrix(&self, projection: &dyn Projection) -> Result<[f32; 16], ProjectionError>;
+      pub fn get_25d_view_proj_matrix(&self, projection: &dyn Projection) -> Result<[f32; 16], ProjectionError>;
+      pub fn get_3d_view_proj_matrix(&self) -> Result<[f32; 16], ProjectionError>;
+  }
+  ```
+* **Dependências:** `Geodesy Engine` e `Projections Engine`.
+
+### ⛰️ 2.4 Terrain Engine (`core::terrain`)
 Indexador de alta performance para dados de elevação digital de terreno (DTED - Digital Terrain Elevation Data).
 * **Responsabilidades:**
   * Ler e analisar buffers binários correspondentes a arquivos DTED (Níveis 0, 1 ou 2) injetados passivamente.
@@ -158,7 +183,7 @@ Indexador de alta performance para dados de elevação digital de terreno (DTED 
   ```
 * **Dependências:** `Geodesy Engine` (para interpolar distâncias métricas e converter resoluções angulares).
 
-### 📄 2.4 SLD Parser (`core::sld`)
+### 📄 2.5 SLD Parser (`core::sld`)
 Tradutor do padrão de estilização de mapas OGC Styled Layer Descriptor (SLD).
 * **Responsabilidades:**
   * Fazer o parse XML de documentos SLD e extrair regras de renderização visual para feições de mapa.
@@ -188,7 +213,7 @@ Tradutor do padrão de estilização de mapas OGC Styled Layer Descriptor (SLD).
   ```
 * **Dependências:** Sem dependências do Core (utiliza bibliotecas externas em Rust para parsing XML rápido, ex: `quick-xml`).
 
-### 🎖️ 2.5 Symbol Registry (`core::symbol_registry`)
+### 🎖️ 2.6 Symbol Registry (`core::symbol_registry`)
 O registro central e coordenador de geradores de simbologia. O componente é totalmente agnóstico a padrões visuais específicos, delegando a decodificação para provedores plugáveis (como NATO APP-6, ICAO civil ou meteorologia).
 * **Responsabilidades:**
   * Permitir o registro dinâmico de múltiplos provedores de simbologia (`SymbologyProvider`).
@@ -261,7 +286,7 @@ O registro central e coordenador de geradores de simbologia. O componente é tot
   ```
 * **Dependências:** `SLD Parser` (para aplicação de regras de preenchimento, contorno e texto nos símbolos).
 
-### 🎖️ 2.5.1 Customização e Extensibilidade (Bibliotecas de Símbolos Personalizadas)
+### 🎖️ 2.6.1 Customização e Extensibilidade (Bibliotecas de Símbolos Personalizadas)
 Para permitir que o usuário final do framework defina e crie suas próprias bibliotecas de símbolos sem alterar o núcleo do Olayer, o sistema suporta duas abordagens principais:
 
 #### A. Abordagem Programática (Via Rust Crate/SDK)
@@ -366,7 +391,7 @@ impl SymbologyProvider for DeclarativeProvider {
 }
 ```
 
-### ⏱️ 2.6 Target Interpolator (`core::interpolator`)
+### ⏱️ 2.7 Target Interpolator (`core::interpolator`)
 O módulo dinâmico encarregado de sincronizar e suavizar o rastreamento de alvos dinâmicos no espaço tridimensional geodésico através de *Dead Reckoning*.
 * **Responsabilidades:**
   * Manter uma tabela dinâmica em memória com os estados físicos reais recebidos dos sensores para cada alvo (aeronaves, veículos terrestres, etc.).
@@ -386,6 +411,16 @@ O módulo dinâmico encarregado de sincronizar e suavizar o rastreamento de alvo
   pub struct InterpolatedTarget {
       pub id: String,
       pub position: LatLon,        // Posição 3D interpolada no elipsoide
+      pub heading_rad: f64,        // Rumo interpolado em radianos
+  }
+
+  pub struct InterpolationEngine {
+      targets: HashMap<String, TargetState>,
+  }
+
+  impl InterpolationEngine {
+      pub fn new() -> Self;
+```tion: LatLon,        // Posição 3D interpolada no elipsoide
       pub heading_rad: f64,        // Rumo interpolado em radianos
   }
 

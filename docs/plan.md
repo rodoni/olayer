@@ -47,18 +47,21 @@ gantt
 * **Marcos (Milestone 1):** Validação matemática aprovada, com erro acumulado menor que 1 milímetro.
 
 ### Fase 2: Projeções Cartográficas, Parser SLD e Biblioteca de Símbolos
-* **Objetivo:** Permitir a tradução de coordenadas do globo para planos bidimensionais, configurar a engine de estilização e resolver simbologias estruturadas.
+### Fase 2: Projeções Cartográficas, Parser SLD, Biblioteca de Símbolos e Camera Engine
+* **Objetivo:** Permitir a tradução de coordenadas do globo para planos bidimensionais, configurar a engine de estilização, resolver simbologias estruturadas e gerenciar dinamicamente a atitude da câmera.
 * **Tarefas:**
   * [ ] Implementar a projeção **Lambert Conformal Conic (LCC)** com paralelos padrão configuráveis.
   * [ ] Implementar a projeção **Estereográfica Azimutal** com foco no centro do radar (TMA).
   * [ ] Implementar a projeção **Web Mercator** (EPSG:3857) para fundos de mapa padrão.
   * [ ] Desenvolver o parser XML para o padrão OGC **SLD (Styled Layer Descriptor)**, traduzindo estilos geográficos em dicionários de estilos simples.
   * [ ] Desenvolver o módulo **`Symbol Registry`** para decodificação e validação de códigos táticos militares (SIDC NATO) e auxílios-rádio civis (ICAO).
+  * [ ] Desenvolver o componente **`Camera Engine`** (`core::camera`) gerenciando `CameraState` (com zoom, bearing, pitch, roll) e calculando as matrizes de View-Projection para os modos 2D, 2.5D (com inclinação declinada) e 3D.
 * **Plano de Testes:**
   * [ ] Executar testes de reprojeção cruzada (projetar e desprojetar pontos conhecidos para verificar reversibilidade matemática).
   * [ ] Testar parse de SLD contendo tags inválidas ou corrompidas para certificar que o parser não causa pânicos na aplicação.
   * [ ] Validar a correta resolução de SIDC NATO (APP-6) para afiliações e tipos variados, testando comportamento diante de códigos SIDC desconhecidos ou mal-formados.
-* **Marcos (Milestone 2):** Algoritmos de projeção validados, parser SLD lendo arquivos sem exceções e gerador de símbolos composto estruturado.
+  * [ ] Validar matrizes geradas pelo `Camera Engine` verificando o correto mapeamento de pontos conhecidos para o espaço NDC sob rotação, inclinação e escala.
+* **Marcos (Milestone 2):** Algoritmos de projeção validados, parser SLD lendo arquivos sem exceções, gerador de símbolos composto estruturado e Camera Engine provendo matrizes matemáticas robustas.
 
 ### Fase 3: Engine de Terreno DTED e Interpolação de Alvos
 * **Objetivo:** Adicionar elevação geográfica passiva e estimativa cinemática contínua de movimento das aeronaves.
@@ -97,11 +100,12 @@ gantt
   * [ ] Desenvolver o `GPU Pipeline` (WebGL 2.0 / WebGPU) para renderização em tempo real de matrizes, terreno e camadas vetoriais MVT com cache em texturas de Framebuffer.
   * [ ] Implementar a compilação dinâmica do **Texture Atlas** na GPU e renderização de alvos via chamadas instanciadas (`drawElementsInstanced`).
   * [ ] Desenvolver o `CPU Pipeline` para plotagem pixel-perfect de alvos e implementar o algoritmo de **Anti-cluttering** de etiquetas na thread do navegador.
+  * [ ] Implementar controles de câmera interativos na interface (zoom, bearing, pitch, roll) e sincronização bidirecional com gestos de mouse (botão direito / Shift+drag para inclinar e rotacionar).
 * **Plano de Testes:**
   * [ ] Testes de regressão visual automatizados (Snapshot Testing) comparando capturas de tela do Canvas 2D/WebGL contra frames de referência aprovados.
   * [ ] Testar unitariamente a segregação de renderização das camadas estáticas vs dinâmicas no `Layer Manager`.
   * [ ] Simular eventos contínuos de mouse/pan para verificar se o `TS Controller` de fato limita a taxa de quadros e retorna ao modo ocioso (15 FPS) de forma autônoma.
-* **Marcos (Milestone 5):** Tela radar funcional no navegador rodando a 60 FPS com renderização híbrida ativa.
+* **Marcos (Milestone 5):** Tela radar funcional no navegador rodando a 60 FPS com renderização híbrida ativa e controle dinâmico total da câmera.
 
 ### Fase 6: SDK Rust Nativo (Ambiente Desktop)
 * **Objetivo:** Viabilizar o uso do framework em aplicativos desktop locais de altíssima performance (Rust nativo e FFI).
@@ -112,6 +116,7 @@ gantt
   * [ ] Desenvolver a pipeline gráfica local utilizando a biblioteca `wgpu` para suporte a Vulkan, Metal e DirectX 12.
   * [ ] Implementar a compilação dinâmica do Texture Atlas local e renderização instanciada via pipeline nativo do `wgpu`.
   * [ ] Configurar a leitura assíncrona direta de arquivos DTED no disco rígido local da aplicação.
+  * [ ] Adaptar a SDK nativa e controles locais para expor a atitude completa de câmera (zoom, bearing, pitch, roll).
 * **Plano de Testes:**
   * [ ] Executar testes de renderização nativos salvando buffers wgpu locais como imagens PNG e fazendo diff visual.
   * [ ] Executar a suite de testes gráficos locais em ambientes CI utilizando adaptadores gráficos emulados por software (como o llvmpipe/lavapipe) para garantir funcionamento estável em headless.

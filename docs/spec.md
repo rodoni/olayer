@@ -71,22 +71,28 @@ Para otimizar o balanço entre performance gráfica de larga escala e precisão 
 ### C. Estrutura de Renderização Baseada em Camadas (Layer Stack)
 
 Para prover flexibilidade operacional e otimizar a carga de trabalho de rendering, a visualização é estruturada em uma pilha de **Camadas (Layers)** com ciclos e frequências de repintura segregados:
-* **Camadas Estáticas (Fundo de Mapa, Relevo, Aerovias e Setores GIS):** Renderizadas na GPU somente sob alterações de câmera (pan/zoom/rotação) e armazenadas em Framebuffers/Texturas de cache. Quando a tela está estática, a GPU apenas redesenha esta textura composta (*blitting*).
 * **Camadas Dinâmicas (Alvos Táticos, Radar Meteorológico e Réguas Interativas):** Atualizadas em tempo real em cada ciclo de animação da tela (até 60 FPS) sobrepondo-se à textura composta das camadas estáticas, sem custo de reprocessamento do fundo.
 
 ---
 
 ## 5. Requisitos de Funcionalidades GIS
 
-### 5.1 Suporte a Projeções e Visões
+### 5.1 Suporte a Projeções, Visões e Controle de Câmera
 
-O framework deve suportar a alternância dinâmica em tempo de execução entre as seguintes projeções cartográficas e modos de exibição:
+O framework deve suportar a alternância dinâmica em tempo de execução entre as seguintes projeções cartográficas e modos de exibição, com gerenciamento unificado através do **Camera Engine**:
 
 * **Estereográfica Azimutal:** Foco em radares de aproximação (TMA) e preservação de ângulos locais.
 * **Lambert Conformal Conic (LCC):** Foco em mapas de rota En-Route de longa distância.
 * **Mercator / Web Mercator:** Compatibilidade macro padrão.
-* **Visão 2.5D (Perfil de Voo):** Projeção linear da rota em relação à altitude e ao perfil vertical do terreno (corte DTED).
+* **Visão 2.5D (Mapa de Perspectiva Plana Inclinada):** Projeção perspectiva tridimensional sobreposta a um plano projetado. Utiliza uma inclinação (pitch/tilt) padrão de **35 graus** (perspectiva declinada de topo/bird's-eye view, melhorando a visualização de alvos e relevo em comparação com o antigo ângulo estático de 55 graus).
 * **Visão 3D (Globo Virtual):** Transformação direta de coordenadas elipsoidais para cartesianas ECEF.
+
+#### Controle Dinâmico da Câmera (Zoom, Bearing, Pitch, Roll)
+O **Camera Engine** (`core::camera`) do Olayer Core provê controle unificado sobre a atitude da câmera em radianos, integrado às seguintes matrizes View-Projection:
+- **Zoom (escala linear):** Aplicado nos modos 2D, 2.5D e 3D.
+- **Bearing / Rotação (yaw):** Controla a orientação azimutal da câmera nos modos 2D, 2.5D e 3D.
+- **Pitch / Tilt (inclinação vertical):** Controla a inclinação do horizonte nos modos 2.5D (0° a 85°) e 3D (-90° a 90°).
+- **Roll (rolagem lateral):** Disponível nos modos 2.5D e 3D para suporte a movimentação em atitude de vôo completa.
 
 ### 5.2 Simbologia Padronizada (ICAO e NATO) e Registro de Símbolos
 
@@ -100,7 +106,7 @@ O framework deve prover suporte nativo a bibliotecas de símbolos profissionais 
   - Para evitar a sobrecarga de draw calls, a SDK compilará os símbolos gerados sob demanda (procedurais ou importados via SVG/PNG) em uma textura única compartilhada na GPU (**Texture Atlas / Spritesheet**).
   - A plotagem de milhares de aeronaves será feita em uma única chamada de desenho instanciada (`drawElementsInstanced`) referenciando as coordenadas UV do Atlas, eliminando gargalos de CPU.
   - O renderizador final aplicará *Billboard Shaders* para manter os símbolos planos e orientados de frente para o controlador, mesmo em visualizações 3D do globo.
-* **Compatibilidade com Streams 2D e 3D:**
+* **Compatibilidade com Streams 2D/3D:**
   - A importação de SVG e PNG é nativamente compatível com os dois fluxos gráficos (2D plano e 3D globo virtual). 
   - No fluxo **2D**, os símbolos do Atlas são renderizados diretamente como sprites planos com coordenadas de tela $(X,Y)$.
   - No fluxo **3D**, o renderizador aplica projeção tridimensional nas posições de origem geodésicas das aeronaves, mas desenha os símbolos utilizando *Billboards* (placas planas orientadas de frente para a câmera), garantindo que imagens e vetores importados permaneçam legíveis e sem distorção perspectiva no globo 3D.
@@ -153,8 +159,9 @@ Para alimentar o framework com dados cartográficos e estruturais de aviação, 
 ├── core/                  # Código Rust Puro (Agnóstico e Matemático)
 │   ├── Cargo.toml
 │   └── src/
-│       ├── geodesy/       # Fórmulas elipsoidais, conversão ECEF
-│       ├── terrain/       # Indexador espacial e parser DTED em memória
+│       ├── geodesy/       # Módulo de Fórmulas Geodésicas e ECEF (WGS84)
+│       ├── camera/        # Gerenciamento de CameraState e matrizes View-Proj para 2D/2.5D/3D
+│       ├── terrain/       # Parse de arquivos DTED e Índice de Altitude O(1)
 │       ├── sld/           # Parser XML de arquivos Styled Layer Descriptor
 │       └── projections/   # Algoritmos das projeções (Estereográfica, LCC, Mercator)
 │
@@ -164,7 +171,6 @@ Para alimentar o framework com dados cartográficos e estruturais de aviação, 
 └── sdk/
     ├── ts/                # SDK TypeScript para Navegadores (Wrappers Canvas/WebGL)
     └── rust/              # SDK Rust Nativo para aplicações Desktop (Wrappers wgpu/Vulkan)
-
 ```
 
 ---

@@ -159,6 +159,7 @@ graph TB
 
     subgraph Rust_Core_Comp ["Módulos do Core Agnóstico (Rust)"]
         geodesy["📐 Geodesy Module<br>Conversões geodésicas ECEF/WGS84"]:::coreComponent
+        camera["📷 Camera Module<br>Gerenciamento de CameraState e matrizes View-Proj para 2D/2.5D/3D"]:::coreComponent
         projections["🗺️ Projections Module<br>LCC, Estereográfica, Web Mercator"]:::coreComponent
         terrain["⛰️ Terrain Engine (DTED)<br>Índice espacial & Altitude O(1)"]:::coreComponent
         sld_parser["📄 SLD Parser<br>Parser XML e estilos de símbolos"]:::coreComponent
@@ -185,39 +186,42 @@ graph TB
     native_cpu_pipe --> ffi_bridge
     
     %% Relações Internas da Bridge WASM para o Core
-    wasm_bridge --> projections
+    wasm_bridge --> camera
     wasm_bridge --> terrain
     wasm_bridge --> sld_parser
     wasm_bridge --> symbol_registry
     wasm_bridge --> interpolator
 
     %% Relações Internas da Bridge FFI para o Core
-    ffi_bridge --> projections
+    ffi_bridge --> camera
     ffi_bridge --> terrain
     ffi_bridge --> sld_parser
     ffi_bridge --> symbol_registry
     ffi_bridge --> interpolator
     
     %% Relações diretas Rust-to-Rust (SDK Nativa para o Core)
-    native_gpu_pipe --> projections
+    native_gpu_pipe --> camera
     native_gpu_pipe --> terrain
     native_cpu_pipe --> symbol_registry
     native_cpu_pipe --> interpolator
 
     %% Dependências internas do Rust Core
+    camera --> geodesy
+    camera --> projections
     projections --> geodesy
     terrain --> geodesy
     interpolator --> geodesy
     symbol_registry --> sld_parser
 
-    linkStyle 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31 stroke:#333,stroke-dasharray: 2 2;
+    linkStyle 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33 stroke:#333,stroke-dasharray: 2 2;
 ```
 
 ### Detalhamento dos Componentes
 
 #### 1. Módulos do Core Rust
 * **[Geodesy Module](file:///c:/Users/rafae/projects/rust/olayer/core/src/geodesy):** Fornece as funções matemáticas baseadas no elipsoide de referência WGS84. Realiza transformações bidirecionais entre coordenadas geográficas $(\phi, \lambda, h)$ e cartesianas ECEF $(X, Y, Z)$.
-* **[Projections Module](file:///c:/Users/rafae/projects/rust/olayer/core/src/projections):** Contém as fórmulas matemáticas para projetar pontos tridimensionais ou geodésicos em planos 2D. Implementa as projeções Estereográfica, LCC e Mercator.
+* **[Camera Module](file:///c:/Users/rafae/projects/rust/olayer/core/src/camera):** Gerencia o estado tridimensional de navegação geográfica e atitude da câmera (centro, zoom, bearing/yaw, pitch, roll) e calcula as matrizes de visualização e projeção (View-Projection) 2D, 2.5D e 3D de forma unificada e performática.
+* **[Projections Module](file:///c:/Users/rafae/projects/rust/olayer/core/src/projections):** Contém as fórmulas matemáticas para projetar pontos tridimensionais ou geodésicos em planos 2D. Implementa as equações das projeções Estereográfica, LCC e Mercator.
 * **[Terrain Engine (DTED)](file:///c:/Users/rafae/projects/rust/olayer/core/src/terrain):** Gerencia arquivos DTED em memória. Constrói um índice espacial 2D simplificado (Grid) onde cada célula aponta para os bytes de elevação carregados. Permite que consultas de altitude em coordenadas arbitrárias rodem em tempo constante $O(1)$.
 * **[SLD Parser](file:///c:/Users/rafae/projects/rust/olayer/core/src/sld):** Analisador sintático (Parser) de XML que converte o padrão OGC SLD (Styled Layer Descriptor) em metadados de estilo estruturados.
 * **[Symbol Registry](file:///c:/Users/rafae/projects/rust/olayer/core/src/symbol_registry):** Registro unificado e agnóstico de simbologia que aceita a importação de símbolos customizados nos formatos **SVG** ou **PNG**, além de delegar a decodificação de códigos de símbolos para provedores específicos (como NATO APP-6 ou ICAO civil), retornando primitivas vetoriais estruturadas ou buffers de pixel prontos para o Atlas de Texturas.

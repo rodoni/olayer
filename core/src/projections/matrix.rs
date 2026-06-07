@@ -71,6 +71,49 @@ impl Matrix4 {
         Self { m }
     }
 
+    /// Generates a rotation matrix around the X axis.
+    #[inline]
+    pub fn rotation_x(angle_rad: f32) -> Self {
+        let cos_a = angle_rad.cos();
+        let sin_a = angle_rad.sin();
+        let mut m = Self::identity().m;
+        m[5] = cos_a;
+        m[6] = sin_a;
+        m[9] = -sin_a;
+        m[10] = cos_a;
+        Self { m }
+    }
+
+    /// Generates a rotation matrix around the Y axis.
+    #[inline]
+    pub fn rotation_y(angle_rad: f32) -> Self {
+        let cos_a = angle_rad.cos();
+        let sin_a = angle_rad.sin();
+        let mut m = Self::identity().m;
+        m[0] = cos_a;
+        m[2] = -sin_a;
+        m[8] = sin_a;
+        m[10] = cos_a;
+        Self { m }
+    }
+
+    /// Generates a perspective projection matrix.
+    #[inline]
+    pub fn perspective(fovy_rad: f32, aspect: f32, near: f32, far: f32) -> Self {
+        let f = 1.0 / (fovy_rad / 2.0).tan();
+        let nf = 1.0 / (near - far);
+
+        let mut m = [0.0; 16];
+        m[0] = f / aspect;
+        m[5] = f;
+        m[10] = (far + near) * nf;
+        m[11] = -1.0;
+        m[14] = 2.0 * far * near * nf;
+        m[15] = 0.0;
+
+        Self { m }
+    }
+
     /// Returns a shared reference to the underlying column-major array.
     #[inline]
     pub const fn as_slice(&self) -> &[f32; 16] {

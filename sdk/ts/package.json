@@ -1,0 +1,22 @@
+{
+  "name": "olayer-sdk",
+  "version": "0.1.0",
+  "description": "TypeScript SDK for Olayer GIS ATC Framework",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "olayer-wasm": "file:../../bindings/wasm/pkg"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5",
+    "vite": "^5.2.11",
+    "vite-plugin-wasm": "^3.0.1",
+    "vite-plugin-top-level-await": "^1.4.1"
+  }
+}

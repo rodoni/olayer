@@ -1,7 +1,9 @@
 use wasm_bindgen::prelude::*;
 use olayer_core::geodesy::LatLon;
+use olayer_core::geodesy::ellipsoid::Ellipsoid;
 use olayer_core::terrain::TerrainEngine;
 use olayer_core::interpolator::{InterpolationEngine, TargetState};
+use olayer_core::projections::{LambertConformalConic, WebMercator, Stereographic, Projection, CameraState};
 
 /// WASM compatible wrapper for LatLon geodetic coordinates.
 #[wasm_bindgen]
@@ -152,6 +154,222 @@ impl WasmInterpolationEngine {
 
         serde_wasm_bindgen::to_value(&targets)
             .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+}
+
+/// WASM compatible camera parameters.
+#[wasm_bindgen]
+pub struct WasmCameraState {
+    pub center_lat: f64, // radians
+    pub center_lon: f64, // radians
+    pub center_height: f64, // meters
+    pub zoom: f64,
+    pub rotation: f64, // radians
+    pub pitch: f64, // radians
+    pub roll: f64, // radians
+    pub aspect_ratio: f64,
+    pub viewport_base_meters: f64,
+}
+
+#[wasm_bindgen]
+impl WasmCameraState {
+    #[wasm_bindgen(constructor)]
+    pub fn new(
+        center_lat: f64,
+        center_lon: f64,
+        center_height: f64,
+        zoom: f64,
+        rotation: f64,
+        pitch: f64,
+        roll: f64,
+        aspect_ratio: f64,
+        viewport_base_meters: f64,
+    ) -> WasmCameraState {
+        WasmCameraState {
+            center_lat,
+            center_lon,
+            center_height,
+            zoom,
+            rotation,
+            pitch,
+            roll,
+            aspect_ratio,
+            viewport_base_meters,
+        }
+    }
+}
+
+#[wasm_bindgen]
+pub enum WasmProjectionType {
+    Lcc,
+    Stereographic,
+    WebMercator,
+}
+
+/// WASM wrapper to compute map projections and View-Projection matrices.
+#[wasm_bindgen]
+pub struct WasmProjection {
+    projection_type: WasmProjectionType,
+    lcc_std_par1: f64,
+    lcc_std_par2: f64,
+    lcc_origin_lat: f64,
+    lcc_origin_lon: f64,
+    stereo_center_lat: f64,
+    stereo_center_lon: f64,
+}
+
+#[wasm_bindgen]
+impl WasmProjection {
+    #[wasm_bindgen]
+    pub fn new_lcc(std_par1: f64, std_par2: f64, origin_lat: f64, origin_lon: f64) -> WasmProjection {
+        WasmProjection {
+            projection_type: WasmProjectionType::Lcc,
+            lcc_std_par1: std_par1,
+            lcc_std_par2: std_par2,
+            lcc_origin_lat: origin_lat,
+            lcc_origin_lon: origin_lon,
+            stereo_center_lat: 0.0,
+            stereo_center_lon: 0.0,
+        }
+    }
+
+    #[wasm_bindgen]
+    pub fn new_stereographic(center_lat: f64, center_lon: f64) -> WasmProjection {
+        WasmProjection {
+            projection_type: WasmProjectionType::Stereographic,
+            lcc_std_par1: 0.0,
+            lcc_std_par2: 0.0,
+            lcc_origin_lat: 0.0,
+            lcc_origin_lon: 0.0,
+            stereo_center_lat: center_lat,
+            stereo_center_lon: center_lon,
+        }
+    }
+
+    #[wasm_bindgen]
+    pub fn new_web_mercator() -> WasmProjection {
+        WasmProjection {
+            projection_type: WasmProjectionType::WebMercator,
+            lcc_std_par1: 0.0,
+            lcc_std_par2: 0.0,
+            lcc_origin_lat: 0.0,
+            lcc_origin_lon: 0.0,
+            stereo_center_lat: 0.0,
+            stereo_center_lon: 0.0,
+        }
+    }
+
+    fn get_projection(&self) -> Box<dyn Projection> {
+        match self.projection_type {
+            WasmProjectionType::Lcc => {
+                let lcc = LambertConformalConic::new(
+                    self.lcc_std_par1,
+                    self.lcc_std_par2,
+                    self.lcc_origin_lat,
+                    self.lcc_origin_lon,
+                    Ellipsoid::wgs84(),
+                );
+                Box::new(lcc)
+            }
+            WasmProjectionType::Stereographic => {
+                let stereo = Stereographic::new(
+                    self.stereo_center_lat,
+                    self.stereo_center_lon,
+                    Ellipsoid::wgs84(),
+                );
+                Box::new(stereo)
+            }
+            WasmProjectionType::WebMercator => {
+                Box::new(WebMercator::new(Ellipsoid::wgs84()))
+            }
+        }
+    }
+
+    /// Projects geodetic coordinates to planar meters [x, y].
+    pub fn project(&self, lat_rad: f64, lon_rad: f64, height: f64) -> Result<Vec<f64>, JsValue> {
+        let proj = self.get_projection();
+        let lla = LatLon::new(lat_rad, lon_rad, height);
+        proj.project(&lla)
+            .map(|(x, y)| vec![x, y])
+            .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    /// Unprojects planar meters (x, y) to geodetic coordinates.
+    pub fn unproject(&self, x: f64, y: f64) -> Result<WasmLatLon, JsValue> {
+        let proj = self.get_projection();
+        proj.unproject(x, y)
+            .map(|lla| WasmLatLon { lat: lla.lat, lon: lla.lon, height: lla.height })
+            .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    /// Generates a flat 4x4 View-Projection matrix [f32; 16].
+    pub fn get_view_proj_matrix(&self, camera: &WasmCameraState) -> Result<Vec<f32>, JsValue> {
+        let proj = self.get_projection();
+        let cam = CameraState::with_attitude(
+            LatLon::new(camera.center_lat, camera.center_lon, camera.center_height),
+            camera.zoom,
+            camera.rotation,
+            camera.pitch,
+            camera.roll,
+            camera.aspect_ratio,
+            camera.viewport_base_meters,
+        );
+        cam.get_2d_view_proj_matrix(proj.as_ref())
+            .map(|m| m.to_vec())
+            .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    /// Generates a flat 4x4 Perspective View-Projection matrix for 3D globe visualization.
+    pub fn get_3d_view_proj_matrix(&self, camera: &WasmCameraState) -> Result<Vec<f32>, JsValue> {
+        let cam = CameraState::with_attitude(
+            LatLon::new(camera.center_lat, camera.center_lon, camera.center_height),
+            camera.zoom,
+            camera.rotation,
+            camera.pitch,
+            camera.roll,
+            camera.aspect_ratio,
+            camera.viewport_base_meters,
+        );
+        cam.get_3d_view_proj_matrix()
+            .map(|m| m.to_vec())
+            .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    /// Generates a flat 4x4 Perspective View-Projection matrix for a 2.5D tilted flat map.
+    pub fn get_25d_view_proj_matrix(&self, camera: &WasmCameraState) -> Result<Vec<f32>, JsValue> {
+        let proj = self.get_projection();
+        let cam = CameraState::with_attitude(
+            LatLon::new(camera.center_lat, camera.center_lon, camera.center_height),
+            camera.zoom,
+            camera.rotation,
+            camera.pitch,
+            camera.roll,
+            camera.aspect_ratio,
+            camera.viewport_base_meters,
+        );
+        cam.get_25d_view_proj_matrix(proj.as_ref())
+            .map(|m| m.to_vec())
+            .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+}
+
+/// Converts Geodetic LLA coordinates to ECEF 3D Cartesian coordinates [X, Y, Z] in meters.
+#[wasm_bindgen]
+pub fn lla_to_ecef(lat_rad: f64, lon_rad: f64, height: f64) -> Vec<f64> {
+    let lla = LatLon::new(lat_rad, lon_rad, height);
+    let ecef = olayer_core::geodesy::lla_to_ecef(&lla, &Ellipsoid::wgs84());
+    vec![ecef.x, ecef.y, ecef.z]
+}
+
+/// Converts ECEF 3D Cartesian coordinates (X, Y, Z) in meters to Geodetic LLA coordinates.
+#[wasm_bindgen]
+pub fn ecef_to_lla(x: f64, y: f64, z: f64) -> WasmLatLon {
+    let ecef = olayer_core::geodesy::coords::Ecef::new(x, y, z);
+    let lla = olayer_core::geodesy::ecef_to_lla(&ecef, &Ellipsoid::wgs84());
+    WasmLatLon {
+        lat: lla.lat,
+        lon: lla.lon,
+        height: lla.height,
     }
 }
 
