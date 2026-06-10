@@ -11,12 +11,13 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "olayer-wasm": "file:../../bindings/wasm/pkg"
+    "olayer-wasm": "file:../../bindings/wasm/pkg",
+    "puppeteer": "^25.1.0"
   },
   "devDependencies": {
     "typescript": "^5.4.5",
     "vite": "^5.2.11",
-    "vite-plugin-wasm": "^3.0.1",
-    "vite-plugin-top-level-await": "^1.4.1"
+    "vite-plugin-top-level-await": "^1.4.1",
+    "vite-plugin-wasm": "^3.0.1"
   }
 }

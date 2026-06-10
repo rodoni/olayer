@@ -5,7 +5,7 @@ import {
   WasmCameraState,
 } from "olayer-wasm";
 import { LayerManager } from "../layers";
-import { DataManager } from "../providers";
+import { MapDataStack, TerrainTileSource } from "../providers";
 
 export type ViewMode = "2D" | "2.5D" | "3D";
 
@@ -32,7 +32,7 @@ export class OlayerController {
 
   // SDK Managers
   public readonly layerManager: LayerManager;
-  public readonly dataManager: DataManager;
+  public readonly dataManager: MapDataStack;
 
   // Camera State
   private centerLat: number; // radians
@@ -85,7 +85,8 @@ export class OlayerController {
 
     // Instantiate Managers
     this.layerManager = new LayerManager();
-    this.dataManager = new DataManager(this.terrainEngine);
+    this.dataManager = new MapDataStack();
+    this.dataManager.registerSource(new TerrainTileSource(this.terrainEngine));
 
     // Initial Camera Setup
     this.centerLat = config.initialCenterLatRad ?? 0.0;
@@ -225,7 +226,7 @@ export class OlayerController {
   }
 
   public setPitch(pitchRad: number): void {
-    this.pitch = Math.max(0, Math.min(180 * Math.PI / 180, pitchRad));
+    this.pitch = Math.max(-180 * Math.PI / 180, Math.min(180 * Math.PI / 180, pitchRad));
     this.triggerActive();
   }
 
@@ -368,7 +369,7 @@ export class OlayerController {
           const dRot = dx * 0.005;
           const dPitch = dy * 0.005;
           this.rotation = (this.rotation - dRot) % (2 * Math.PI);
-          this.pitch = Math.max(0, Math.min(180 * Math.PI / 180, this.pitch + dPitch));
+          this.pitch = Math.max(-180 * Math.PI / 180, Math.min(180 * Math.PI / 180, this.pitch + dPitch));
         } else {
           // Rotate camera in orbital 3D space
           const lonOffset = dx * 0.005;
@@ -385,7 +386,7 @@ export class OlayerController {
         const dRot = dx * 0.005;
         const dPitch = dy * 0.005;
         this.rotation = (this.rotation - dRot) % (2 * Math.PI);
-        this.pitch = Math.max(0, Math.min(180 * Math.PI / 180, this.pitch + dPitch));
+        this.pitch = Math.max(-180 * Math.PI / 180, Math.min(180 * Math.PI / 180, this.pitch + dPitch));
         return;
       }
 
@@ -434,7 +435,7 @@ export class OlayerController {
       this.triggerActive();
 
       const factor = e.deltaY < 0 ? 1.1 : 0.9;
-      this.zoom = Math.max(0.1, Math.min(this.zoom * factor, 1000.0));
+      this.zoom = Math.max(0.02, Math.min(this.zoom * factor, 1000.0));
     }, { passive: false });
   }
 

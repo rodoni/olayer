@@ -222,6 +222,47 @@
       <button id="addAircraftBtn">🛰️ Inject Radar Target</button>
       <button id="clearTargetsBtn">🗑️ Clear Targets</button>
 
+      <!-- Map Layers Section -->
+      <div id="mapLayersSection" style="margin-top: 16px; border-top: 1px dashed rgba(255, 255, 255, 0.1); padding-top: 16px;">
+        <h2 style="font-size: 0.9rem; text-transform: uppercase; color: var(--accent); margin-bottom: 12px; display: flex; align-items: center; gap: 6px;">
+          🗺️ Map Layers
+        </h2>
+        
+        <div class="form-group">
+          <label for="mapSourceSelect">Map Source</label>
+          <select id="mapSourceSelect">
+            <option value="osm">OpenStreetMap (OSM)</option>
+            <option value="geoserver_wms">GeoServer WMS (Raster)</option>
+            <option value="geoserver_tms">GeoServer TMS (Raster)</option>
+            <option value="none">None</option>
+          </select>
+        </div>
+
+        <div id="geoserverConfigGroup" style="display: none;">
+          <div class="form-group">
+            <label for="geoserverHostInput">GeoServer Host</label>
+            <input type="text" id="geoserverHostInput" value="http://localhost:8080/geoserver" style="width: 100%; background: rgba(25, 30, 42, 0.8); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 6px; color: var(--text); padding: 8px 10px; font-family: inherit; font-size: 0.8rem; outline: none;">
+          </div>
+          
+          <div class="form-group">
+            <label for="geoserverLayerInput">Base Layer Name</label>
+            <input type="text" id="geoserverLayerInput" value="topp:states" style="width: 100%; background: rgba(25, 30, 42, 0.8); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 6px; color: var(--text); padding: 8px 10px; font-family: inherit; font-size: 0.8rem; outline: none;">
+          </div>
+        </div>
+
+        <div class="form-group" style="display: flex; align-items: center; gap: 8px; margin-top: 10px;">
+          <input type="checkbox" id="showVectorOverlayCheckbox" style="accent-color: var(--accent); width: 16px; height: 16px; cursor: pointer;">
+          <label for="showVectorOverlayCheckbox" style="margin-bottom: 0; cursor: pointer;">Show Vector Overlay</label>
+        </div>
+
+        <div id="vectorConfigGroup" style="display: none;">
+          <div class="form-group">
+            <label for="vectorLayerInput">Vector Layer Name</label>
+            <input type="text" id="vectorLayerInput" value="topp:states" style="width: 100%; background: rgba(25, 30, 42, 0.8); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 6px; color: var(--text); padding: 8px 10px; font-family: inherit; font-size: 0.8rem; outline: none;">
+          </div>
+        </div>
+      </div>
+
       <!-- Camera Controls Sub-Panel -->
       <div id="cameraControlsSection" style="margin-top: 16px; border-top: 1px dashed rgba(255, 255, 255, 0.1); padding-top: 16px;">
         <h2 style="font-size: 0.9rem; text-transform: uppercase; color: var(--accent-blue); margin-bottom: 12px; display: flex; align-items: center; gap: 6px;">
@@ -234,7 +275,11 @@
             <span>Zoom</span>
             <span id="zoomValText">1.0x</span>
           </div>
-          <input type="range" id="zoomRange" min="0.1" max="10" step="0.1" value="1.0" style="width: 100%; accent-color: var(--accent-blue);">
+          <input type="range" id="zoomRange" min="0.02" max="20" step="0.01" value="1.0" style="width: 100%; accent-color: var(--accent-blue); margin-bottom: 8px;">
+          <div style="display: flex; gap: 8px;">
+            <button id="zoomOutBtn" style="font-size: 0.75rem; padding: 6px; margin-bottom: 0;">🔍- Zoom Out</button>
+            <button id="zoomInBtn" style="font-size: 0.75rem; padding: 6px; margin-bottom: 0;">🔍+ Zoom In</button>
+          </div>
         </div>
 
         <!-- Bearing / Rotation Control -->
@@ -252,7 +297,7 @@
             <span>Pitch (Tilt)</span>
             <span id="pitchValText">35°</span>
           </div>
-          <input type="range" id="pitchRange" min="0" max="180" step="1" value="35" style="width: 100%; accent-color: var(--accent-blue);">
+          <input type="range" id="pitchRange" min="-180" max="180" step="1" value="35" style="width: 100%; accent-color: var(--accent-blue);">
         </div>
 
         <!-- Roll Control -->

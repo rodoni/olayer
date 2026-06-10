@@ -136,7 +136,7 @@ graph TB
     subgraph TS_SDK_Comp ["SDK TypeScript (Web)"]
         ts_controller["🎮 TS Controller<br>Loop (15/60 FPS) & Eventos"]:::component
         ts_layer_manager["🥞 TS Layer Manager<br>Composição e controle de layers"]:::component
-        ts_data_manager["📥 TS Data Manager<br>Requisições HTTP MVT/WMTS/DTED"]:::component
+        ts_map_data_stack["📥 TS Map Data Stack<br>Gerenciador de Sources & Cache (MVT/WMTS/DTED)"]:::component
         ts_gpu_pipe["🎨 WebGL/WebGPU Pipe<br>Desenho estático base map"]:::component
         ts_cpu_pipe["🎯 WebGL/Canvas 2D Pipe<br>Símbolos (Atlas) & Anti-clutter"]:::component
     end
@@ -148,7 +148,7 @@ graph TB
     subgraph Native_SDK_Comp ["SDK Nativa (Desktop)"]
         native_controller["🎮 Native Controller<br>Loop nativo & Janela (winit)"]:::nativeComponent
         native_layer_manager["🥞 Native Layer Manager<br>Composição e controle de layers nativo"]:::nativeComponent
-        native_data_manager["📥 Native Data Manager<br>I/O local e rede (reqwest)"]:::nativeComponent
+        native_map_data_stack["📥 Native Map Data Stack<br>Gerenciador de Sources & Cache Nativo"]:::nativeComponent
         native_gpu_pipe["🎨 wgpu Pipe (Matrix)<br>Renderização de terreno/fundo (Vulkan/Metal/DX)"]:::nativeComponent
         native_cpu_pipe["🎯 wgpu Pipe (Vertex)<br>Símbolos (Atlas) & Anti-clutter nativo"]:::nativeComponent
     end
@@ -171,8 +171,8 @@ graph TB
     ts_controller --> ts_layer_manager
     ts_layer_manager --> ts_gpu_pipe
     ts_layer_manager --> ts_cpu_pipe
-    ts_data_manager --> ts_controller
-    ts_data_manager --> wasm_bridge
+    ts_map_data_stack --> ts_controller
+    ts_map_data_stack --> wasm_bridge
     ts_gpu_pipe --> wasm_bridge
     ts_cpu_pipe --> wasm_bridge
 
@@ -180,8 +180,8 @@ graph TB
     native_controller --> native_layer_manager
     native_layer_manager --> native_gpu_pipe
     native_layer_manager --> native_cpu_pipe
-    native_data_manager --> native_controller
-    native_data_manager --> ffi_bridge
+    native_map_data_stack --> native_controller
+    native_map_data_stack --> ffi_bridge
     native_gpu_pipe --> ffi_bridge
     native_cpu_pipe --> ffi_bridge
     
@@ -230,14 +230,14 @@ graph TB
 #### 2. Componentes da SDK TypeScript (Web Client)
 * **TS Controller:** Controla o loop de animação da tela no navegador utilizando `requestAnimationFrame` e gerencia a modulação dinâmica de FPS (15 FPS ocioso / 60 FPS ativo).
 * **TS Layer Manager:** Coordena a pilha de camadas (Layer Stack) na Web, gerindo o ciclo de pintura otimizado com isolamento de camadas estáticas e dinâmicas.
-* **TS Data Manager:** Realiza as chamadas HTTP assíncronas no navegador (`fetch`) para obter os arquivos vetoriais MVT do GeoServer, imagens WMTS, esquemas SLD e binários DTED.
+* **TS Map Data Stack:** Gerencia a infraestrutura de dados de mapa na web. Implementa as abstrações de `MapDataSource` e gerencia sub-provedores como `VectorTileSource` (para MVT/GeoServer), `RasterTileSource` (WMTS/OpenStreetMap) e `TerrainTileSource` (paginação dinâmica de terreno). Controla filas de requisições, concorrência no navegador e cache local LRU.
 * **WebGL/WebGPU GPU Pipeline:** Vincula buffers de vértices estáticos e renderiza na GPU a partir de matrizes $4 \times 4$ enviadas pela ponte WASM.
 * **WebGL/Canvas 2D CPU Pipeline:** Renderiza alvos dinâmicos resolvendo os sprites no *Atlas de Texturas* da GPU e calculando a anti-sobreposição de etiquetas.
 
 #### 3. Componentes da SDK Nativa (Desktop Client)
 * **Native Controller:** Controla o loop nativo de frames e gerencia a criação de janelas desktop locais (utilizando a crate `winit` ou o loop de mensagens da aplicação host).
 * **Native Layer Manager:** Gerencia a pilha de camadas nativas para controle de visibilidade, mesclagem e repintura em nível nativo.
-* **Native Data Manager:** Gerencia a leitura assíncrona de arquivos DTED no disco rígido local e faz requisições HTTP (via `reqwest` ou biblioteca similar) para buscar MVTs/WMTS do GeoServer.
+* **Native Map Data Stack:** Equivalente de infraestrutura de dados para plataformas Desktop. Gerencia conexões de rede de alto desempenho (via `reqwest`), decodificação de formatos táticos e I/O de disco local eficiente para arquivos DTED.
 * **wgpu GPU Pipeline:** Compila pipelines e renderiza na GPU (Vulkan, Metal ou DirectX 12) através da biblioteca Rust `wgpu` para desenhar terrenos tridimensionais e mapas de fundo vetoriais.
 * **wgpu CPU/Vertex Pipeline:** Renderiza os alvos dinâmicos no desktop usando chamadas instanciadas e *billboards* a partir de um atlas de textura local.
 

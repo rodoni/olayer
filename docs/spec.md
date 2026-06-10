@@ -151,6 +151,14 @@ Para alimentar o framework com dados cartográficos e estruturais de aviação, 
 
 ### 7.3 Otimização de Entrega: GeoWebCache (GWC)
 * Toda requisição de mapa de fundo vinda do framework deve obrigatoriamente bater na camada do GeoWebCache em formato MVT ou WMTS (Ráster, para imagens de satélite). Fica proibido o uso de WMS puro/dinâmico para telas operacionais em tempo real para evitar sobrecarga do servidor de mapas.
+
+### 7.4 Pilha de Dados de Mapa (Map Data Stack)
+Para isolar a rede e o gerenciamento de arquivos da renderização WebGL e cálculos do radar, as SDKs implementam a pilha de dados baseada em `MapDataSource`:
+* **`VectorTileSource` (MVT / GeoServer):** Gerencia a paginação e o cálculo geométrico dos limites visíveis (Bounding Box) da câmera em tempo real, realizando buscas paralelas de blocos vetoriais no GeoServer.
+* **`RasterTileSource` (WMTS / OSM):** Controla o download de imagens de mapa e o upload de texturas para a GPU de forma assíncrona.
+* **`TerrainTileSource` (DTED / Terreno):** Paginação automática baseada na posição do controlador. Substitui a injeção passiva pura por um resolvedor de rede dinâmico com fila de downloads e algoritmo de despejo de memória LRU (Least Recently Used) para garantir consumo estável de memória RAM/WASM.
+* **Desacoplamento por Concorrência:** A decodificação de formatos geográficos complexos (MVT/DTED) será executada em threads de suporte (Web Workers no navegador, Threads locais em desktop) para que a thread de renderização principal nunca bloqueie o tráfego do radar.
+
 ---
 
 ## 8. Estrutura Proposta de Código do Repositório

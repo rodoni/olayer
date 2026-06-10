@@ -17,10 +17,15 @@ export { OlayerController } from "./controller";
 export type { OlayerConfig } from "./controller";
 
 // Export SDK Layer System
-export { Layer, LayerManager } from "./layers";
+export { Layer, LayerManager, TileLayer, VectorTileLayer } from "./layers";
 
 // Export Data Managers and Providers
-export { DataManager } from "./providers";
+export { DataManager, TerrainTileSource } from "./providers";
+export { RasterTileSource } from "./providers/raster";
+export { VectorTileSource } from "./providers/vector";
+export { MapDataStack } from "./providers/stack";
+export type { MapDataSource } from "./providers/datasource";
+
 
 // Export Renderers and Texture Atlas
 export { WebGLRenderer } from "./renderer/gpu";

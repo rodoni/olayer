@@ -4,6 +4,10 @@ import init, {
   Layer,
   WebGLRenderer,
   CPURenderer,
+  TileLayer,
+  RasterTileSource,
+  VectorTileSource,
+  VectorTileLayer,
 } from "../src";
 
 // Pre-define coordinates for São Paulo (TMA SP) in radians
@@ -16,6 +20,8 @@ let activeProjection: WasmProjection;
 let controller: OlayerController;
 let gridLayer: GridLayer;
 let radarLayer: RadarLayer;
+let tileLayer: TileLayer | null = null;
+let vectorLayer: VectorTileLayer | null = null;
 let selectedTargetId: string | null = null;
 
 // Helper to create a mock DTED Level 0 binary tile in memory
@@ -445,6 +451,132 @@ function generateRandomTarget(): void {
   controller.triggerActive();
 }
 
+// Rebuilds and updates map layers based on GUI selections
+function updateMapLayers(): void {
+  if (!controller) return;
+
+  // 1. Remove and destroy existing custom layers
+  if (tileLayer) {
+    controller.layerManager.removeLayer(tileLayer.id);
+    tileLayer.destroy(controller.gl);
+    tileLayer = null;
+  }
+  if (vectorLayer) {
+    controller.layerManager.removeLayer(vectorLayer.id);
+    vectorLayer.destroy(controller.gl);
+    vectorLayer = null;
+  }
+
+  // Also remove standard layers temporarily so we can re-add in order
+  if (gridLayer) {
+    controller.layerManager.removeLayer(gridLayer.id);
+  }
+  if (radarLayer) {
+    controller.layerManager.removeLayer(radarLayer.id);
+  }
+
+  // 2. Read values from GUI
+  const mapSourceSelect = document.getElementById("mapSourceSelect") as HTMLSelectElement;
+  const mapSource = mapSourceSelect ? mapSourceSelect.value : "osm";
+
+  const hostInput = document.getElementById("geoserverHostInput") as HTMLInputElement;
+  let host = hostInput ? hostInput.value.trim() : "http://localhost:8080/geoserver";
+  host = host.replace(/\/+$/, ""); // Remove trailing slashes
+
+  const baseLayerInput = document.getElementById("geoserverLayerInput") as HTMLInputElement;
+  const baseLayerName = baseLayerInput ? baseLayerInput.value.trim() : "topp:states";
+
+  const vectorOverlayCheckbox = document.getElementById("showVectorOverlayCheckbox") as HTMLInputElement;
+  const showVector = vectorOverlayCheckbox ? vectorOverlayCheckbox.checked : false;
+
+  const vectorLayerInput = document.getElementById("vectorLayerInput") as HTMLInputElement;
+  const vectorLayerName = vectorLayerInput ? vectorLayerInput.value.trim() : "topp:states";
+
+  // Toggle DOM element visibility based on selections
+  const geoserverConfigGroup = document.getElementById("geoserverConfigGroup");
+  if (geoserverConfigGroup) {
+    geoserverConfigGroup.style.display = (mapSource === "geoserver_wms" || mapSource === "geoserver_tms") ? "block" : "none";
+  }
+
+  const vectorConfigGroup = document.getElementById("vectorConfigGroup");
+  if (vectorConfigGroup) {
+    vectorConfigGroup.style.display = showVector ? "block" : "none";
+  }
+
+  // 3. Rebuild Base Tile Layer if configured
+  if (mapSource === "osm") {
+    const osmSource = new RasterTileSource(
+      controller.gl,
+      "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+      1000
+    );
+    controller.dataManager.registerSource(osmSource);
+    tileLayer = new TileLayer("osm_base_map", osmSource);
+    tileLayer.opacity = 0.35;
+  } else if (mapSource === "geoserver_wms") {
+    const wmsSource = new RasterTileSource(
+      controller.gl,
+      (x, y, z) => {
+        // Compute EPSG:3857 Bbox for XYZ tile coordinate
+        const size = 20037508.342789244 * 2;
+        const numTiles = 1 << z;
+        const tileSize = size / numTiles;
+        const minX = -20037508.342789244 + x * tileSize;
+        const maxX = minX + tileSize;
+        const maxY = 20037508.342789244 - y * tileSize;
+        const minY = maxY - tileSize;
+        return `${host}/wms?service=WMS&version=1.1.1&request=GetMap&layers=${baseLayerName}&styles=&bbox=${minX},${minY},${maxX},${maxY}&width=256&height=256&srs=EPSG:3857&format=image/png&transparent=true`;
+      },
+      1000
+    );
+    controller.dataManager.registerSource(wmsSource);
+    tileLayer = new TileLayer("geoserver_base_map", wmsSource);
+    tileLayer.opacity = 0.35;
+  } else if (mapSource === "geoserver_tms") {
+    const tmsSource = new RasterTileSource(
+      controller.gl,
+      (x, y, z) => {
+        const y_tms = (1 << z) - 1 - y;
+        return `${host}/gwc/service/tms/1.0.0/${baseLayerName}@EPSG:900913@png/${z}/${x}/${y_tms}.png`;
+      },
+      1000
+    );
+    controller.dataManager.registerSource(tmsSource);
+    tileLayer = new TileLayer("geoserver_base_map", tmsSource);
+    tileLayer.opacity = 0.35;
+  }
+
+  // 4. Rebuild Vector Layer if configured
+  if (showVector) {
+    const vecSource = new VectorTileSource(
+      (x, y, z) => {
+        const y_tms = (1 << z) - 1 - y;
+        return `${host}/gwc/service/tms/1.0.0/${vectorLayerName}@EPSG:900913@geojson/${z}/${x}/${y_tms}.geojson`;
+      },
+      1000
+    );
+    vectorLayer = new VectorTileLayer("geoserver_vector_layer", vecSource);
+    vectorLayer.opacity = 0.7;
+  }
+
+  // 5. Add layers back to Manager in correct rendering stack order
+  if (tileLayer) {
+    controller.layerManager.addLayer(tileLayer);
+  }
+  if (vectorLayer) {
+    controller.layerManager.addLayer(vectorLayer);
+  }
+  if (gridLayer) {
+    controller.layerManager.addLayer(gridLayer);
+  }
+  if (radarLayer) {
+    controller.layerManager.addLayer(radarLayer);
+  }
+
+  // Trigger repaint
+  controller.triggerActive();
+}
+
 // Startup execution after WASM loading
 async function start() {
   // 1. Initialize WebAssembly
@@ -485,12 +617,15 @@ async function start() {
   }
   console.log("Mock DTED tiles loaded successfully!");
 
-  // Create and register layers
+  // Set controller on window for layers to access
+  (window as any).olayerController = controller;
+
+  // Create static grid and radar layers (independent of base map URL)
   gridLayer = new GridLayer(controller.gl, activeProjection, "2D");
   radarLayer = new RadarLayer(controller);
 
-  controller.layerManager.addLayer(gridLayer);
-  controller.layerManager.addLayer(radarLayer);
+  // Initialize map layers based on GUI selections
+  updateMapLayers();
 
   // Start render loop
   controller.startLoop();
@@ -542,6 +677,12 @@ async function start() {
   }, 500);
 
   // Hook Event Listeners
+  document.getElementById("mapSourceSelect")?.addEventListener("change", updateMapLayers);
+  document.getElementById("geoserverHostInput")?.addEventListener("input", updateMapLayers);
+  document.getElementById("geoserverLayerInput")?.addEventListener("input", updateMapLayers);
+  document.getElementById("showVectorOverlayCheckbox")?.addEventListener("change", updateMapLayers);
+  document.getElementById("vectorLayerInput")?.addEventListener("input", updateMapLayers);
+
   document.getElementById("addAircraftBtn")?.addEventListener("click", () => {
     generateRandomTarget();
   });
@@ -686,6 +827,16 @@ async function start() {
   document.getElementById("zoomRange")?.addEventListener("input", (e) => {
     const val = parseFloat((e.target as HTMLInputElement).value);
     controller.setZoom(val);
+  });
+
+  document.getElementById("zoomInBtn")?.addEventListener("click", () => {
+    const currentZoom = controller.getZoom();
+    controller.setZoom(currentZoom * 1.3);
+  });
+
+  document.getElementById("zoomOutBtn")?.addEventListener("click", () => {
+    const currentZoom = controller.getZoom();
+    controller.setZoom(currentZoom / 1.3);
   });
 
   // Bearing range input listener
