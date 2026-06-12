@@ -1,4 +1,4 @@
-import { WasmTerrainEngine } from "olayer-wasm";
+import { WasmTerrainEngine, WasmTileKey } from "olayer-wasm";
 import { MapDataSource } from "./datasource";
 
 /**
@@ -8,7 +8,8 @@ import { MapDataSource } from "./datasource";
 export class TerrainTileSource implements MapDataSource {
   public readonly id: string = "terrain_dted";
   private terrainEngine: WasmTerrainEngine;
-  private terrainCache: Map<string, Uint8Array> = new Map(); // Key format: "lat,lon"
+  private terrainCache: Map<string, Uint8Array> = new Map(); // requestKey -> bytes
+  private tileKeyMap: Map<string, WasmTileKey> = new Map();  // requestKey -> WasmTileKey
   private maxTiles: number;
   private urlResolver: string | ((lat: number, lon: number) => string);
 
@@ -28,13 +29,13 @@ export class TerrainTileSource implements MapDataSource {
    * otherwise it assumes mock loading or manual injection.
    */
   public async loadTile(lat: number, lon: number, _unused?: number): Promise<void> {
-    const key = `${lat},${lon}`;
+    const requestKey = `${lat},${lon}`;
 
     // LRU hit: mark as most recently used by re-inserting
-    if (this.terrainCache.has(key)) {
-      const bytes = this.terrainCache.get(key)!;
-      this.terrainCache.delete(key);
-      this.terrainCache.set(key, bytes);
+    if (this.terrainCache.has(requestKey)) {
+      const bytes = this.terrainCache.get(requestKey)!;
+      this.terrainCache.delete(requestKey);
+      this.terrainCache.set(requestKey, bytes);
       return;
     }
 
@@ -72,22 +73,23 @@ export class TerrainTileSource implements MapDataSource {
 
       // Evict oldest tile if cache is full (FIFO on Map keys behaves like LRU)
       if (this.terrainCache.size >= this.maxTiles) {
-        const oldestKey = this.terrainCache.keys().next().value;
-        if (oldestKey) {
-          const [oldLat, oldLon] = oldestKey.split(",").map(Number);
-          // Unload from WASM TerrainEngine
-          this.terrainEngine.unload_tile(oldLat, oldLon);
-          // Delete from local JS cache
-          this.terrainCache.delete(oldestKey);
-          console.log(`LRU Eviction: Unloaded tile [lat: ${oldLat}, lon: ${oldLon}] to free WASM memory.`);
+        const oldestRequestKey = this.terrainCache.keys().next().value;
+        if (oldestRequestKey) {
+          const oldestTileKey = this.tileKeyMap.get(oldestRequestKey);
+          if (oldestTileKey) {
+            this.terrainEngine.unload_tile(oldestTileKey.lat_deg, oldestTileKey.lon_deg);
+          }
+          this.terrainCache.delete(oldestRequestKey);
+          this.tileKeyMap.delete(oldestRequestKey);
         }
       }
 
-      // Load tile in the WASM engine
-      this.terrainEngine.load_tile(bytes);
+      // Load tile in the WASM engine and capture the actual tile key
+      const wasmKey = this.terrainEngine.load_tile(bytes);
+      this.tileKeyMap.set(requestKey, wasmKey);
 
       // Store in JS cache
-      this.terrainCache.set(key, bytes);
+      this.terrainCache.set(requestKey, bytes);
     } catch (error) {
       console.error(`Failed to load DTED tile for [${lat}, ${lon}] from ${url}:`, error);
       throw error;
@@ -98,33 +100,42 @@ export class TerrainTileSource implements MapDataSource {
    * Manually injects a pre-downloaded or mock DTED tile into the cache and WASM engine.
    */
   public injectTile(lat: number, lon: number, bytes: Uint8Array): void {
-    const key = `${lat},${lon}`;
-    
-    if (this.terrainCache.has(key)) {
-      this.terrainCache.delete(key);
+    const requestKey = `${lat},${lon}`;
+
+    if (this.terrainCache.has(requestKey)) {
+      this.terrainCache.delete(requestKey);
+      this.tileKeyMap.delete(requestKey);
     }
 
     if (this.terrainCache.size >= this.maxTiles) {
-      const oldestKey = this.terrainCache.keys().next().value;
-      if (oldestKey) {
-        const [oldLat, oldLon] = oldestKey.split(",").map(Number);
-        this.terrainEngine.unload_tile(oldLat, oldLon);
-        this.terrainCache.delete(oldestKey);
+      const oldestRequestKey = this.terrainCache.keys().next().value;
+      if (oldestRequestKey) {
+        const oldestTileKey = this.tileKeyMap.get(oldestRequestKey);
+        if (oldestTileKey) {
+          this.terrainEngine.unload_tile(oldestTileKey.lat_deg, oldestTileKey.lon_deg);
+        }
+        this.terrainCache.delete(oldestRequestKey);
+        this.tileKeyMap.delete(oldestRequestKey);
       }
     }
 
-    this.terrainEngine.load_tile(bytes);
-    this.terrainCache.set(key, bytes);
+    const wasmKey = this.terrainEngine.load_tile(bytes);
+    this.tileKeyMap.set(requestKey, wasmKey);
+    this.terrainCache.set(requestKey, bytes);
   }
 
   /**
    * Unloads the tile from cache and WASM heap.
    */
   public unloadTile(lat: number, lon: number, _unused?: number): void {
-    const key = `${lat},${lon}`;
-    if (this.terrainCache.has(key)) {
-      this.terrainEngine.unload_tile(lat, lon);
-      this.terrainCache.delete(key);
+    const requestKey = `${lat},${lon}`;
+    if (this.terrainCache.has(requestKey)) {
+      const tileKey = this.tileKeyMap.get(requestKey);
+      if (tileKey) {
+        this.terrainEngine.unload_tile(tileKey.lat_deg, tileKey.lon_deg);
+      }
+      this.terrainCache.delete(requestKey);
+      this.tileKeyMap.delete(requestKey);
     }
   }
 
@@ -132,11 +143,14 @@ export class TerrainTileSource implements MapDataSource {
    * Unloads all tiles and clears the cache.
    */
   public clearCache(): void {
-    for (const key of this.terrainCache.keys()) {
-      const [lat, lon] = key.split(",").map(Number);
-      this.terrainEngine.unload_tile(lat, lon);
+    for (const requestKey of this.terrainCache.keys()) {
+      const tileKey = this.tileKeyMap.get(requestKey);
+      if (tileKey) {
+        this.terrainEngine.unload_tile(tileKey.lat_deg, tileKey.lon_deg);
+      }
     }
     this.terrainCache.clear();
+    this.tileKeyMap.clear();
   }
 
   /**
@@ -154,4 +168,3 @@ export type { MapDataSource } from "./datasource";
 export { RasterTileSource } from "./raster";
 export { VectorTileSource } from "./vector";
 export { MapDataStack } from "./stack";
-
