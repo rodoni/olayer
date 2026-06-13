@@ -398,26 +398,32 @@ olayer/
 │       └── interpolator/         # Lógica de Dead Reckoning para rastreio de alvos
 │           └── mod.rs
 │
-├── bindings/
-│   └── wasm/                     # [C4 Component: WASM Bindings Layer]
+sdk/
+├── ts/                       # [C4 Component: Olayer TS SDK]
+│   ├── package.json
+│   ├── src/
+│   │   ├── controller/       # Gerenciamento de Loop, FPS Throttler e Eventos
+│   │   ├── providers/        # Chamadas de rede WMTS, MVT, SLD e injeção DTED
+│   │   ├── renderer/         # Renderizador WebGL (GPU) e Canvas (CPU)
+│   │   └── index.ts          # API pública da SDK TypeScript
+│   ├── tsconfig.json
+│   └── wasm/                 # [C4 Component: WASM Bindings Layer]
 │       ├── Cargo.toml
 │       └── src/
-│           └── lib.rs            # Exportações com #[wasm_bindgen] para a SDK TS
+│           └── lib.rs        # Exportações com #[wasm_bindgen] para a SDK TS
 │
-└── sdk/
-    ├── ts/                       # [C4 Component: Olayer TS SDK]
-    │   ├── package.json
-    │   ├── src/
-    │   │   ├── controller/       # Gerenciamento de Loop, FPS Throttler e Eventos
-    │   │   ├── providers/        # Chamadas de rede WMTS, MVT, SLD e injeção DTED
-    │   │   ├── renderer/         # Renderizador WebGL (GPU) e Canvas (CPU)
-    │   │   └── index.ts          # API pública da SDK TypeScript
-    │   └── tsconfig.json
+└── native/                   # [C4 Component: Olayer Native Environment]
+    ├── c_ffi_bridge/         # [C4 Component: C-FFI Bridge]
+    │   ├── Cargo.toml
+    │   └── src/
+    │       └── lib.rs        # Exports C-compatible / cbindgen header
     │
-    └── rust/                     # [C4 Component: Olayer Native SDK]
+    └── desktop/              # [C4 Component: Olayer Native SDK & Demo]
         ├── Cargo.toml
         └── src/
-            └── lib.rs            # Interface estática / wgpu nativo para Desktop
+            ├── lib.rs        # Interface estática nativa / FPS throttler
+            └── main.rs       # Demo nativo wgpu + winit + egui
+
 ```
 
 ---

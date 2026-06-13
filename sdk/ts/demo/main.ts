@@ -8,6 +8,7 @@ import init, {
   RasterTileSource,
   VectorTileSource,
   VectorTileLayer,
+  WasmStyleRegistry,
 } from "../src";
 
 // Pre-define coordinates for São Paulo (TMA SP) in radians
@@ -369,6 +370,28 @@ class RadarLayer extends Layer {
       );
 
       if (screenPos) {
+        let symbolId = "civil:plane";
+        if (t.id.startsWith("TAM") || t.id.startsWith("GLO")) {
+          symbolId = "civil:plane";
+        } else if (t.id.startsWith("AZU")) {
+          symbolId = "mil:fighter";
+        } else {
+          symbolId = "mil:cargo";
+        }
+
+        let symbolUv = undefined;
+        try {
+          symbolUv = this.controller.atlasManager.registerWasmSymbol(
+            symbolId,
+            this.controller.symbolRegistry,
+            this.controller.styleRegistry
+          );
+        } catch (err) {
+          console.error("Failed to register WASM symbol in atlas:", err);
+        }
+
+        const atlasCanvas = (this.controller.atlasManager as any).atlasCanvas;
+
         this.cpuRenderer.drawTarget(
           {
             id: t.id,
@@ -385,8 +408,8 @@ class RadarLayer extends Layer {
           this.controller.glCanvas.width,
           this.controller.glCanvas.height,
           t.speed_mps ?? 180.0,
-          null,
-          undefined,
+          atlasCanvas,
+          symbolUv,
           viewMode,
           viewProjMatrix,
           camera.center_lat,
@@ -600,6 +623,80 @@ async function start() {
     initialZoom: 1.0,
     viewportBaseMeters: 250000.0, // 250 km base TMA size
   });
+
+  // Register symbols library
+  const symbolsJson = JSON.stringify({
+    library_name: "OlayerAviationSymbols",
+    symbols: {
+      "civil:plane": {
+        bbox: [-12.0, -12.0, 12.0, 12.0],
+        anchor: [0.0, 0.0],
+        primitives: [
+          {
+            type: "Circle",
+            cx: 0.0,
+            cy: 0.0,
+            r: 5.0,
+            fill: { r: 0, g: 230, b: 118, a: 255 },
+            stroke: { color: { r: 0, g: 100, b: 50, a: 255 }, width: 1.0 }
+          },
+          {
+            type: "Path",
+            commands: "M 0,-10 L 0,10 M -8,0 L 8,0 M -4,6 L 4,6",
+            stroke: { color: { r: 0, g: 230, b: 118, a: 255 }, width: 1.5 }
+          }
+        ]
+      },
+      "mil:fighter": {
+        bbox: [-12.0, -12.0, 12.0, 12.0],
+        anchor: [0.0, 0.0],
+        primitives: [
+          {
+            type: "Path",
+            commands: "M 0,-12 L -6,2 L -10,6 L -2,4 L 0,10 L 2,4 L 10,6 L 6,2 Z",
+            fill: { r: 0, g: 176, b: 255, a: 180 },
+            stroke: { color: { r: 0, g: 176, b: 255, a: 255 }, width: 1.5 }
+          }
+        ]
+      },
+      "mil:cargo": {
+        bbox: [-15.0, -15.0, 15.0, 15.0],
+        anchor: [0.0, 0.0],
+        primitives: [
+          {
+            type: "Path",
+            commands: "M 0,-12 L -4,-8 L -14,-2 L -4,-2 L 0,8 L 4,-2 L 14,-2 L 4,-8 Z",
+            fill: { r: 255, g: 145, b: 0, a: 180 },
+            stroke: { color: { r: 255, g: 145, b: 0, a: 255 }, width: 1.5 }
+          }
+        ]
+      }
+    }
+  });
+  controller.symbolRegistry.register_declarative_provider(symbolsJson);
+
+  const sldXml = `<?xml version="1.0" encoding="UTF-8"?>
+  <StyledLayerDescriptor version="1.0.0">
+      <NamedLayer>
+          <Name>civil:plane</Name>
+          <UserStyle>
+              <FeatureTypeStyle>
+                  <Rule>
+                      <PointSymbolizer>
+                          <Graphic>
+                              <Mark>
+                                  <Fill>
+                                      <CssParameter name="fill">#00E676</CssParameter>
+                                  </Fill>
+                              </Mark>
+                          </Graphic>
+                      </PointSymbolizer>
+                  </Rule>
+              </FeatureTypeStyle>
+          </UserStyle>
+      </NamedLayer>
+  </StyledLayerDescriptor>`;
+  controller.styleRegistry = WasmStyleRegistry.parse(sldXml);
 
   // Load mock DTED Level 0 tiles for São Paulo TMA area to support 2.5D flight profile
   console.log("Loading mock DTED tiles...");
@@ -870,6 +967,11 @@ async function start() {
     }
     controller.setCenter(SP_LAT_RAD, SP_LON_RAD);
     controller.triggerActive();
+  });
+
+  // Run Benchmark button listener
+  document.getElementById("runBenchmarkBtn")?.addEventListener("click", () => {
+    window.location.href = "./benchmark.html";
   });
 
   // Periodically synchronize sliders with camera state

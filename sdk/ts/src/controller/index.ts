@@ -3,9 +3,12 @@ import {
   WasmInterpolationEngine,
   WasmProjection,
   WasmCameraState,
+  WasmSymbolRegistry,
+  WasmStyleRegistry,
 } from "olayer-wasm";
 import { LayerManager } from "../layers";
 import { MapDataStack, TerrainTileSource } from "../providers";
+import { TextureAtlasManager } from "../renderer/atlas";
 
 export type ViewMode = "2D" | "2.5D" | "3D";
 
@@ -29,6 +32,11 @@ export class OlayerController {
   public readonly terrainEngine: WasmTerrainEngine;
   public readonly interpolator: WasmInterpolationEngine;
   public readonly projection: WasmProjection;
+
+  // Symbology & Atlas
+  public readonly symbolRegistry: WasmSymbolRegistry;
+  public readonly atlasManager: TextureAtlasManager;
+  public styleRegistry: WasmStyleRegistry | null = null;
 
   // SDK Managers
   public readonly layerManager: LayerManager;
@@ -82,6 +90,8 @@ export class OlayerController {
     this.terrainEngine = new WasmTerrainEngine();
     this.interpolator = new WasmInterpolationEngine();
     this.projection = config.projection;
+    this.symbolRegistry = new WasmSymbolRegistry();
+    this.atlasManager = new TextureAtlasManager(this.gl);
 
     // Instantiate Managers
     this.layerManager = new LayerManager();
@@ -439,14 +449,13 @@ export class OlayerController {
     }, { passive: false });
   }
 
-  /**
-   * Destroys contexts and unloads WASM memory allocations.
-   */
   public destroy(): void {
     this.stopLoop();
     this.dataManager.clearCache();
     this.terrainEngine.free();
     this.interpolator.free();
     this.projection.free();
+    this.symbolRegistry.free();
+    this.atlasManager.destroy();
   }
 }

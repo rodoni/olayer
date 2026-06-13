@@ -173,12 +173,13 @@ Para isolar a rede e o gerenciamento de arquivos da renderização WebGL e cálc
 │       ├── sld/           # Parser XML de arquivos Styled Layer Descriptor
 │       └── projections/   # Algoritmos das projeções (Estereográfica, LCC, Mercator)
 │
-├── bindings/
-│   └── wasm/              # Camada de exportação wasm-bindgen para TypeScript
-│
 └── sdk/
-    ├── ts/                # SDK TypeScript para Navegadores (Wrappers Canvas/WebGL)
-    └── rust/              # SDK Rust Nativo para aplicações Desktop (Wrappers wgpu/Vulkan)
+    ├── ts/                # SDK TypeScript para Navegadores
+    │   └── wasm/          # Camada de exportação wasm-bindgen para TypeScript
+    │
+    └── native/            # SDK Nativo Desktop e C-FFI
+        ├── c_ffi_bridge/  # Exportação C-FFI (cbindgen)
+        └── desktop/       # Aplicação nativa desktop (WGPU/winit/egui)
 ```
 
 ---

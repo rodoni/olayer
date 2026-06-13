@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "core",
-    "bindings/wasm",
-    "bindings/c_ffi",
+    "sdk/ts/wasm",
+    "sdk/native",
+    "sdk/native/demo",
 ]

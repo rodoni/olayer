@@ -144,6 +144,91 @@ export class TextureAtlasManager {
   }
 
   /**
+   * Registers a procedural symbol resolved from the WASM Symbol Registry and SLD Style.
+   */
+  public registerWasmSymbol(
+    id: string,
+    registry: any,
+    style: any
+  ): SymbolUV {
+    if (this.uvs.has(id)) {
+      return this.uvs.get(id)!;
+    }
+
+    const resolved = registry.resolve_symbol(id, style);
+    if (!resolved) {
+      throw new Error(`Failed to resolve symbol: ${id}`);
+    }
+
+    const bbox = resolved.bbox;
+    const width = Math.ceil(bbox[2] - bbox[0]) + 4;
+    const height = Math.ceil(bbox[3] - bbox[1]) + 4;
+    const anchorX = resolved.anchor[0];
+    const anchorY = resolved.anchor[1];
+
+    return this.registerSymbol(id, width, height, (ctx) => {
+      ctx.translate(width / 2 - anchorX, height / 2 - anchorY);
+
+      for (const prim of resolved.primitives) {
+        if (prim.type === "Path") {
+          const parts = prim.commands.split(/(?=[MmLlZz])/);
+          ctx.beginPath();
+          for (const part of parts) {
+            const trimmed = part.trim();
+            if (!trimmed) continue;
+            const action = trimmed[0];
+            const nums = (trimmed.slice(1).match(/-?\d+(?:\.\d+)?/g) || []).map(Number);
+            if (action === "M" || action === "m") {
+              ctx.moveTo(nums[0], nums[1]);
+            } else if (action === "L" || action === "l") {
+              ctx.lineTo(nums[0], nums[1]);
+            } else if (action === "Z" || action === "z") {
+              ctx.closePath();
+            }
+          }
+          if (prim.fill) {
+            ctx.fillStyle = `rgba(${prim.fill.r}, ${prim.fill.g}, ${prim.fill.b}, ${prim.fill.a / 255})`;
+            ctx.fill();
+          }
+          if (prim.stroke) {
+            ctx.strokeStyle = `rgba(${prim.stroke.color.r}, ${prim.stroke.color.g}, ${prim.stroke.color.b}, ${prim.stroke.color.a / 255})`;
+            ctx.lineWidth = prim.stroke.width;
+            if (prim.stroke.dash_array) {
+              ctx.setLineDash(prim.stroke.dash_array);
+            } else {
+              ctx.setLineDash([]);
+            }
+            ctx.stroke();
+          }
+        } else if (prim.type === "Circle") {
+          ctx.beginPath();
+          ctx.arc(prim.cx, prim.cy, prim.r, 0, 2 * Math.PI);
+          if (prim.fill) {
+            ctx.fillStyle = `rgba(${prim.fill.r}, ${prim.fill.g}, ${prim.fill.b}, ${prim.fill.a / 255})`;
+            ctx.fill();
+          }
+          if (prim.stroke) {
+            ctx.strokeStyle = `rgba(${prim.stroke.color.r}, ${prim.stroke.color.g}, ${prim.stroke.color.b}, ${prim.stroke.color.a / 255})`;
+            ctx.lineWidth = prim.stroke.width;
+            if (prim.stroke.dash_array) {
+              ctx.setLineDash(prim.stroke.dash_array);
+            } else {
+              ctx.setLineDash([]);
+            }
+            ctx.stroke();
+          }
+        } else if (prim.type === "Text") {
+          ctx.fillStyle = `rgba(${prim.color.r}, ${prim.color.g}, ${prim.color.b}, ${prim.color.a / 255})`;
+          ctx.font = `${prim.font_size}px sans-serif`;
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText(prim.content, prim.offset_x, prim.offset_y);
+        }
+      }
+    });
+  }
+
+  /**
    * Retrieves the UV data of a registered symbol.
    */
   public getSymbolUV(id: string): SymbolUV | undefined {

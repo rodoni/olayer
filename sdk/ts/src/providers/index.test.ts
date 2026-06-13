@@ -50,7 +50,7 @@ function createMockDted0(originLat: string, originLon: string, numCols: number, 
   return data;
 }
 
-const wasmPath = resolve(__dirname, "../../../../bindings/wasm/pkg/olayer_wasm_bg.wasm");
+const wasmPath = resolve(__dirname, "../../wasm/pkg/olayer_wasm_bg.wasm");
 
 beforeAll(() => {
   const wasmBuffer = readFileSync(wasmPath);

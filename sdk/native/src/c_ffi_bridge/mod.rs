@@ -667,17 +667,17 @@ mod tests {
 
             // Interpolate should skip the bad ID but keep the good one
             let mut ptr: *mut C_InterpolatedTarget = std::ptr::null_mut();
-            let mut cnt: usize = 0;
-            let interp = olayer_interpolator_interpolate_all(engine, 10.0, &mut ptr, &mut cnt);
+            let mut count: usize = 0;
+            let interp = olayer_interpolator_interpolate_all(engine, 10.0, &mut ptr, &mut count);
             assert_eq!(interp, 0);
-            assert_eq!(cnt, 1);
+            assert_eq!(count, 1);
             assert!(!ptr.is_null());
 
             let target = &*ptr;
             let target_id = std::ffi::CStr::from_ptr(target.id).to_str().unwrap();
             assert_eq!(target_id, "OK");
 
-            olayer_interpolated_targets_free(ptr, cnt);
+            olayer_interpolated_targets_free(ptr, count);
             olayer_interpolator_free(engine);
         }
     }

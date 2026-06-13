@@ -10,6 +10,8 @@ export {
   WasmProjectionType,
   WasmLatLon,
   WasmTileKey,
+  WasmStyleRegistry,
+  WasmSymbolRegistry,
 } from "olayer-wasm";
 
 // Export SDK Controller

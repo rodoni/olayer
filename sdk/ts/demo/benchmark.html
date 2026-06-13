@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Olayer GIS ATC - 60 FPS Stress Benchmark</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-dark: #080a0f;
+      --panel-bg: rgba(12, 16, 26, 0.85);
+      --panel-border: rgba(0, 230, 118, 0.25);
+      --accent-green: #00e676;
+      --accent-blue: #00b0ff;
+      --accent-orange: #ff9100;
+      --accent-red: #ff1744;
+      --text: #e3e9f0;
+      --text-muted: #7e8e9f;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body, html {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: var(--bg-dark);
+      font-family: 'Outfit', sans-serif;
+      color: var(--text);
+    }
+
+    #benchmark-container {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+    }
+
+    canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+      z-index: 1;
+    }
+
+    /* Glassmorphic Benchmark Controls */
+    .dashboard {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      z-index: 10;
+      width: 380px;
+      background: var(--panel-bg);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid var(--panel-border);
+      border-radius: 16px;
+      padding: 24px;
+      box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.5);
+      transition: all 0.3s ease;
+    }
+
+    h1 {
+      font-size: 1.4rem;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      background: linear-gradient(135deg, var(--accent-green), var(--accent-blue));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .subtitle {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      margin-bottom: 24px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .section-title {
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--accent-blue);
+      margin-bottom: 12px;
+      font-weight: 600;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      padding-bottom: 6px;
+    }
+
+    .form-group {
+      margin-bottom: 20px;
+    }
+
+    label {
+      display: block;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+      font-weight: 600;
+    }
+
+    select, button, input[type="range"] {
+      width: 100%;
+      outline: none;
+    }
+
+    select {
+      background: rgba(18, 22, 33, 0.8);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 8px;
+      color: var(--text);
+      padding: 12px;
+      font-family: inherit;
+      font-size: 0.85rem;
+      transition: all 0.2s ease;
+      cursor: pointer;
+    }
+
+    select:focus {
+      border-color: var(--accent-green);
+      box-shadow: 0 0 8px rgba(0, 230, 118, 0.3);
+    }
+
+    input[type="range"] {
+      -webkit-appearance: none;
+      height: 6px;
+      border-radius: 3px;
+      background: rgba(255, 255, 255, 0.1);
+      outline: none;
+      margin: 12px 0;
+    }
+
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: var(--accent-blue);
+      cursor: pointer;
+      transition: transform 0.1s ease;
+    }
+
+    input[type="range"]::-webkit-slider-thumb:hover {
+      transform: scale(1.25);
+      background: var(--accent-green);
+    }
+
+    .slider-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .slider-val {
+      font-size: 0.9rem;
+      font-weight: 700;
+      color: var(--accent-blue);
+    }
+
+    .btn-group {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+
+    button {
+      background: linear-gradient(135deg, rgba(0, 230, 118, 0.1), rgba(0, 176, 255, 0.1));
+      border: 1px solid rgba(0, 230, 118, 0.2);
+      border-radius: 8px;
+      color: var(--text);
+      padding: 12px;
+      font-family: inherit;
+      font-size: 0.85rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+
+    button:hover {
+      background: linear-gradient(135deg, rgba(0, 230, 118, 0.25), rgba(0, 176, 255, 0.25));
+      border-color: var(--accent-green);
+      box-shadow: 0 0 10px rgba(0, 230, 118, 0.2);
+    }
+
+    button.btn-primary {
+      background: linear-gradient(135deg, rgba(0, 230, 118, 0.3), rgba(0, 230, 118, 0.4));
+      border-color: var(--accent-green);
+    }
+
+    button.btn-primary:hover {
+      background: linear-gradient(135deg, rgba(0, 230, 118, 0.45), rgba(0, 230, 118, 0.55));
+    }
+
+    button:active {
+      transform: scale(0.97);
+    }
+
+    /* Stats Grid */
+    .metrics-panel {
+      background: rgba(18, 22, 33, 0.5);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      border-radius: 12px;
+      padding: 16px;
+      margin-top: 20px;
+    }
+
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .metric-card {
+      background: rgba(8, 10, 15, 0.6);
+      border: 1px solid rgba(255, 255, 255, 0.03);
+      padding: 10px 12px;
+      border-radius: 8px;
+    }
+
+    .metric-label {
+      font-size: 0.65rem;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      letter-spacing: 0.5px;
+    }
+
+    .metric-value {
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: var(--text);
+      margin-top: 4px;
+    }
+
+    .metric-value.highlight-green {
+      color: var(--accent-green);
+    }
+
+    .metric-value.highlight-blue {
+      color: var(--accent-blue);
+    }
+
+    .metric-value.highlight-orange {
+      color: var(--accent-orange);
+    }
+
+    .metric-value.highlight-red {
+      color: var(--accent-red);
+    }
+
+    /* Diagnostics Log Console */
+    .console-log {
+      margin-top: 16px;
+      background: #040508;
+      border-radius: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      padding: 10px;
+      font-family: monospace;
+      font-size: 0.7rem;
+      height: 80px;
+      overflow-y: auto;
+      color: #00ff66;
+      white-space: pre-wrap;
+    }
+
+    /* Floating Alert */
+    .warning-toast {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      z-index: 100;
+      background: rgba(255, 23, 68, 0.9);
+      border: 1px solid var(--accent-red);
+      color: white;
+      padding: 12px 20px;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      box-shadow: 0 4px 15px rgba(255, 23, 68, 0.4);
+      display: none;
+      animation: slideIn 0.3s ease;
+    }
+
+    @keyframes slideIn {
+      from { transform: translateX(120%); }
+      to { transform: translateX(0); }
+    }
+  </style>
+</head>
+<body>
+  <div id="benchmark-container">
+    <canvas id="benchmarkCanvas"></canvas>
+
+    <!-- Floating performance warning -->
+    <div id="performanceToast" class="warning-toast">
+      ⚠️ High stress detected: FPS dropped below 45!
+    </div>
+
+    <!-- Dashboard -->
+    <div class="dashboard">
+      <h1>⚡ Olayer Stress Test</h1>
+      <div class="subtitle">60 FPS Real-Time GIS Benchmark</div>
+
+      <div class="form-group">
+        <div class="slider-header">
+          <label for="targetSlider">Target Aircraft Count</label>
+          <span id="targetCountText" class="slider-val">5,000</span>
+        </div>
+        <input type="range" id="targetSlider" min="500" max="10000" step="500" value="5000">
+      </div>
+
+      <div class="form-group">
+        <label for="projectionSelect">Projection System</label>
+        <select id="projectionSelect">
+          <option value="Stereographic">Stereographic Azimuthal (Radar Scope)</option>
+          <option value="LCC">Lambert Conformal Conic (En-Route)</option>
+          <option value="Mercator">Web Mercator (Global Mercator)</option>
+        </select>
+      </div>
+
+      <div class="btn-group">
+        <button id="toggleSimBtn" class="btn-primary">⏸️ Pause</button>
+        <button id="resetSimBtn">🔄 Reset</button>
+      </div>
+
+      <button id="backToDemoBtn" style="width: 100%; border-color: rgba(255,255,255,0.1); background: transparent; margin-top: 10px;">
+        ⬅️ Back to Web Demo
+      </button>
+
+      <div class="metrics-panel">
+        <div class="section-title">Telemetry & Profiling</div>
+        <div class="metrics-grid">
+          <div class="metric-card">
+            <div class="metric-label">Frame Rate</div>
+            <div id="fpsMetric" class="metric-value highlight-green">-- FPS</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">Active Targets</div>
+            <div id="activeMetric" class="metric-value highlight-blue">0</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">Interp. Time</div>
+            <div id="interpTimeMetric" class="metric-value">-- ms</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">Render Time</div>
+            <div id="renderTimeMetric" class="metric-value">-- ms</div>
+          </div>
+        </div>
+
+        <div class="console-log" id="consoleLog">Initializing Wasm GIS engines...</div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="./benchmark.ts"></script>
+</body>
+</html>

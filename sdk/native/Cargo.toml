@@ -1,0 +1,19 @@
+[package]
+name = "olayer-native"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["rlib", "staticlib", "cdylib"]
+
+[dependencies]
+olayer-core = { path = "../../core" }
+wgpu = "0.19"
+bytemuck = { version = "1.16", features = ["derive"] }
+egui = "0.27"
+resvg = "0.38"
+usvg = "0.38"
+log = "0.4"
+
+[build-dependencies]
+cbindgen = "0.26.0"

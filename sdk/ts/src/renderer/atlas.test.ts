@@ -66,6 +66,47 @@ describe("TextureAtlasManager", () => {
     expect(uv1).toBe(uv2);
   });
 
+  it("should register a WASM symbol correctly", () => {
+    const gl = createMockGL();
+    const atlas = new TextureAtlasManager(gl, 512);
+
+    const mockRegistry = {
+      resolve_symbol: vi.fn(() => ({
+        bbox: [-10, -10, 10, 10],
+        anchor: [0, 0],
+        primitives: [
+          {
+            type: "Circle",
+            cx: 0,
+            cy: 0,
+            r: 5,
+            fill: { r: 255, g: 0, b: 0, a: 255 },
+          },
+          {
+            type: "Path",
+            commands: "M -10 -10 L 10 10",
+            stroke: { color: { r: 0, g: 0, b: 0, a: 255 }, width: 2 },
+          },
+          {
+            type: "Text",
+            content: "X",
+            offset_x: 0,
+            offset_y: 0,
+            font_size: 10,
+            color: { r: 255, g: 255, b: 255, a: 255 },
+          }
+        ]
+      }))
+    };
+    const mockStyle = {};
+
+    const uv = atlas.registerWasmSymbol("test_wasm_sym", mockRegistry, mockStyle);
+    expect(uv).toBeTruthy();
+    expect(mockRegistry.resolve_symbol).toHaveBeenCalledWith("test_wasm_sym", mockStyle);
+    expect(uv.width).toBe(24);
+    expect(uv.height).toBe(24);
+  });
+
   it("should destroy the WebGL texture", () => {
     const gl = createMockGL();
     const atlas = new TextureAtlasManager(gl, 512);

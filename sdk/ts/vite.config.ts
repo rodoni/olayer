@@ -9,6 +9,11 @@ export default defineConfig({
     environment: "jsdom",
     include: ["src/**/*.test.ts"]
   },
+  resolve: {
+    alias: {
+      "olayer-wasm": resolve(__dirname, "./wasm/pkg/olayer_wasm.js")
+    }
+  },
   plugins: [
     wasm(),
     topLevelAwait()

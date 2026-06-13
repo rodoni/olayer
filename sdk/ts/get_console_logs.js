@@ -24,6 +24,6 @@ import fs from 'fs';
   await browser.close();
   logs.push('Done.');
 
-  fs.writeFileSync('C:\\Users\\rafae\\.gemini\\antigravity-ide\\brain\\eabcfa80-93c6-41f3-a72f-a7886eaafe4f\\scratch\\browser_logs.txt', logs.join('\n'));
+  fs.writeFileSync('C:\\Users\\rafae\\.gemini\\antigravity-ide\\brain\\3fa5120b-0750-4348-8e64-10cbcf6b5cc0\\browser_logs.txt', logs.join('\n'));
   console.log('Saved logs.');
 })();

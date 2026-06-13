@@ -1,13 +1,14 @@
-# Bridge WebAssembly (WASM)
-## Componentes de Interoperabilidade Web (C4 Model - Nível 3)
+# Arquitetura: Bridge WebAssembly (WASM)
 
-Este documento descreve o design detalhado, a estrutura de interfaces e a gestão de recursos da ponte de interoperabilidade **WebAssembly (WASM)** do Olayer, localizada em `bindings/wasm`. Este componente é responsável por traduzir dados e expor as capacidades do [Olayer Core](file:///c:/Users/rafae/projects/rust/olayer/core) para a SDK TypeScript rodando no navegador.
+Este documento descreve o design detalhado, a estrutura de interfaces e a gestão de recursos da ponte de interoperabilidade **WebAssembly (WASM)** do Olayer, localizada em [wasm](file:///c:/Users/rafae/projects/rust/olayer/sdk/ts/wasm).
+
+Este componente é responsável por traduzir dados e expor as capacidades do [Olayer Core](file:///c:/Users/rafae/projects/rust/olayer/core) para o SDK TypeScript rodando no navegador.
 
 ---
 
-## 1. Diagrama do Contêiner WASM
+## 1. Diagrama do Contêiner WASM (C4 Model - Nível 3)
 
-A ponte WASM atua como um adaptador bidirecional entre o runtime do JavaScript (Engine V8) e o motor em Rust compillado para código de máquina WASM.
+A ponte WASM atua como um adaptador bidirecional entre o runtime do JavaScript (Engine V8) e o motor em Rust compilado para código de máquina WASM.
 
 ```mermaid
 graph TB
@@ -20,7 +21,7 @@ graph TB
         js_heap["🗄️ JavaScript Heap<br>(TypedArrays: Uint8Array)"]:::js
     end
 
-    subgraph WASM_Bridge_Boundary ["bindings/wasm (wasm-bindgen)"]
+    subgraph WASM_Bridge_Boundary ["sdk/ts/wasm (wasm-bindgen)"]
         wasm_bindgen["🔗 wasm-bindgen Wrappers<br>(Classes e Métodos Exportados)"]:::wasm
         wasm_memory["💾 Memória Linear WASM<br>(Heap Compartilhada)"]:::wasm
     end
@@ -60,7 +61,7 @@ O componente **WASM Bridge** possui as seguintes atribuições principais:
 
 ## 3. Interfaces Projetadas (WASM Exports)
 
-Os wrappers definidos na pasta `bindings/wasm` atuam como fachadas de conversão para as estruturas reais do Rust Core:
+Os wrappers definidos na pasta [wasm](file:///c:/Users/rafae/projects/rust/olayer/sdk/ts/wasm) atuam como fachadas de conversão para as estruturas reais do Rust Core:
 
 ### 3.1 Coordenadas
 ```rust

@@ -4,6 +4,9 @@ use olayer_core::geodesy::ellipsoid::Ellipsoid;
 use olayer_core::terrain::TerrainEngine;
 use olayer_core::interpolator::{InterpolationEngine, TargetState};
 use olayer_core::projections::{LambertConformalConic, WebMercator, Stereographic, Projection, CameraState};
+use olayer_core::sld::StyleRegistry;
+use olayer_core::symbol_registry::{SymbolRegistry, providers::DeclarativeProvider};
+
 
 /// WASM compatible wrapper for LatLon geodetic coordinates.
 #[wasm_bindgen]
@@ -373,10 +376,108 @@ pub fn ecef_to_lla(x: f64, y: f64, z: f64) -> WasmLatLon {
     }
 }
 
+#[wasm_bindgen]
+pub struct WasmStyleRegistry {
+    pub(crate) inner: StyleRegistry,
+}
+
+#[wasm_bindgen]
+impl WasmStyleRegistry {
+    #[wasm_bindgen]
+    pub fn parse(xml: &str) -> Result<WasmStyleRegistry, JsValue> {
+        olayer_core::sld::parser::parse(xml)
+            .map(|inner| WasmStyleRegistry { inner })
+            .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+}
+
+#[wasm_bindgen]
+pub struct WasmSymbolRegistry {
+    inner: SymbolRegistry,
+}
+
+#[wasm_bindgen]
+impl WasmSymbolRegistry {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> WasmSymbolRegistry {
+        WasmSymbolRegistry {
+            inner: SymbolRegistry::new(),
+        }
+    }
+
+    #[wasm_bindgen]
+    pub fn register_declarative_provider(&mut self, json_content: &str) -> Result<(), JsValue> {
+        let provider = DeclarativeProvider::from_json(json_content)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        self.inner.register_provider(Box::new(provider));
+        Ok(())
+    }
+
+    #[wasm_bindgen]
+    pub fn resolve_symbol(&self, code: &str, style: &WasmStyleRegistry) -> Result<JsValue, JsValue> {
+        let resolved = self.inner.resolve_symbol(code, &style.inner)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        serde_wasm_bindgen::to_value(&resolved)
+            .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use wasm_bindgen_test::*;
+
+    #[wasm_bindgen_test]
+    fn test_wasm_style_and_symbol_registry() {
+        let sld = r#"<?xml version="1.0" encoding="UTF-8"?>
+        <StyledLayerDescriptor version="1.0.0">
+            <NamedLayer>
+                <Name>civil:vor</Name>
+                <UserStyle>
+                    <FeatureTypeStyle>
+                        <Rule>
+                            <PointSymbolizer>
+                                <Graphic>
+                                    <Mark>
+                                        <Fill>
+                                            <CssParameter name="fill">#FF00FF</CssParameter>
+                                        </Fill>
+                                    </Mark>
+                                </Graphic>
+                            </PointSymbolizer>
+                        </Rule>
+                    </FeatureTypeStyle>
+                </UserStyle>
+            </NamedLayer>
+        </StyledLayerDescriptor>"#;
+
+        let style = WasmStyleRegistry::parse(sld).unwrap();
+
+        let json = r#"{
+            "library_name": "TestLib",
+            "symbols": {
+                "civil:vor": {
+                    "bbox": [-10.0, -10.0, 10.0, 10.0],
+                    "anchor": [0.0, 0.0],
+                    "primitives": [
+                        {
+                            "type": "Circle",
+                            "cx": 0.0,
+                            "cy": 0.0,
+                            "r": 5.0,
+                            "fill": { "r": 255, "g": 255, "b": 255, "a": 255 }
+                        }
+                    ]
+                }
+            }
+        }"#;
+
+        let mut registry = WasmSymbolRegistry::new();
+        registry.register_declarative_provider(json).unwrap();
+
+        let resolved_val = registry.resolve_symbol("civil:vor", &style).unwrap();
+        assert!(!resolved_val.is_null() && !resolved_val.is_undefined());
+    }
 
     #[wasm_bindgen_test]
     fn test_wasm_latlon() {
