@@ -131,13 +131,13 @@ impl NativeLayerManager {
     }
 
     /// Returns all visible static layers.
-    pub fn visible_static_layers(&self) -> Vec<&Box<dyn Layer>> {
-        self.layers.iter().filter(|l| l.is_visible() && l.is_static()).collect()
+    pub fn visible_static_layers(&self) -> Vec<&dyn Layer> {
+        self.layers.iter().filter(|l| l.is_visible() && l.is_static()).map(|b| b.as_ref()).collect()
     }
 
     /// Returns all visible dynamic layers.
-    pub fn visible_dynamic_layers(&self) -> Vec<&Box<dyn Layer>> {
-        self.layers.iter().filter(|l| l.is_visible() && !l.is_static()).collect()
+    pub fn visible_dynamic_layers(&self) -> Vec<&dyn Layer> {
+        self.layers.iter().filter(|l| l.is_visible() && !l.is_static()).map(|b| b.as_ref()).collect()
     }
 
     /// Toggles visibility for a specific layer.

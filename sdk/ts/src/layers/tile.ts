@@ -296,13 +296,34 @@ export class TileLayer extends Layer {
       this.lastViewMode = viewMode;
     }
 
-    // Limpeza de salvaguarda de cache para evitar vazamento de recursos
-    if (this.tileGeometries.size > 150) {
-      this.clearGeometryCache(gl);
-    }
-
     const z = this.getTileZoom(zoom);
     const bounds = this.getVisibleTileBounds(controller, z);
+
+    // Limpeza seletiva do cache para evitar vazamento de recursos sem destruir tiles visíveis
+    if (this.tileGeometries.size > 300) {
+      const keysToDelete: string[] = [];
+      for (const [key, geom] of this.tileGeometries.entries()) {
+        const [tzStr, txStr, tyStr] = key.split("/");
+        const tz = parseInt(tzStr, 10);
+        const tx = parseInt(txStr, 10);
+        const ty = parseInt(tyStr, 10);
+
+        if (
+          tz !== z ||
+          tx < bounds.minX ||
+          tx > bounds.maxX ||
+          ty < bounds.minY ||
+          ty > bounds.maxY
+        ) {
+          gl.deleteVertexArray(geom.vao);
+          gl.deleteBuffer(geom.vertexBuffer);
+          keysToDelete.push(key);
+        }
+      }
+      for (const key of keysToDelete) {
+        this.tileGeometries.delete(key);
+      }
+    }
 
     if ((this as any)._lastLoggedBounds !== JSON.stringify(bounds)) {
       (this as any)._lastLoggedBounds = JSON.stringify(bounds);

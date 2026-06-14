@@ -57,7 +57,10 @@ export class TextureAtlasManager {
   private ctx: CanvasRenderingContext2D;
 
   constructor(gl: WebGL2RenderingContext);
-  public registerSymbol(id: string, drawFn: (ctx: CanvasRenderingContext2D) => void, width: number, height: number): void;
+  public registerSymbol(id: string, drawFn: (ctx: CanvasRenderingContext2D) => void, width: number, height: number): SymbolUV;
+  public registerWasmSymbol(id: string, registry: any, style: any): SymbolUV;
+  public registerImageSymbol(id: string, src: string | HTMLImageElement, width?: number, height?: number): Promise<SymbolUV>;
+  public getSymbolUV(id: string): SymbolUV | undefined;
   public getTexture(): WebGLTexture | null;
   public destroy(): void;
 }

@@ -96,21 +96,26 @@ O **Camera Engine** (`core::camera`) do Olayer Core provê controle unificado so
 
 ### 5.2 Simbologia Padronizada (ICAO e NATO) e Registro de Símbolos
 
-O framework deve prover suporte nativo a bibliotecas de símbolos profissionais para aviação civil e defesa, operando através de um **Registro de Símbolos (Symbol Registry)** no Core Rust e gerenciamento de renderização performático na SDK:
-* **Simbologia Civil (ICAO):** Suporte completo à representação gráfica de auxílios-rádio à navegação (VOR, NDB, DME, TACAN), fixes de rota, aeródromos e pistas de pouso conforme as normas da ICAO.
-* **Simbologia Militar (NATO APP-6 / MIL-STD-2525):** Suporte à decodificação e montagem procedural de símbolos táticos complexos a partir de códigos identificadores padrão (SIDC - Symbol Identification Codes), gerenciando molduras de afiliação, ícones centrais e modificadores.
-* **Importação de Símbolos Customizados (SVG e PNG):**
-  - O **Symbol Registry** deve aceitar a importação de símbolos customizados nos formatos **SVG** (vetorial) e **PNG** (rasterizado) para estender a biblioteca de ícones.
-  - Os símbolos importados em SVG serão rasterizados em tempo de execução pela SDK na resolução apropriada (evitando perda de qualidade em telas Retina/High-DPI) antes do envio para o Texture Atlas. Os arquivos PNG serão decodificados e transferidos diretamente.
+O framework gerencia bibliotecas de símbolos profissionais para aviação civil e defesa de forma performática e modular, dividindo as responsabilidades entre compilação offline de vetores (SVG) e carregamento dinâmico de imagens rasterizadas (PNG):
+
+* **Compilação e Importação de Símbolos Vetoriais (SVG):**
+  - Para manter a leveza do Core WASM e evitar o uso de interpretadores pesados de SVG em tempo de execução, a importação e tratamento de arquivos SVG são feitos no processo de build por meio da ferramenta CLI **`tools/symbol-compiler`**.
+  - O compilador faz o parse recursivo de caminhos, círculos, textos e estilos (incluindo cores CSS, opacidades e tracejados) dos arquivos SVG, mapeando-os para um JSON de biblioteca declarativa no padrão `DeclarativeLibraryDto` do Core.
+  - O Core Rust consome esta biblioteca no formato consolidado através do `DeclarativeProvider` registrado no `SymbolRegistry`.
+* **Carregamento de Símbolos Rasterizados (PNG/JPG) via SDK:**
+  - Símbolos contendo imagens PNG ou JPG são injetados diretamente na SDK TypeScript através do método `TextureAtlasManager::registerImageSymbol`. 
+  - A SDK utiliza as APIs nativas do navegador para carregar e renderizar os pixels de forma assíncrona, desenhando-os diretamente no Canvas do Texture Atlas para upload na GPU. A lógica de decodificação raster fica inteiramente a cargo do browser, não alterando a estrutura do Core em WASM.
+* **Simbologia Civil (ICAO) e Militar (NATO APP-6 / MIL-STD-2525):**
+  - Os pacotes de símbolos civis padrão (VOR, NDB, DME, TACAN, etc.) e táticos militares (molduras de afiliação, ícones de caça, cargueiro, etc.) são providos como SVGs base modulares pré-compilados pela ferramenta de build ou injetáveis via JSON compilado.
 * **Estratégia de Performance (Atlas de Texturas & Instanciamento):**
-  - Para evitar a sobrecarga de draw calls, a SDK compilará os símbolos gerados sob demanda (procedurais ou importados via SVG/PNG) em uma textura única compartilhada na GPU (**Texture Atlas / Spritesheet**).
-  - A plotagem de milhares de aeronaves será feita em uma única chamada de desenho instanciada (`drawElementsInstanced`) referenciando as coordenadas UV do Atlas, eliminando gargalos de CPU.
-  - O renderizador final aplicará *Billboard Shaders* para manter os símbolos planos e orientados de frente para o controlador, mesmo em visualizações 3D do globo.
+  - Para evitar a sobrecarga de draw calls, a SDK compila os símbolos gerados sob demanda (primitivos vetoriais do WASM ou imagens carregadas via PNG) em uma textura compartilhada única na GPU (**Texture Atlas / Spritesheet**).
+  - A plotagem de milhares de alvos de radar faz uso de uma única chamada de desenho instanciada (`drawElementsInstanced`) que referencia as coordenadas UV do Atlas, eliminando gargalos de CPU e transferências extras.
+  - O renderizador final aplica *Billboard Shaders* para manter os símbolos planos e orientados de frente para o controlador, mesmo em visualizações 3D ou 2.5D inclinadas do globo.
 * **Compatibilidade com Streams 2D/3D:**
-  - A importação de SVG e PNG é nativamente compatível com os dois fluxos gráficos (2D plano e 3D globo virtual). 
-  - No fluxo **2D**, os símbolos do Atlas são renderizados diretamente como sprites planos com coordenadas de tela $(X,Y)$.
-  - No fluxo **3D**, o renderizador aplica projeção tridimensional nas posições de origem geodésicas das aeronaves, mas desenha os símbolos utilizando *Billboards* (placas planas orientadas de frente para a câmera), garantindo que imagens e vetores importados permaneçam legíveis e sem distorção perspectiva no globo 3D.
-* **Estilização SLD:** O Core conterá um parser XML para arquivos **SLD (Styled Layer Descriptor)** que converterá regras estáticas em metadados de estilo para o Registro de Símbolos.
+  - O Texture Atlas e a projeção de símbolos são nativamente compatíveis com todos os modos de visão (2D plano, 2.5D de perfil e 3D do globo virtual). 
+  - No fluxo **2D/2.5D**, os símbolos do Atlas são renderizados diretamente como sprites planos nas coordenadas de tela.
+  - No fluxo **3D**, o renderizador projeta a origem tridimensional da aeronave e desenha os símbolos utilizando *Billboards* no espaço tridimensional, garantindo que permaneçam legíveis e com escala visual consistente sem distorção angular de perspectiva.
+* **Estilização SLD:** O Core contém um parser XML para arquivos **SLD (Styled Layer Descriptor)** que converte regras estáticas de estilização em metadados de estilo aplicados dinamicamente sobre as regras dos símbolos resolvidos no Registro de Símbolos.
 
 ### 5.3 Integração Passiva com DTED
 

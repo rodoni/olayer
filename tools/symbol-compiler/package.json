@@ -1,0 +1,22 @@
+{
+  "name": "olayer-symbol-compiler",
+  "version": "0.1.0",
+  "description": "CLI tool to compile SVG asset directories to Olayer-compatible JSON libraries.",
+  "type": "module",
+  "bin": {
+    "olayer-symbol-compiler": "./dist/cli.js"
+  },
+  "main": "./dist/compiler.js",
+  "scripts": {
+    "build": "tsc",
+    "compile": "node ./dist/cli.js"
+  },
+  "dependencies": {
+    "commander": "^12.1.0",
+    "fast-xml-parser": "^4.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.7",
+    "typescript": "^5.4.5"
+  }
+}

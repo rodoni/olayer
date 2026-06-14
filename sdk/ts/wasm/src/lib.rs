@@ -1,3 +1,6 @@
+#![allow(clippy::missing_safety_doc)]
+#![allow(clippy::too_many_arguments)]
+
 use wasm_bindgen::prelude::*;
 use olayer_core::geodesy::LatLon;
 use olayer_core::geodesy::ellipsoid::Ellipsoid;
@@ -98,6 +101,12 @@ impl WasmTerrainEngine {
     }
 }
 
+impl Default for WasmTerrainEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// WASM wrapper for InterpolationEngine.
 #[wasm_bindgen]
 pub struct WasmInterpolationEngine {
@@ -157,6 +166,12 @@ impl WasmInterpolationEngine {
 
         serde_wasm_bindgen::to_value(&targets)
             .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+}
+
+impl Default for WasmInterpolationEngine {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -422,6 +437,12 @@ impl WasmSymbolRegistry {
     }
 }
 
+impl Default for WasmSymbolRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -619,5 +640,320 @@ mod tests {
         let first_lon = flat[3];
         assert!((first_lat - -22.9).abs() < 1e-5);
         assert!((first_lon - -48.0).abs() < 1e-5);
+    }
+
+    #[wasm_bindgen_test]
+    fn test_wasm_tile_key() {
+        let key = WasmTileKey::new(-23, -48);
+        assert_eq!(key.lat_deg, -23);
+        assert_eq!(key.lon_deg, -48);
+    }
+
+    #[wasm_bindgen_test]
+    fn test_wasm_camera_state() {
+        let cam = WasmCameraState::new(
+            0.41, -0.81, 1000.0, 2.0, 0.5, 0.35, 0.0, 1.6, 250000.0,
+        );
+        assert_eq!(cam.center_lat, 0.41);
+        assert_eq!(cam.center_lon, -0.81);
+        assert_eq!(cam.center_height, 1000.0);
+        assert_eq!(cam.zoom, 2.0);
+        assert_eq!(cam.rotation, 0.5);
+        assert_eq!(cam.pitch, 0.35);
+        assert_eq!(cam.roll, 0.0);
+        assert_eq!(cam.aspect_ratio, 1.6);
+        assert_eq!(cam.viewport_base_meters, 250000.0);
+    }
+
+    #[wasm_bindgen_test]
+    fn test_wasm_projection_stereographic() {
+        let proj = WasmProjection::new_stereographic(0.0, 0.0);
+        let xy = proj.project(0.0, 0.0, 0.0);
+        assert!(xy.is_ok());
+        let coords = xy.unwrap();
+        assert!(coords.len() == 2);
+        assert!(coords[0].abs() < 1e-6);
+        assert!(coords[1].abs() < 1e-6);
+
+        let lla = proj.unproject(0.0, 0.0);
+        assert!(lla.is_ok());
+        let lla = lla.unwrap();
+        assert!((lla.lat - 0.0).abs() < 1e-6);
+        assert!((lla.lon - 0.0).abs() < 1e-6);
+    }
+
+    #[wasm_bindgen_test]
+    fn test_wasm_projection_lcc() {
+        let proj = WasmProjection::new_lcc(
+            -20.0_f64.to_radians(), -25.0_f64.to_radians(),
+            -23.0_f64.to_radians(), -46.0_f64.to_radians(),
+        );
+        let xy = proj.project(-23.0_f64.to_radians(), -46.0_f64.to_radians(), 0.0);
+        assert!(xy.is_ok());
+        let coords = xy.unwrap();
+        assert!(coords.len() == 2);
+        // Center point should project near (0, 0)
+        assert!(coords[0].abs() < 1e-3);
+        assert!(coords[1].abs() < 1e-3);
+    }
+
+    #[wasm_bindgen_test]
+    fn test_wasm_projection_web_mercator() {
+        let proj = WasmProjection::new_web_mercator();
+        let xy = proj.project(0.0, 0.0, 0.0);
+        assert!(xy.is_ok());
+        let coords = xy.unwrap();
+        assert!(coords.len() == 2);
+        assert!(coords[0].abs() < 1e-6);
+        assert!(coords[1].abs() < 1e-6);
+    }
+
+    #[wasm_bindgen_test]
+    fn test_wasm_projection_2d_view_proj_matrix() {
+        let proj = WasmProjection::new_stereographic(0.0, 0.0);
+        let cam = WasmCameraState::new(
+            0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 100000.0,
+        );
+        let m = proj.get_view_proj_matrix(&cam);
+        assert!(m.is_ok());
+        let flat = m.unwrap();
+        assert_eq!(flat.len(), 16);
+    }
+
+    #[wasm_bindgen_test]
+    fn test_wasm_projection_3d_view_proj_matrix() {
+        let proj = WasmProjection::new_stereographic(0.0, 0.0);
+        let cam = WasmCameraState::new(
+            0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 100000.0,
+        );
+        let m = proj.get_3d_view_proj_matrix(&cam);
+        assert!(m.is_ok());
+        let flat = m.unwrap();
+        assert_eq!(flat.len(), 16);
+    }
+
+    #[wasm_bindgen_test]
+    fn test_wasm_projection_25d_view_proj_matrix() {
+        let proj = WasmProjection::new_web_mercator();
+        let cam = WasmCameraState::new(
+            0.0, 0.0, 0.0, 1.0, 0.0, 0.35, 0.0, 1.0, 100000.0,
+        );
+        let m = proj.get_25d_view_proj_matrix(&cam);
+        assert!(m.is_ok());
+        let flat = m.unwrap();
+        assert_eq!(flat.len(), 16);
+    }
+
+    #[wasm_bindgen_test]
+    fn test_wasm_lla_to_ecef() {
+        let ecef = lla_to_ecef(0.0, 0.0, 0.0);
+        assert_eq!(ecef.len(), 3);
+        // At equator, prime meridian, sea level: x = R_earth, y = 0, z = 0
+        assert!((ecef[0] - 6378137.0).abs() < 1.0);
+        assert!(ecef[1].abs() < 1.0);
+        assert!(ecef[2].abs() < 1.0);
+    }
+
+    #[wasm_bindgen_test]
+    fn test_wasm_ecef_to_lla() {
+        let lla = ecef_to_lla(6378137.0, 0.0, 0.0);
+        assert!((lla.lat - 0.0).abs() < 1e-6);
+        assert!((lla.lon - 0.0).abs() < 1e-6);
+        assert!((lla.height - 0.0).abs() < 1.0);
+    }
+
+    #[wasm_bindgen_test]
+    fn test_wasm_ecef_to_lla_roundtrip() {
+        let lat = 0.41;
+        let lon = -0.81;
+        let height = 1000.0;
+        let ecef = lla_to_ecef(lat, lon, height);
+        let lla = ecef_to_lla(ecef[0], ecef[1], ecef[2]);
+        assert!((lla.lat - lat).abs() < 1e-6);
+        assert!((lla.lon - lon).abs() < 1e-6);
+        assert!((lla.height - height).abs() < 1e-3);
+    }
+
+    #[wasm_bindgen_test]
+    fn test_wasm_interpolator_multiple_targets() {
+        let mut engine = WasmInterpolationEngine::new();
+        for i in 0..5 {
+            let id = format!("TGT{}", i);
+            let res = engine.update_target(
+                &id,
+                0.0 + i as f64 * 0.01,
+                0.0,
+                1000.0 + i as f64 * 100.0,
+                100.0,
+                0.0,
+                0.0,
+                0.0,
+            );
+            assert!(res.is_ok());
+        }
+
+        let val = engine.interpolate_all(5.0);
+        assert!(val.is_ok());
+        let arr = js_sys::Array::from(&val.unwrap());
+        assert_eq!(arr.length(), 5);
+    }
+
+    #[wasm_bindgen_test]
+    fn test_wasm_interpolator_remove_nonexistent() {
+        let mut engine = WasmInterpolationEngine::new();
+        let removed = engine.remove_target("NOEXIST");
+        assert!(!removed);
+    }
+
+    #[wasm_bindgen_test]
+    fn test_wasm_terrain_unload_nonexistent() {
+        let mut engine = WasmTerrainEngine::new();
+        let existed = engine.unload_tile(0, 0);
+        assert!(!existed);
+    }
+
+    #[wasm_bindgen_test]
+    fn test_wasm_terrain_multiple_tiles() {
+        let mut engine = WasmTerrainEngine::new();
+        let mock1 = create_mock_dted0("230000S", "0480000W", 4, 4);
+        let mock2 = create_mock_dted0("240000S", "0480000W", 4, 4);
+
+        let k1 = engine.load_tile(&mock1);
+        assert!(k1.is_ok());
+        assert_eq!(k1.unwrap().lat_deg, -23);
+
+        let k2 = engine.load_tile(&mock2);
+        assert!(k2.is_ok());
+        assert_eq!(k2.unwrap().lat_deg, -24);
+
+        let e1 = engine.get_elevation(-23.0, -48.0);
+        assert!(e1.is_ok());
+        let e2 = engine.get_elevation(-24.0, -48.0);
+        assert!(e2.is_ok());
+
+        engine.unload_tile(-23, -48);
+        let e1_removed = engine.get_elevation(-23.0, -48.0);
+        assert!(e1_removed.is_err());
+        let e2_still = engine.get_elevation(-24.0, -48.0);
+        assert!(e2_still.is_ok());
+    }
+
+    #[wasm_bindgen_test]
+    fn test_wasm_terrain_vertical_profile_error_no_tile() {
+        let engine = WasmTerrainEngine::new();
+        let route = [-23.0_f64, -46.0, 0.0, -23.0, -45.0, 0.0];
+        let profile = engine.get_vertical_profile(&route, 2000.0);
+        assert!(profile.is_err());
+    }
+
+    #[wasm_bindgen_test]
+    fn test_wasm_projection_type_roundtrip() {
+        let proj = WasmProjection::new_stereographic(0.0, 0.0);
+        let cam = WasmCameraState::new(
+            0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 100000.0,
+        );
+        let m = proj.get_view_proj_matrix(&cam);
+        assert!(m.is_ok());
+        let flat = m.unwrap();
+        // Verify it's a valid matrix (last element of 4x4 should be 1 for orthographic)
+        assert!(flat[15].abs() > 0.0);
+    }
+
+    #[wasm_bindgen_test]
+    fn test_wasm_latlon_default() {
+        let coord = WasmLatLon::new(0.0, 0.0, 0.0);
+        assert_eq!(coord.lat, 0.0);
+        assert_eq!(coord.lon, 0.0);
+        assert_eq!(coord.height, 0.0);
+    }
+
+    #[wasm_bindgen_test]
+    fn test_wasm_terrain_elevation_boundary() {
+        let mut engine = WasmTerrainEngine::new();
+        let mock = create_mock_dted0("230000S", "0480000W", 4, 4);
+        engine.load_tile(&mock).unwrap();
+
+        // Test boundary coordinates
+        let elev = engine.get_elevation(-23.0, -48.0);
+        assert!(elev.is_ok());
+        // Northeast corner
+        let elev_ne = engine.get_elevation(-22.0, -47.0);
+        assert!(elev_ne.is_ok());
+    }
+}
+
+// ============================================================================
+// Additional non-wasm unit tests (run with cargo test, no browser needed)
+// ============================================================================
+
+#[cfg(test)]
+mod unit_tests {
+    use super::*;
+
+    #[test]
+    fn test_wasm_latlon_pure() {
+        let coord = WasmLatLon::new(0.41, -0.81, 100.0);
+        assert_eq!(coord.lat, 0.41);
+        assert_eq!(coord.lon, -0.81);
+        assert_eq!(coord.height, 100.0);
+    }
+
+    #[test]
+    fn test_wasm_tile_key_pure() {
+        let key = WasmTileKey::new(-23, -48);
+        assert_eq!(key.lat_deg, -23);
+        assert_eq!(key.lon_deg, -48);
+    }
+
+    #[test]
+    fn test_wasm_camera_state_pure() {
+        let cam = WasmCameraState::new(
+            0.41, -0.81, 1000.0, 2.0, 0.5, 0.35, 0.0, 1.6, 250000.0,
+        );
+        assert_eq!(cam.center_lat, 0.41);
+        assert_eq!(cam.center_lon, -0.81);
+        assert_eq!(cam.center_height, 1000.0);
+        assert_eq!(cam.zoom, 2.0);
+        assert_eq!(cam.rotation, 0.5);
+        assert_eq!(cam.pitch, 0.35);
+        assert_eq!(cam.roll, 0.0);
+        assert_eq!(cam.aspect_ratio, 1.6);
+        assert_eq!(cam.viewport_base_meters, 250000.0);
+    }
+
+    #[test]
+    fn test_wasm_interpolation_engine_with_stale_threshold() {
+        let engine = WasmInterpolationEngine::with_stale_threshold(10.0);
+        // Just verify it constructs without error
+        let _ = engine;
+    }
+
+    #[test]
+    fn test_wasm_lla_to_ecef_pure() {
+        let ecef = lla_to_ecef(0.0, 0.0, 0.0);
+        assert_eq!(ecef.len(), 3);
+        assert!((ecef[0] - 6378137.0).abs() < 1.0);
+        assert!(ecef[1].abs() < 1.0);
+        assert!(ecef[2].abs() < 1.0);
+    }
+
+    #[test]
+    fn test_wasm_ecef_to_lla_pure() {
+        let lla = ecef_to_lla(6378137.0, 0.0, 0.0);
+        assert!((lla.lat - 0.0).abs() < 1e-6);
+        assert!((lla.lon - 0.0).abs() < 1e-6);
+        assert!((lla.height - 0.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn test_wasm_ecef_lla_roundtrip_pure() {
+        let lat = 0.41;
+        let lon = -0.81;
+        let height = 1000.0;
+        let ecef = lla_to_ecef(lat, lon, height);
+        let lla = ecef_to_lla(ecef[0], ecef[1], ecef[2]);
+        assert!((lla.lat - lat).abs() < 1e-6);
+        assert!((lla.lon - lon).abs() < 1e-6);
+        assert!((lla.height - height).abs() < 1e-3);
     }
 }

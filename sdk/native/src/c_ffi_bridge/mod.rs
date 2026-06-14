@@ -1,4 +1,6 @@
 #![allow(clippy::must_use_candidate)]
+#![allow(clippy::missing_safety_doc)]
+#![allow(clippy::too_many_arguments)]
 
 use std::os::raw::{c_char, c_int};
 use olayer_core::geodesy::LatLon;

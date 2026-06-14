@@ -271,7 +271,7 @@ fn main() {
 
                                     ui.separator();
                                     if ui.button("🛰️ Inject Radar Target").clicked() {
-                                        let callsigns = vec!["TAM", "GLO", "AZU", "TAP", "AAL"];
+                                        let callsigns = ["TAM", "GLO", "AZU", "TAP", "AAL"];
                                         let id = format!("{}{}", callsigns[rand::random::<usize>() % callsigns.len()], rand::random::<u32>() % 900 + 100);
                                         let offset = (15.0 + rand::random::<f64>() * 80.0) * 1000.0 / 6378137.0;
                                         let angle = rand::random::<f64>() * 2.0 * std::f64::consts::PI;

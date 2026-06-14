@@ -1,0 +1,182 @@
+{
+  "library_name": "OlayerAviationSymbols",
+  "symbols": {
+    "civil:plane": {
+      "bbox": [
+        -12,
+        -12,
+        12,
+        12
+      ],
+      "anchor": [
+        0,
+        0
+      ],
+      "primitives": [
+        {
+          "type": "Circle",
+          "cx": 0,
+          "cy": 0,
+          "r": 4,
+          "fill": {
+            "r": 0,
+            "g": 230,
+            "b": 118,
+            "a": 255
+          },
+          "stroke": {
+            "color": {
+              "r": 0,
+              "g": 122,
+              "b": 61,
+              "a": 255
+            },
+            "width": 1
+          }
+        },
+        {
+          "type": "Path",
+          "commands": "M 0,-8 L 0,8 M -7,0 L 7,0 M -3,5 L 3,5",
+          "stroke": {
+            "color": {
+              "r": 0,
+              "g": 230,
+              "b": 118,
+              "a": 255
+            },
+            "width": 1.5
+          }
+        }
+      ]
+    },
+    "mil:fighter": {
+      "bbox": [
+        -12,
+        -12,
+        12,
+        12
+      ],
+      "anchor": [
+        0,
+        0
+      ],
+      "primitives": [
+        {
+          "type": "Path",
+          "commands": "M 0,-10 L -5,2 L -8,5 L -2,3 L 0,8 L 2,3 L 8,5 L 5,2 Z",
+          "fill": {
+            "r": 0,
+            "g": 176,
+            "b": 255,
+            "a": 179
+          },
+          "stroke": {
+            "color": {
+              "r": 0,
+              "g": 176,
+              "b": 255,
+              "a": 255
+            },
+            "width": 1.5
+          }
+        }
+      ]
+    },
+    "civil:vor": {
+      "bbox": [
+        -12,
+        -12,
+        12,
+        12
+      ],
+      "anchor": [
+        0,
+        0
+      ],
+      "primitives": [
+        {
+          "type": "Circle",
+          "cx": 0,
+          "cy": 0,
+          "r": 3,
+          "fill": {
+            "r": 0,
+            "g": 230,
+            "b": 118,
+            "a": 255
+          },
+          "stroke": {
+            "color": {
+              "r": 0,
+              "g": 122,
+              "b": 61,
+              "a": 255
+            },
+            "width": 1
+          }
+        },
+        {
+          "type": "Path",
+          "commands": "M -8,-5 L -8,5 L 0,10 L 8,5 L 8,-5 L 0,-10 Z",
+          "stroke": {
+            "color": {
+              "r": 0,
+              "g": 230,
+              "b": 118,
+              "a": 255
+            },
+            "width": 1.5
+          }
+        }
+      ]
+    },
+    "civil:tacan": {
+      "bbox": [
+        -12,
+        -12,
+        12,
+        12
+      ],
+      "anchor": [
+        0,
+        0
+      ],
+      "primitives": [
+        {
+          "type": "Circle",
+          "cx": 0,
+          "cy": 0,
+          "r": 4,
+          "fill": {
+            "r": 255,
+            "g": 145,
+            "b": 0,
+            "a": 255
+          },
+          "stroke": {
+            "color": {
+              "r": 178,
+              "g": 101,
+              "b": 0,
+              "a": 255
+            },
+            "width": 1
+          }
+        },
+        {
+          "type": "Path",
+          "commands": "M 0,-9 L -8,5 L 8,5 Z",
+          "stroke": {
+            "color": {
+              "r": 255,
+              "g": 145,
+              "b": 0,
+              "a": 255
+            },
+            "width": 1.5
+          }
+        }
+      ]
+    }
+  }
+}

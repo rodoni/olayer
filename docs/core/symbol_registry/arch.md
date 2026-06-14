@@ -111,8 +111,10 @@ Após a geração do `ResolvedSymbol` pelo provedor, a engine do `SymbolRegistry
 * Se o SLD contiver uma regra de preenchimento (`FillStyle`) ou contorno (`StrokeStyle`), esses atributos sobrescrevem os valores padrão de todas as primitivas compatíveis (`Path` e `Circle`) do símbolo resolvido.
 * As cores especificadas em SLD como strings hexadecimais (ex: `#FF5733`) são convertidas internamente para a struct `Color` pelo parser auxiliar integrado.
 
-### 4.3 Formato Declarativo (JSON)
-O `DeclarativeProvider` permite o carregamento dinâmico de símbolos. Um arquivo de biblioteca tática segue o formato:
+### 4.3 Formato Declarativo (JSON) e Compilação Offline
+O `DeclarativeProvider` permite o carregamento dinâmico de bibliotecas de símbolos consolidadas em JSON. Em vez de escrever esses arquivos JSON complexos à mão, o fluxo padrão utiliza a ferramenta CLI **`tools/symbol-compiler`** em tempo de build.
+
+O compilador lê os arquivos SVG, extrai elementos como `<path>`, `<circle>`, `<text>`, converte cores CSS/SVG e suas opacidades e gera uma biblioteca declarativa no seguinte formato compatível:
 ```json
 {
   "library_name": "MinhaColecao",

@@ -21,6 +21,7 @@ let activeProjection: WasmProjection;
 let controller: OlayerController;
 let gridLayer: GridLayer;
 let radarLayer: RadarLayer;
+let navAidLayer: NavAidLayer; // Dynamic layer for NavAids
 let tileLayer: TileLayer | null = null;
 let vectorLayer: VectorTileLayer | null = null;
 let selectedTargetId: string | null = null;
@@ -253,6 +254,141 @@ class GridLayer extends Layer {
   }
 }
 
+// 1.5 NavAid Layer (Dynamic Canvas 2D overlay for static navaids using compiled symbols)
+interface NavAid {
+  id: string;
+  name: string;
+  lat: number;
+  lon: number;
+  type: "vor" | "tacan";
+}
+
+const NAV_AIDS: NavAid[] = [
+  {
+    id: "CGO",
+    name: "CONGONHAS VOR",
+    lat: -23.6268 * Math.PI / 180,
+    lon: -46.6596 * Math.PI / 180,
+    type: "vor"
+  },
+  {
+    id: "BGO",
+    name: "GUARULHOS VOR",
+    lat: -23.4322 * Math.PI / 180,
+    lon: -46.4692 * Math.PI / 180,
+    type: "vor"
+  },
+  {
+    id: "KPS",
+    name: "CAMPINAS TACAN",
+    lat: -23.0074 * Math.PI / 180,
+    lon: -47.1344 * Math.PI / 180,
+    type: "tacan"
+  }
+];
+
+class NavAidLayer extends Layer {
+  private controller: OlayerController;
+  public cpuRenderer: CPURenderer;
+
+  constructor(controller: OlayerController) {
+    super("dynamic_navaids");
+    this.controller = controller;
+    this.cpuRenderer = new CPURenderer(controller.ctx2d);
+  }
+
+  public renderStatic(gl: WebGL2RenderingContext, viewProjMatrix: Float32Array): void {
+    // NavAids has no static WebGL elements
+  }
+
+  public renderDynamic(ctx: CanvasRenderingContext2D, currentTime: number): void {
+    const camera = this.controller.getCameraState();
+    const viewMode = this.controller.getViewMode();
+    const viewProjMatrix = this.controller.currentViewProjMatrix;
+
+    let centerXY: number[] = [0, 0];
+    if (viewMode !== "3D") {
+      try {
+        centerXY = this.controller.projection.project(
+          camera.center_lat,
+          camera.center_lon,
+          camera.center_height
+        );
+      } catch {
+        camera.free();
+        return;
+      }
+    }
+
+    const atlasCanvas = (this.controller.atlasManager as any).atlasCanvas;
+
+    for (const na of NAV_AIDS) {
+      const screenPos = this.cpuRenderer.projectToScreen(
+        this.controller.projection,
+        na.lat,
+        na.lon,
+        0.0, // height
+        centerXY[0],
+        centerXY[1],
+        camera.zoom,
+        camera.rotation,
+        camera.viewport_base_meters,
+        this.controller.glCanvas.width,
+        this.controller.glCanvas.height,
+        viewMode,
+        viewProjMatrix,
+        camera.center_lat,
+        camera.center_lon
+      );
+
+      if (screenPos) {
+        const symbolId = na.type === "vor" ? "civil:vor" : "civil:tacan";
+        
+        let symbolUv = this.controller.atlasManager.getSymbolUV(symbolId);
+        if (!symbolUv) {
+          try {
+            symbolUv = this.controller.atlasManager.registerWasmSymbol(
+              symbolId,
+              this.controller.symbolRegistry,
+              this.controller.styleRegistry
+            );
+          } catch (err) {
+            console.error("Failed to register WASM symbol in atlas:", err);
+          }
+        }
+
+        if (symbolUv && atlasCanvas) {
+          const sw = symbolUv.width;
+          const sh = symbolUv.height;
+          ctx.save();
+          ctx.translate(screenPos.x, screenPos.y);
+          ctx.drawImage(
+            atlasCanvas,
+            symbolUv.u0 * atlasCanvas.width,
+            symbolUv.v0 * atlasCanvas.height,
+            sw,
+            sh,
+            -sw / 2,
+            -sh / 2,
+            sw,
+            sh
+          );
+
+          // Draw station label
+          ctx.fillStyle = na.type === "vor" ? "#00e676" : "#ff9100";
+          ctx.font = "bold 9px 'Inter', 'Roboto', sans-serif";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "top";
+          ctx.fillText(na.id, 0, sh / 2 + 2);
+          ctx.restore();
+        }
+      }
+    }
+
+    camera.free();
+  }
+}
+
 // 2. Radar Traffic Layer (Dynamic Canvas 2D overlay)
 class RadarLayer extends Layer {
   private controller: OlayerController;
@@ -299,6 +435,11 @@ class RadarLayer extends Layer {
       }
     } catch (err) {
       console.error("Failed to interpolate targets:", err);
+    }
+
+    // Se houver tráfego ativo, mantém o controlador ativo (60 FPS) para animação suave
+    if (targets.length > 0) {
+      this.controller.triggerActive();
     }
 
     // Update target count in UI
@@ -375,19 +516,23 @@ class RadarLayer extends Layer {
           symbolId = "civil:plane";
         } else if (t.id.startsWith("AZU")) {
           symbolId = "mil:fighter";
+        } else if (t.id.startsWith("COP") || t.id.startsWith("HEL")) {
+          symbolId = "custom:helicopter";
         } else {
-          symbolId = "mil:cargo";
+          symbolId = "civil:plane";
         }
 
-        let symbolUv = undefined;
-        try {
-          symbolUv = this.controller.atlasManager.registerWasmSymbol(
-            symbolId,
-            this.controller.symbolRegistry,
-            this.controller.styleRegistry
-          );
-        } catch (err) {
-          console.error("Failed to register WASM symbol in atlas:", err);
+        let symbolUv = this.controller.atlasManager.getSymbolUV(symbolId);
+        if (!symbolUv) {
+          try {
+            symbolUv = this.controller.atlasManager.registerWasmSymbol(
+              symbolId,
+              this.controller.symbolRegistry,
+              this.controller.styleRegistry
+            );
+          } catch (err) {
+            console.error("Failed to register WASM symbol in atlas:", err);
+          }
         }
 
         const atlasCanvas = (this.controller.atlasManager as any).atlasCanvas;
@@ -435,7 +580,7 @@ interface SimulatedTarget {
 const activeSimulatedTargets: SimulatedTarget[] = [];
 
 function generateRandomTarget(): void {
-  const callsigns = ["TAM", "GLO", "AZU", "ARG", "TAP", "AAL", "KLM", "DLH"];
+  const callsigns = ["TAM", "GLO", "AZU", "COP", "HEL", "ARG", "TAP", "AAL", "KLM", "DLH"];
   const randomCall = callsigns[Math.floor(Math.random() * callsigns.length)] + Math.floor(100 + Math.random() * 900);
   
   // Random offset around São Paulo center (approx +-50km)
@@ -493,6 +638,9 @@ function updateMapLayers(): void {
   // Also remove standard layers temporarily so we can re-add in order
   if (gridLayer) {
     controller.layerManager.removeLayer(gridLayer.id);
+  }
+  if (navAidLayer) {
+    controller.layerManager.removeLayer(navAidLayer.id);
   }
   if (radarLayer) {
     controller.layerManager.removeLayer(radarLayer.id);
@@ -592,6 +740,9 @@ function updateMapLayers(): void {
   if (gridLayer) {
     controller.layerManager.addLayer(gridLayer);
   }
+  if (navAidLayer) {
+    controller.layerManager.addLayer(navAidLayer);
+  }
   if (radarLayer) {
     controller.layerManager.addLayer(radarLayer);
   }
@@ -624,56 +775,31 @@ async function start() {
     viewportBaseMeters: 250000.0, // 250 km base TMA size
   });
 
-  // Register symbols library
-  const symbolsJson = JSON.stringify({
-    library_name: "OlayerAviationSymbols",
-    symbols: {
-      "civil:plane": {
-        bbox: [-12.0, -12.0, 12.0, 12.0],
-        anchor: [0.0, 0.0],
-        primitives: [
-          {
-            type: "Circle",
-            cx: 0.0,
-            cy: 0.0,
-            r: 5.0,
-            fill: { r: 0, g: 230, b: 118, a: 255 },
-            stroke: { color: { r: 0, g: 100, b: 50, a: 255 }, width: 1.0 }
-          },
-          {
-            type: "Path",
-            commands: "M 0,-10 L 0,10 M -8,0 L 8,0 M -4,6 L 4,6",
-            stroke: { color: { r: 0, g: 230, b: 118, a: 255 }, width: 1.5 }
-          }
-        ]
-      },
-      "mil:fighter": {
-        bbox: [-12.0, -12.0, 12.0, 12.0],
-        anchor: [0.0, 0.0],
-        primitives: [
-          {
-            type: "Path",
-            commands: "M 0,-12 L -6,2 L -10,6 L -2,4 L 0,10 L 2,4 L 10,6 L 6,2 Z",
-            fill: { r: 0, g: 176, b: 255, a: 180 },
-            stroke: { color: { r: 0, g: 176, b: 255, a: 255 }, width: 1.5 }
-          }
-        ]
-      },
-      "mil:cargo": {
-        bbox: [-15.0, -15.0, 15.0, 15.0],
-        anchor: [0.0, 0.0],
-        primitives: [
-          {
-            type: "Path",
-            commands: "M 0,-12 L -4,-8 L -14,-2 L -4,-2 L 0,8 L 4,-2 L 14,-2 L 4,-8 Z",
-            fill: { r: 255, g: 145, b: 0, a: 180 },
-            stroke: { color: { r: 255, g: 145, b: 0, a: 255 }, width: 1.5 }
-          }
-        ]
-      }
+  // Fetch and register compiled SVG symbols library
+  try {
+    const symbolsResponse = await fetch("./assets/compiled_symbols.json");
+    if (!symbolsResponse.ok) {
+      throw new Error(`HTTP error ${symbolsResponse.status} fetching symbols`);
     }
-  });
-  controller.symbolRegistry.register_declarative_provider(symbolsJson);
+    const compiledSymbolsJson = await symbolsResponse.text();
+    controller.symbolRegistry.register_declarative_provider(compiledSymbolsJson);
+    console.log("Compiled symbols library registered successfully!");
+  } catch (err) {
+    console.error("Failed to load compiled symbols library:", err);
+  }
+
+  // Register custom PNG helicopter symbol in atlas
+  try {
+    await controller.atlasManager.registerImageSymbol(
+      "custom:helicopter",
+      "./assets/custom_heli.png",
+      32,
+      32
+    );
+    console.log("Custom PNG helicopter symbol registered in atlas successfully!");
+  } catch (err) {
+    console.error("Failed to register custom PNG helicopter symbol:", err);
+  }
 
   const sldXml = `<?xml version="1.0" encoding="UTF-8"?>
   <StyledLayerDescriptor version="1.0.0">
@@ -717,8 +843,9 @@ async function start() {
   // Set controller on window for layers to access
   (window as any).olayerController = controller;
 
-  // Create static grid and radar layers (independent of base map URL)
+  // Create static grid, navaid and radar layers (independent of base map URL)
   gridLayer = new GridLayer(controller.gl, activeProjection, "2D");
+  navAidLayer = new NavAidLayer(controller);
   radarLayer = new RadarLayer(controller);
 
   // Initialize map layers based on GUI selections

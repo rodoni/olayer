@@ -1,3 +1,5 @@
+#![allow(clippy::too_many_arguments)]
+
 use olayer_core::geodesy::LatLon;
 use olayer_core::projections::{Projection, CameraState};
 use usvg::TreeParsing;
@@ -9,11 +11,12 @@ use crate::native_controller::NativeController;
 /// geodetic coordinates (latitude, longitude, altitude) of dynamic radar targets.
 /// It draws them without 3D perspective distortion (**Billboard** effect), and
 /// manages heading vectors, tactical data labels, and the 2.5D flight profile.
+#[derive(Default)]
 pub struct WgpuCpuVertexPipeline {}
 
 impl WgpuCpuVertexPipeline {
     pub fn new() -> Self {
-        Self {}
+        Self::default()
     }
 
     /// Plots the interpolated target list on the given egui painter.
@@ -156,25 +159,23 @@ pub fn project_lla_to_screen(
         } else {
             None
         }
+    } else if let Ok(xy) = projection.project(&LatLon::new(lat, lon, alt)) {
+        let cx_cy = projection.project(&camera.center).unwrap_or((0.0, 0.0));
+        let tx = xy.0 - cx_cy.0;
+        let ty = xy.1 - cx_cy.1;
+        let rx = tx * (-camera.rotation).cos() - ty * (-camera.rotation).sin();
+        let ry = tx * (-camera.rotation).sin() + ty * (-camera.rotation).cos();
+        let w_meters = (camera.viewport_base_meters / camera.zoom) as f32;
+        let aspect = camera.aspect_ratio as f32;
+        let h_meters = w_meters / aspect;
+        let ndc_x = rx as f32 / (w_meters / 2.0);
+        let ndc_y = ry as f32 / (h_meters / 2.0);
+        Some(egui::pos2(
+            (ndc_x + 1.0) * 0.5 * width as f32,
+            (1.0 - ndc_y) * 0.5 * height as f32,
+        ))
     } else {
-        if let Ok(xy) = projection.project(&LatLon::new(lat, lon, alt)) {
-            let cx_cy = projection.project(&camera.center).unwrap_or((0.0, 0.0));
-            let tx = xy.0 - cx_cy.0;
-            let ty = xy.1 - cx_cy.1;
-            let rx = tx * (-camera.rotation).cos() - ty * (-camera.rotation).sin();
-            let ry = tx * (-camera.rotation).sin() + ty * (-camera.rotation).cos();
-            let w_meters = (camera.viewport_base_meters / camera.zoom) as f32;
-            let aspect = camera.aspect_ratio as f32;
-            let h_meters = w_meters / aspect;
-            let ndc_x = rx as f32 / (w_meters / 2.0);
-            let ndc_y = ry as f32 / (h_meters / 2.0);
-            Some(egui::pos2(
-                (ndc_x + 1.0) * 0.5 * width as f32,
-                (1.0 - ndc_y) * 0.5 * height as f32,
-            ))
-        } else {
-            None
-        }
+        None
     }
 }
 

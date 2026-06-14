@@ -34,15 +34,14 @@ pub trait MapDataSource {
 ///
 /// Unlike the Web SDK (which consumes tiles via HTTP), the native stack reads
 /// directly from the local filesystem.
+#[derive(Default)]
 pub struct NativeMapDataStack {
     sources: HashMap<String, Box<dyn MapDataSource>>,
 }
 
 impl NativeMapDataStack {
     pub fn new() -> Self {
-        Self {
-            sources: HashMap::new(),
-        }
+        Self::default()
     }
 
     /// Registers a data source in the stack.

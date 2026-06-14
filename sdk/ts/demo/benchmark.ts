@@ -50,8 +50,19 @@ async function start() {
 
   // Setup canvas
   const canvas = document.getElementById("benchmarkCanvas") as HTMLCanvasElement;
-  resizeCanvas(canvas);
-  window.addEventListener("resize", () => resizeCanvas(canvas));
+  const container = document.getElementById("benchmark-container");
+
+  // Create hidden glCanvas for controller logic
+  const glCanvas = document.createElement("canvas");
+  glCanvas.style.position = "absolute";
+  glCanvas.style.top = "0";
+  glCanvas.style.left = "0";
+  glCanvas.style.width = "100%";
+  glCanvas.style.height = "100%";
+  glCanvas.style.visibility = "hidden";
+  glCanvas.style.pointerEvents = "none";
+  glCanvas.style.zIndex = "0";
+  container?.appendChild(glCanvas);
 
   const ctx = canvas.getContext("2d");
   if (!ctx) {
@@ -63,11 +74,16 @@ async function start() {
   activeProjection = WasmProjection.new_stereographic(SP_LAT_RAD, SP_LON_RAD);
 
   // Initialize Controller
-  controller = OlayerController.new_with_center(SP_LAT_RAD, SP_LON_RAD);
+  controller = new OlayerController({
+    glCanvas,
+    canvas2D: canvas,
+    projection: activeProjection,
+    initialCenterLatRad: SP_LAT_RAD,
+    initialCenterLonRad: SP_LON_RAD,
+    initialZoom: 1.0,
+    viewportBaseMeters: 250000.0,
+  });
   controller.setViewMode("2D");
-  // Set aspect ratio
-  controller.setAspectRatio(canvas.width / canvas.height);
-  controller.setZoom(1.0);
 
   // Setup CPU Renderer
   cpuRenderer = new CPURenderer(ctx);
@@ -85,14 +101,6 @@ async function start() {
   requestAnimationFrame(renderLoop);
 
   log("Stress benchmark active. Render loop started at 60 FPS.");
-}
-
-function resizeCanvas(canvas: HTMLCanvasElement) {
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight;
-  if (controller) {
-    controller.setAspectRatio(canvas.width / canvas.height);
-  }
 }
 
 function regenerateTargets() {
@@ -127,14 +135,16 @@ function regenerateTargets() {
     simulatedTargets.push(target);
 
     // Seed the interpolator
-    controller.interpolator.update_target({
-      id: target.id,
-      last_position: { lat: target.lat, lon: target.lon, height: target.alt },
-      speed_mps: target.speed,
-      track_heading_rad: target.heading,
-      vertical_rate_mps: 0.0,
-      last_ping_time: nowSec
-    });
+    controller.interpolator.update_target(
+      target.id,
+      target.lat,
+      target.lon,
+      target.alt,
+      target.speed,
+      target.heading,
+      0.0,
+      nowSec
+    );
   }
 
   log(`Target generation complete. ${targetCount} targets loaded.`);
@@ -265,14 +275,16 @@ function renderLoop(timestamp: number) {
       t.lat += latOffset;
       t.lon += lonOffset;
 
-      controller.interpolator.update_target({
-        id: t.id,
-        last_position: { lat: t.lat, lon: t.lon, height: t.alt },
-        speed_mps: t.speed,
-        track_heading_rad: t.heading,
-        vertical_rate_mps: 0.0,
-        last_ping_time: nowSec
-      });
+      controller.interpolator.update_target(
+        t.id,
+        t.lat,
+        t.lon,
+        t.alt,
+        t.speed,
+        t.heading,
+        0.0,
+        nowSec
+      );
     }
     lastRadarUpdate = timestamp;
   }
@@ -396,4 +408,7 @@ function renderLoop(timestamp: number) {
 }
 
 // Start benchmark
-window.addEventListener("load", start);
+start().catch(err => {
+  console.error("Failed to start stress benchmark:", err);
+  log(`Initialization error: ${err}`);
+});

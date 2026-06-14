@@ -236,6 +236,53 @@ export class TextureAtlasManager {
   }
 
   /**
+   * Registers a PNG/raster image symbol from a URL or an Image element.
+   */
+  public registerImageSymbol(
+    id: string,
+    src: string | HTMLImageElement,
+    width?: number,
+    height?: number
+  ): Promise<SymbolUV> {
+    if (this.uvs.has(id)) {
+      return Promise.resolve(this.uvs.get(id)!);
+    }
+
+    return new Promise((resolve, reject) => {
+      let img: HTMLImageElement;
+      if (typeof src === "string") {
+        img = new Image();
+        img.crossOrigin = "anonymous";
+        img.src = src;
+      } else {
+        img = src;
+      }
+
+      const onLoad = () => {
+        const w = width ?? img.naturalWidth ?? img.width;
+        const h = height ?? img.naturalHeight ?? img.height;
+        try {
+          const uv = this.registerSymbol(id, w, h, (ctx) => {
+            ctx.drawImage(img, 0, 0, w, h);
+          });
+          resolve(uv);
+        } catch (err) {
+          reject(err);
+        }
+      };
+
+      if (img.complete && (img.naturalWidth !== 0 || img.width !== 0)) {
+        onLoad();
+      } else {
+        img.onload = onLoad;
+        img.onerror = (err) => {
+          reject(new Error(`Failed to load image symbol from source: ${typeof src === "string" ? src : "ImageElement"}`));
+        };
+      }
+    });
+  }
+
+  /**
    * Returns the compiled WebGL texture.
    */
   public getTexture(): WebGLTexture | null {
