@@ -1,30 +1,30 @@
-# Arquitetura do Componente: Projections Engine (`core::projections`)
+# Component Architecture: Projections Engine (`core::projections`)
 
-Este documento descreve o design técnico, as equações cartográficas e a estrutura modular do módulo **Projections Engine** do Olayer Core. Este componente traduz coordenadas geodésicas tridimensionais (LLA) em planos projetados bidimensionais (2D) e gera as matrizes de visualização consumidas pelas pipelines gráficas WebGL, WebGPU e Vulkan.
-
----
-
-## 1. Responsabilidades
-
-O **Projections Engine** é o motor de representação cartográfica plana do framework, encarregado de:
-1. **Abstração Cartográfica:** Definir uma interface unificada (`Projection` trait) que encapsula o comportamento das projeções.
-2. **Projeções de Missão Crítica:**
-   * **Lambert Conformal Conic (LCC):** Projeção cônica conforme com dois paralelos padrão, essencial para visualizações *En-Route* (alta precisão em mapas de rotas continentais).
-   * **Estereográfica Azumital (Ellipsoidal):** Projeção azimutal com ponto de tangência na antena do radar, preservando ângulos locais para aproximações terminais (TMA).
-   * **Web Mercator (EPSG:3857):** Compatibilidade com provedores comerciais de mapas de fundo (Vector/Raster Tiles).
-3. **Cálculo de Câmera e Matrizes:** Computar matrizes de transformação de projeção e visualização (View-Projection Matrix $4 \times 4$) a partir de um estado tridimensional de câmera (`CameraState`).
+This document describes the technical design, cartographic equations, and modular structure of the **Projections Engine** module of the Olayer Core. This component translates three-dimensional geodetic coordinates (LLA) into projected 2D planes and generates the visualization matrices consumed by the WebGL, WebGPU, and Vulkan graphics pipelines.
 
 ---
 
-## 2. Diagrama de Estruturas e Trait
+## 1. Responsibilities
 
-O diagrama de classes a seguir apresenta o design e as relações dos componentes de projeção.
+The **Projections Engine** is the framework's flat cartographic representation engine, responsible for:
+1. **Cartographic Abstraction:** Define a unified interface (`Projection` trait) that encapsulates the behavior of projections.
+2. **Mission-Critical Projections:**
+   * **Lambert Conformal Conic (LCC):** Conformal conic projection with two standard parallels, essential for *En-Route* visualizations (high precision in continental route maps).
+   * **Azimuthal Stereographic (Ellipsoidal):** Azimuthal projection with tangency point at the radar antenna, preserving local angles for terminal approaches (TMA).
+   * **Web Mercator (EPSG:3857):** Compatibility with commercial base map providers (Vector/Raster Tiles).
+3. **Camera and Matrix Calculation:** Compute projection and visualization transformation matrices (View-Projection Matrix $4 \times 4$) from a three-dimensional camera state (`CameraState`).
+
+---
+
+## 2. Structure and Trait Diagram
+
+The following class diagram presents the design and relationships of the projection components.
 
 ```mermaid
 classDiagram
     direction TB
 
-    %% Estruturas e Configurações
+    %% Structures and Configurations
     class CameraState {
         +center: LatLon
         +zoom: f64
@@ -41,7 +41,7 @@ classDiagram
         +get_view_proj_matrix(camera: &CameraState) [f32; 16]
     }
 
-    %% Projeções Concretas
+    %% Concrete Projections
     class LambertConformalConic {
         +std_parallel_1: f64
         +std_parallel_2: f64
@@ -66,78 +66,78 @@ classDiagram
         +new() WebMercator
     }
 
-    %% Relações de Dependência
-    Projection <|.. LambertConformalConic : implementa
-    Projection <|.. Stereographic : implementa
-    Projection <|.. WebMercator : implementa
+    %% Dependency Relations
+    Projection <|.. LambertConformalConic : implements
+    Projection <|.. Stereographic : implements
+    Projection <|.. WebMercator : implements
 
-    LambertConformalConic ..> Ellipsoid : usa parâmetros
-    Stereographic ..> Ellipsoid : usa parâmetros
-    WebMercator ..> Ellipsoid : usa parâmetros
+    LambertConformalConic ..> Ellipsoid : uses parameters
+    Stereographic ..> Ellipsoid : uses parameters
+    WebMercator ..> Ellipsoid : uses parameters
 
-    CameraState ..> LatLon : centralizado em
-    Projection ..> CameraState : gera matriz para
+    CameraState ..> LatLon : centered on
+    Projection ..> CameraState : generates matrix for
 ```
 
 ---
 
-## 3. Estrutura Física do Módulo (`core/src/projections`)
+## 3. Physical Module Structure (`core/src/projections`)
 
-A divisão do código segue a estrutura física abaixo:
+The code division follows the physical structure below:
 
 ```text
 core/src/projections/
-├── mod.rs               # Facade do módulo (Trait Projection, CameraState, re-exports)
-├── errors.rs            # Enum de erros (ProjectionError) e formatação
-├── lcc.rs               # Implementação da Lambert Conformal Conic
-├── stereographic.rs     # Implementação da Estereográfica Azimutal
-├── mercator.rs          # Implementação da Web Mercator
-└── matrix.rs            # Utilitários matemáticos para transformações de matrizes 4x4
+├── mod.rs               # Module facade (Projection Trait, CameraState, re-exports)
+├── errors.rs            # Error enum (ProjectionError) and formatting
+├── lcc.rs               # Lambert Conformal Conic implementation
+├── stereographic.rs     # Azimuthal Stereographic implementation
+├── mercator.rs          # Web Mercator implementation
+└── matrix.rs            # Mathematical utilities for 4x4 matrix transformations
 ```
 
 ---
 
-## 4. Detalhes Matemáticos e de Implementação
+## 4. Mathematical and Implementation Details
 
 ### 4.1 Lambert Conformal Conic (LCC)
-A projeção LCC elipsoidal é configurada por dois paralelos padrão ($\phi_1$ e $\phi_2$), uma latitude de origem $\phi_0$ e um meridiano central $\lambda_0$.
-* **Cálculo de Constantes (Pré-processamento na instanciação):**
+The ellipsoidal LCC projection is configured by two standard parallels ($\phi_1$ and $\phi_2$), an origin latitude $\phi_0$, and a central meridian $\lambda_0$.
+* **Constant Calculation (Pre-processing at instantiation):**
   $$n = \frac{\ln(m_1 / m_2)}{\ln(t_1 / t_2)}$$
   $$F = \frac{m_1}{n \cdot t_1^n}$$
   $$\rho(\phi) = a \cdot F \cdot t^n$$
-  Onde $m = \frac{\cos\phi}{\sqrt{1 - e^2 \sin^2\phi}}$ e $t = \tan(\pi/4 - \phi/2) \cdot \left(\frac{1 + e\sin\phi}{1 - e\sin\phi}\right)^{e/2}$.
-* **Projeção (LLA $\rightarrow$ 2D):**
+  Where $m = \frac{\cos\phi}{\sqrt{1 - e^2 \sin^2\phi}}$ and $t = \tan(\pi/4 - \phi/2) \cdot \left(\frac{1 + e\sin\phi}{1 - e\sin\phi}\right)^{e/2}$.
+* **Projection (LLA $\rightarrow$ 2D):**
   $$\theta = n \cdot (\lambda - \lambda_0)$$
   $$\rho = a \cdot F \cdot t(\phi)^n$$
   $$x = \rho \sin\theta$$
   $$y = \rho_0 - \rho \cos\theta$$
 
-### 4.2 Estereográfica Azimutal (Elipsoidal)
-Para preservação de ângulos e precisão nas proximidades do centro do radar da TMA ($\phi_c, \lambda_c$), a projeção estereográfica elipsoidal é modelada conforme Snyder.
-* **Projeção (LLA $\rightarrow$ 2D):**
-  A conversão utiliza uma esfera auxiliar (Latitude Conforme $\chi$) para ajustar a oblabilidade do elipsoide:
+### 4.2 Azimuthal Stereographic (Ellipsoidal)
+For angle preservation and precision near the TMA radar center ($\phi_c, \lambda_c$), the ellipsoidal stereographic projection is modeled according to Snyder.
+* **Projection (LLA $\rightarrow$ 2D):**
+  The conversion uses an auxiliary sphere (Conformal Latitude $\chi$) to adjust the ellipsoid's oblateness:
   $$\tan(\pi/4 + \chi/2) = \tan(\pi/4 + \phi/2) \cdot \left(\frac{1 - e\sin\phi}{1 + e\sin\phi}\right)^{e/2}$$
-  Calcula-se a projeção estereográfica esférica sobre a latitude conforme $\chi$ em relação ao centro $\chi_c$.
+  The spherical stereographic projection is calculated on the conformal latitude $\chi$ relative to the center $\chi_c$.
 
-### 4.3 Matriz View-Projection $4 \times 4$
-A matriz View-Projection é responsável por transladar, rotacionar e escalar os dados geográficos 2D projetados para o espaço de exibição normalizado (Normalized Device Coordinates - NDC) da GPU de forma contínua.
-* **Passo 1 (Câmera):** Projetar o centro geodésico da câmera $(\phi_c, \lambda_c)$ usando a projeção corrente para obter o ponto cartesiano $P_c = (x_c, y_c)$.
-* **Passo 2 (View Matrix):**
-  A matriz de visualização translada o mundo por $(-x_c, -y_c)$ e aplica a rotação da câmera (azimute $\theta$):
+### 4.3 View-Projection $4 \times 4$ Matrix
+The View-Projection matrix is responsible for translating, rotating, and scaling the projected 2D geographic data to the GPU's normalized display space (Normalized Device Coordinates - NDC) continuously.
+* **Step 1 (Camera):** Project the camera's geodetic center $(\phi_c, \lambda_c)$ using the current projection to obtain the Cartesian point $P_c = (x_c, y_c)$.
+* **Step 2 (View Matrix):**
+  The view matrix translates the world by $(-x_c, -y_c)$ and applies the camera rotation (azimuth $\theta$):
   $$V = R_z(-\theta) \cdot T(-x_c, -y_c, 0)$$
-* **Passo 3 (Projection Matrix):**
-  Usa-se uma projeção ortográfica baseada no zoom da câmera e na proporção da tela (*aspect ratio*):
+* **Step 3 (Projection Matrix):**
+  An orthographic projection based on the camera zoom and screen proportion (*aspect ratio*) is used:
   $$w = \frac{\text{viewport\_base\_meters}}{\text{zoom}}$$
   $$h = \frac{w}{\text{aspect\_ratio}}$$
   $$P = \text{Ortho}\left(-\frac{w}{2}, \frac{w}{2}, -\frac{h}{2}, \frac{h}{2}, -1000.0, 1000.0\right)$$
-* **Passo 4 (View-Projection):**
+* **Step 4 (View-Projection):**
   $$VP = P \cdot V$$
-  O resultado é retornado em vetor plano de 16 elementos (`[f32; 16]`) em ordem **column-major** (padrão de shaders GLSL/WGSL).
+  The result is returned in a flat 16-element vector (`[f32; 16]`) in **column-major** order (GLSL/WGSL shader standard).
 
 ---
 
-## 5. Critérios de Performance e Design
+## 5. Performance and Design Criteria
 
-1. **Caching de Constantes:** Constantes de projeção que dependem apenas de parâmetros iniciais (como $n$ e $F$ na LCC) devem ser calculadas uma única vez durante a inicialização da struct e armazenadas em campos privados, evitando recalcular em cada frame.
-2. **Column-Major layout:** A ordenação dos elementos da matriz $4\times4$ deve ser estritamente em colunas para injeção rápida em Uniform Buffers sem custo de transposição na GPU.
-3. **Precisão f64:** Todas as transformações de coordenadas de dados crus (LLA $\leftrightarrow$ 2D) rodam em precisão de ponto flutuante de 64 bits (`f64`). Apenas a montagem final da matriz View-Projection é truncada para 32 bits (`f32`) para correspondência com hardware gráfico padrão.
+1. **Constant Caching:** Projection constants that depend only on initial parameters (such as $n$ and $F$ in LCC) must be calculated once during struct initialization and stored in private fields, avoiding recalculation at each frame.
+2. **Column-Major layout:** The ordering of the $4\times4$ matrix elements must be strictly in columns for fast injection into Uniform Buffers without GPU transposition cost.
+3. **f64 Precision:** All raw data coordinate transformations (LLA $\leftrightarrow$ 2D) run in 64-bit floating point precision (`f64`). Only the final View-Projection matrix assembly is truncated to 32 bits (`f32`) for matching with standard graphics hardware.

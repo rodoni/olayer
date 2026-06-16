@@ -1,10 +1,10 @@
-# Componentes da SDK Nativa (Desktop)
+# Native SDK Components (Desktop)
 
-Este documento detalha tecnicamente os componentes da SDK Nativa do **Olayer**, conforme definido na [Arquitetura de Software (arch.md)](file:///c:/Users/rafae/projects/rust/olayer/docs/arch.md). O motor nativo em Rust é projetado para integração de alto desempenho em sistemas de controle de tráfego aéreo (ATC) desktop, suportando renderização acelerada por GPU e interoperação com linguagens como C e C++.
+This document details technically the components of the **Olayer** Native SDK, as defined in the [Software Architecture (arch.md)](file:///c:/Users/rafae/projects/rust/olayer/docs/arch.md). The native Rust engine is designed for high-performance integration in desktop air traffic control (ATC) systems, supporting GPU-accelerated rendering and interoperability with languages such as C and C++.
 
 ---
 
-## Índice dos Componentes
+## Component Index
 
 1. [Native Controller](#1-native-controller)
 2. [Native Layer Manager](#2-native-layer-manager)
@@ -17,97 +17,137 @@ Este documento detalha tecnicamente os componentes da SDK Nativa do **Olayer**, 
 
 ## 1. Native Controller
 
-### Responsabilidade
-O `Native Controller` gerencia o estado global de execução da SDK no ambiente nativo desktop. Ele serve como o ponto de entrada principal e orquestrador que une os motores geodésico, de interpolação, de projeção e a câmera. Além disso, implementa o mecanismo de controle dinâmico de taxa de quadros (**FPS Throttling**), chaveando entre 60 FPS (modo ativo, durante interações do usuário ou atualizações frequentes) e 15 FPS (modo ocioso/idle) para economizar recursos de processamento e CPU.
+### Responsibility
+The `Native Controller` manages the global execution state of the SDK in the native desktop environment. It serves as the main entry point and orchestrator that unites the geodetic, interpolation, cartographic projection, and camera engines. In addition, it implements the dynamic frame rate control mechanism (**FPS Throttling**), switching between 60 FPS (active mode, during user interactions or frequent updates) and 15 FPS (idle/idle mode) to save processing and CPU resources.
 
-### Estruturas de Dados Chave
-* `NativeController` (definida em [mod.rs](file:///c:/Users/rafae/projects/rust/olayer/sdk/native/src/native_controller/mod.rs)):
-  * `terrain`: [TerrainEngine](file:///c:/Users/rafae/projects/rust/olayer/core/src/terrain) - Motor de busca de elevação do terreno (DTED).
-  * `interpolator`: [InterpolationEngine](file:///c:/Users/rafae/projects/rust/olayer/core/src/interpolator) - Motor de Dead Reckoning para alvos radar.
-  * `projection`: `Box<dyn Projection + Send + Sync>` - Projeção ativa (Ex: [Stereographic](file:///c:/Users/rafae/projects/rust/olayer/core/src/projections), [LambertConformalConic](file:///c:/Users/rafae/projects/rust/olayer/core/src/projections)).
-  * `camera`: [CameraState](file:///c:/Users/rafae/projects/rust/olayer/core/src/camera) - Estado de atitude e posição da câmera para cálculo de visualização/projeção.
-  * `is_active`: `bool` - Flag indicando se a aplicação está em estado de alta atividade.
-  * `last_active_time`: `std::time::Instant` - Marca temporal da última interação ou evento importante.
-  * `active_timeout`: `std::time::Duration` - Tempo limite antes de retornar ao estado ocioso.
+### Key Data Structures
+* `NativeController` (defined in [mod.rs](file:///c:/Users/rafae/projects/rust/olayer/sdk/native/src/native_controller/mod.rs)):
+  * `terrain`: [TerrainEngine](file:///c:/Users/rafae/projects/rust/olayer/core/src/terrain) - Terrain elevation search engine (DTED).
+  * `interpolator`: [InterpolationEngine](file:///c:/Users/rafae/projects/rust/olayer/core/src/interpolator) - Dead Reckoning engine for radar targets.
+  * `projection`: `Box<dyn Projection + Send + Sync>` - Active projection (e.g., [Stereographic](file:///c:/Users/rafae/projects/rust/olayer/core/src/projections), [LambertConformalConic](file:///c:/Users/rafae/projects/rust/olayer/core/src/projections)).
+  * `camera`: [CameraState](file:///c:/Users/rafae/projects/rust/olayer/core/src/camera) - Camera attitude and position state for visualization/projection calculation.
+  * `is_active`: `bool` - Flag indicating whether the application is in a high-activity state.
+  * `last_active_time`: `std::time::Instant` - Timestamp of the last interaction or important event.
+  * `active_timeout`: `std::time::Duration` - Time limit before returning to idle state.
 
-### Métodos Principais
-* `new(center_lat: f64, center_lon: f64) -> Self`: Inicializa o controlador com uma câmera centrada nas coordenadas fornecidas e projeção estereográfica azimutal padrão.
-* `trigger_active(&mut self)`: Atualiza a marca temporal ativa e sinaliza alta atividade (60 FPS).
-* `check_active(&mut self) -> bool`: Valida se o período de atividade expirou, atualizando `is_active`.
-* `get_target_fps(&mut self) -> u32`: Retorna a taxa de quadros alvo (60 para ativo, 15 para ocioso).
+### Main Methods
+* `new(center_lat: f64, center_lon: f64) -> Self`: Initializes the controller with a camera centered on the provided coordinates and default azimuthal stereographic projection.
+* `trigger_active(&mut self)`: Updates the active timestamp and signals high activity (60 FPS).
+* `check_active(&mut self) -> bool`: Validates whether the activity period has expired, updating `is_active`.
+* `get_target_fps(&mut self) -> u32`: Returns the target frame rate (60 for active, 15 for idle).
 
 ---
 
 ## 2. Native Layer Manager
 
-### Responsabilidade
-O `Native Layer Manager` é responsável por controlar a pilha de camadas de exibição do mapa desktop (Ex: fundo de mapa estático, linhas da grade geodésica, alvos táticos e overlays de interface). Ele gerencia a visibilidade de cada camada e decide a ordem de repintura (*compositing*). Em vez de repintar todos os elementos geográficos densos a cada frame, ele suporta a segregação de ciclos gráficos, instruindo o pipeline a desenhar elementos estáticos em texturas de cache quando a câmera não muda de estado.
+### Responsibility
+The `Native Layer Manager` is responsible for controlling the map display layer stack (e.g., static background map, geodetic grid lines, tactical targets, and interface overlays). It manages the visibility of each layer and decides the repaint order (*compositing*). Instead of repainting all dense geographic elements every frame, it supports the segregation of graphics cycles, instructing the pipeline to draw static elements into cache textures when the camera does not change state.
 
-### Fluxo de Funcionamento no Loop Nativo
-Como implementado no loop de eventos em [main.rs](file:///c:/Users/rafae/projects/rust/olayer/sdk/native/demo/src/main.rs):
-1. **Pintura de Fundo e Grades Estáticas:** O WGPU limpa o buffer com a cor do tema de radar ATC e desenha as linhas da grade baseando-se no `grid_vertex_buffer` atualizado.
-2. **Pintura da Camada de Alvos (Radar Overlay):** Desenha a lista de alvos dinâmicos por cima do mapa e das grades.
-3. **Desenho de Interface (HUD/Egui Overlay):** Adiciona botões, controles de projeção e janelas informativas (ex: perfil de voo 2.5D) no topo da pilha, renderizado através da integração com o `egui_wgpu::Renderer`.
+### Key Data Structures
+* `Layer` trait (defined in [mod.rs](file:///c:/Users/rafae/projects/rust/olayer/sdk/native/src/native_layer_manager/mod.rs)):
+  * `id(&self) -> &str` — Unique identifier.
+  * `is_visible(&self) -> bool` — Whether the layer is currently visible.
+  * `set_visible(&mut self, visible: bool)` — Toggle visibility.
+  * `is_static(&self) -> bool` — Whether the layer is static (rarely changes) or dynamic (updated every frame).
+* `NativeLayerManager`:
+  * `layers: Vec<Box<dyn Layer>>` — Stack of active layers in render order (back-to-front).
+  * `show_grid`, `show_targets`, `show_hud`, `show_terrain` — Convenience boolean toggles for the hardcoded layers used by the demo app.
+
+### Main Methods
+* `add_layer(layer: Box<dyn Layer>) -> Result<(), String>` — Adds a new layer to the top of the stack. Returns `Err` if the ID already exists.
+* `remove_layer(id: &str) -> bool` — Removes a layer by its identifier. Returns `true` if found.
+* `reorder_layer(id: &str, new_index: usize) -> Result<(), String>` — Moves a layer to a specific position in the stack.
+* `get_layers() -> &[Box<dyn Layer>]` — Returns all layers in render order.
+* `visible_static_layers() -> Vec<&dyn Layer>` — Returns visible static layers.
+* `visible_dynamic_layers() -> Vec<&dyn Layer>` — Returns visible dynamic layers.
+* `set_layer_visibility(id: &str, visible: bool) -> Result<(), String>` — Toggles visibility for a specific layer.
+* `set_all_visibility(visible: bool)` — Toggles all layers on or off.
+
+### Operation Flow in the Native Loop
+As implemented in the event loop in [main.rs](file:///c:/Users/rafae/projects/rust/olayer/sdk/native/demo/src/main.rs):
+1. **Background and Static Grid Painting:** WGPU clears the buffer with the ATC radar theme color and draws the grid lines based on the updated `grid_vertex_buffer`.
+2. **Target Layer Painting (Radar Overlay):** Draws the list of dynamic targets over the map and grids.
+3. **Interface Drawing (HUD/Egui Overlay):** Adds buttons, projection controls, and informative windows (e.g., 2.5D flight profile) at the top of the stack, rendered through integration with `egui_wgpu::Renderer`.
 
 ---
 
 ## 3. Native Map Data Stack
 
-### Responsabilidade
-O `Native Map Data Stack` gerencia a ingestão e o cache local de recursos estáticos e dinâmicos de dados cartográficos e operacionais para a aplicação desktop. Diferente do ecossistema Web (que consome dados via rede do navegador), no ambiente desktop este componente pode acessar o sistema de arquivos local de forma assíncrona, efetuando o carregamento rápido de arquivos de terreno DTED no disco e decodificando-os diretamente para a memória linear do Rust Core.
+### Responsibility
+The `Native Map Data Stack` manages the ingestion and local caching of static and dynamic cartographic and operational data resources for the desktop application. Unlike the Web ecosystem (which consumes data via browser network), in the desktop environment this component can access the local file system asynchronously, performing quick loading of DTED terrain files on disk and decoding them directly into the Rust Core's linear memory.
 
-### Integração de Dados
-* **I/O de Disco Local:** Carrega tiles binários DTED mapeados na grade geográfica diretamente para a struct [TerrainEngine](file:///c:/Users/rafae/projects/rust/olayer/core/src/terrain) usando `load_tile`.
-* **Fluxo de Sensores:** Recebe fluxos de radar externos a taxas de ~1 Hz e abastece o [InterpolationEngine](file:///c:/Users/rafae/projects/rust/olayer/core/src/interpolator) nativo através do método `update_target`.
+### Key Data Structures
+* `MapDataSource` trait (defined in [mod.rs](file:///c:/Users/rafae/projects/rust/olayer/sdk/native/src/native_map_data_stack/mod.rs)):
+  * `id(&self) -> &str` — Unique identifier for the data source.
+  * `clear_cache(&mut self)` — Clears the local provider cache.
+  * `cache_size(&self) -> usize` — Returns the number of cached items.
+* `NativeMapDataStack`:
+  * `sources: HashMap<String, Box<dyn MapDataSource>>` — Registry of registered data sources.
+  * `register_source(source: Box<dyn MapDataSource>) -> Result<(), String>` — Registers a new data source. Returns `Err` if the ID already exists.
+  * `get_source(id: &str) -> Option<&dyn MapDataSource>` — Retrieves a registered source by ID.
+  * `clear_cache()` — Clears the caches of all registered sources.
+  * `get_cache_size() -> usize` — Returns the aggregate cache size across all sources.
+  * `load_dted_file(path: &str, terrain: &mut TerrainEngine) -> Result<(), String>` — Loads a DTED tile from a file path into the given terrain engine (backward-compatible helper).
+  * `load_dted_buffer(buffer: &[u8], terrain: &mut TerrainEngine) -> Result<(), String>` — Loads a DTED tile from a raw buffer into the given terrain engine.
+* `TerrainDataSource` (concrete `MapDataSource` implementation):
+  * Wraps a `TerrainEngine` and tracks loaded tiles so it can implement `clear_cache` and `cache_size`.
+  * `load_file(path: &str) -> Result<(), String>` — Loads a DTED tile from disk.
+  * `load_buffer(buffer: &[u8]) -> Result<(), String>` — Loads a DTED tile from a raw buffer.
+  * `unload_tile(lat_deg: i32, lon_deg: i32) -> bool` — Unloads a specific tile by its coordinate degrees.
+  * `get_elevation(lat_deg: f64, lon_deg: f64) -> Result<f64, String>` — Queries elevation at the given coordinate degrees.
+
+### Data Integration
+* **Local Disk I/O:** Loads binary DTED tiles mapped on the geographic grid directly into the [TerrainEngine](file:///c:/Users/rafae/projects/rust/olayer/core/src/terrain) struct using `load_tile`.
+* **Sensor Flow:** Receives external radar feeds at ~1 Hz rates and supplies the native [InterpolationEngine](file:///c:/Users/rafae/projects/rust/olayer/core/src/interpolator) via the `update_target` method.
 
 ---
 
 ## 4. wgpu GPU Pipeline
 
-### Responsabilidade
-O `wgpu GPU Pipeline` é a engine de renderização baseada em hardware para ambientes nativos (Desktop). Ele gerencia e compila pipelines gráficos acelerados via APIs de baixo nível (Vulkan, Metal ou DirectX 12) utilizando a crate `wgpu` do Rust. Este pipeline processa dados geográficos e de relevo densos representados por matrizes de transformação de projeção e visualização tridimensionais (MVP) computadas no Rust Core.
+### Responsibility
+The `wgpu GPU Pipeline` is the hardware-accelerated rendering engine for native environments (Desktop). It manages and compiles graphics pipelines accelerated via low-level APIs (Vulkan, Metal, or DirectX 12) using the Rust `wgpu` crate. This pipeline processes dense geographic and relief data represented by 3D projection and visualization transformation matrices (MVP) computed in the Rust Core.
 
-### Componentes de Renderização
-* **Compilação de Shaders (WGSL):** Executa o shader de grade (`vs_main` e `fs_main` definidos em [mod.rs](file:///c:/Users/rafae/projects/rust/olayer/sdk/native/src/wgpu_gpu_pipeline/mod.rs)) para projetar e colorir os meridianos e paralelos.
-* **Buffers de Uniforms:** Mantém buffers para envio da matriz combinada de View-Projection (`mat4x4<f32>`) e dados de cores da grade para a GPU.
-* **Vertex Buffers:** Preenche o buffer de vértices da grade dinamicamente via `rebuild_grid_buffers` toda vez que a câmera ou a projeção ativa é alterada.
+### Rendering Components
+* **Shader Compilation (WGSL):** Executes the grid shader (`vs_main` and `fs_main` defined in [mod.rs](file:///c:/Users/rafae/projects/rust/olayer/sdk/native/src/wgpu_gpu_pipeline/mod.rs)) to project and color the meridians and parallels.
+* **Uniform Buffers:** Maintains buffers for sending the combined View-Projection matrix (`mat4x4<f32>`) and grid color data to the GPU.
+* **Vertex Buffers:** Fills the grid vertex buffer dynamically via `rebuild_grid_buffers` every time the camera or active projection is changed.
 
 ---
 
 ## 5. wgpu CPU/Vertex Pipeline
 
-### Responsabilidade
-O `wgpu CPU/Vertex Pipeline` cuida da projeção e plotagem de alvos dinâmicos (aeronaves) e seus respectivos metadados (etiquetas de texto, vetores de velocidade e rumo) que não podem sofrer distorções espaciais 3D (efeito *Billboard*). O cálculo de transformação de coordenadas geodésicas (latitude, longitude, altitude) para coordenadas planas de tela em pixels $(X, Y)$ é feito na CPU pelo Core, e a SDK realiza a renderização das primitivas geométricas (círculos, retângulos, vetores) e texto na interface gráfica.
+### Responsibility
+The `wgpu CPU/Vertex Pipeline` handles the projection and plotting of dynamic targets (aircraft) and their respective metadata (text labels, velocity vectors, and heading) that cannot suffer 3D spatial distortions ( **Billboard** effect). The coordinate transformation calculation from geodetic (latitude, longitude, altitude) to flat screen pixel coordinates $(X, Y)$ is done on the CPU by the Core, and the SDK performs the rendering of geometric primitives (circles, rectangles, vectors) and text on the graphical interface.
 
-### Lógica de Projeção Dinâmica
-No arquivo [mod.rs](file:///c:/Users/rafae/projects/rust/olayer/sdk/native/src/wgpu_cpu_vertex_pipeline/mod.rs):
-* `project_lla_to_screen`: Traduz as coordenadas geodésicas baseadas na projeção ativa e matriz de visualização.
-  * **No modo 3D:** Converte coordenadas LLA para coordenadas cartesianas ECEF tridimensionais, aplica culling de oclusão da curvatura da terra (horizon occlusion culling) e multiplica pela matriz de visualização 3D.
-  * **No modo 2.5D:** Projeta a base da aeronave bidimensionalmente usando a projeção planar ativa e adiciona a altitude como o eixo Z, projetando depois com a matriz perspectiva 2.5D da câmera.
-  * **No modo 2D:** Projeta bidimensionalmente usando a projeção cartográfica ativa (Stereographic, LCC, Mercator) e translada/rotaciona de acordo com o bearing/zoom da câmera.
-* **Renderização de Alvos com Egui Painter:** A SDK desenha as aeronaves como círculos cheios, cercadas por retângulos nos alvos selecionados, com linhas que representam o vetor de rumo planejado para 1 minuto à frente e blocos de texto contendo o callsign, Altitude (Flight Level) e Velocidade (knots).
+### Dynamic Projection Logic
+In the file [mod.rs](file:///c:/Users/rafae/projects/rust/olayer/sdk/native/src/wgpu_cpu_vertex_pipeline/mod.rs):
+* `project_lla_to_screen`: Translates geodetic coordinates based on the active projection and visualization matrix.
+  * **In 3D mode:** Converts LLA coordinates to 3D ECEF rectangular coordinates using the WGS84 ellipsoid, applies horizon occlusion culling (horizon occlusion culling), and multiplies by the 3D view matrix.
+  * **In 2.5D mode:** Projects the aircraft base two-dimensionally using the active planar projection and adds altitude as the Z axis, then projects with the 2.5D perspective camera matrix.
+  * **In 2D mode:** Projects two-dimensionally using the active cartographic projection (Stereographic, LCC, Mercator) and translates/rotates according to the camera bearing/zoom.
+* **Target Rendering with Egui Painter:** The SDK draws aircraft as filled circles, surrounded by rectangles on selected targets, with lines representing the planned heading vector for 1 minute ahead and text blocks containing the callsign, Altitude (Flight Level), and Speed (knots).
 
 ---
 
 ## 6. C-FFI Bridge (cbindgen)
 
-### Responsabilidade
-A `C-FFI Bridge` fornece uma interface binária compatível com a linguagem C (`libolayer_native.h`), permitindo que aplicações clientes escritas em C, C++, C# ou outras linguagens compiladas nativamente consumam diretamente os motores matemáticos e lógicos do Olayer Core em Rust.
+### Responsibility
+The `C-FFI Bridge` provides a binary interface compatible with the C language (`libolayer_native.h`), allowing client applications written in C, C++, C#, or other natively compiled languages to directly consume the mathematical and logical engines of the Olayer Core in Rust.
 
-### Arquitetura de Interoperabilidade FFI
-A ponte FFI está localizada no subprojeto [c_ffi_bridge](file:///c:/Users/rafae/projects/rust/olayer/sdk/native/src/c_ffi_bridge) e implementa:
-* **Estruturas de Dados FFI compatíveis (`#[repr(C)]`):**
-  * `C_LatLon` - Par de coordenadas geodésicas.
-  * `C_InterpolatedTarget` - Registro de alvos interpolados com strings C-compatible (`*mut c_char`).
-  * `C_ProfilePoint` - Ponto no gráfico do perfil vertical.
-* **Gerenciamento de Ponteiros Opacos:** Instancia instâncias de `TerrainEngine` e `InterpolationEngine` no heap do Rust e expõe ponteiros opacos (`*mut TerrainEngine`) para controle do host.
-* **Prevenção de Unwind de Pânico (`catch_unwind`):** Garante que panics ocorridos dentro das crates Rust não cruzem a fronteira FFI para a aplicação host (o que resultaria em comportamento indefinido / crash), retornando códigos de erro negativos estruturados.
+### FFI Interoperability Architecture
+The FFI bridge is located in the subproject [c_ffi_bridge](file:///c:/Users/rafae/projects/rust/olayer/sdk/native/src/c_ffi_bridge) and implements:
+* **FFI-compatible Data Structures (`#[repr(C]`):**
+  * `C_LatLon` - Pair of geodetic coordinates.
+  * `C_InterpolatedTarget` - Interpolated target records with C-compatible strings (`*mut c_char`).
+  * `C_ProfilePoint` - Point in the vertical profile graph.
+* **Opaque Pointer Management:** Instantiates `TerrainEngine` and `InterpolationEngine` instances on the Rust heap and exposes opaque pointers (`*mut TerrainEngine`) for host control.
+* **Panic Unwind Prevention (`catch_unwind`):** Ensures that panics occurring within the Rust crates do not cross the FFI boundary to the host application (which would result in undefined behavior / crash), returning structured negative error codes.
 
 ---
 
-## Diagrama de Interações e Fluxo Nativo
+## Native Interaction and Flow Diagram
 
-O diagrama abaixo ilustra a cooperação de alto nível dos componentes nativos durante um frame típico de renderização tática de radar:
+The diagram below illustrates the high-level cooperation of the native components during a typical radar tactical rendering frame:
 
 ```mermaid
 sequenceDiagram
@@ -118,29 +158,29 @@ sequenceDiagram
     participant GPU as wgpu GPU Pipeline (Grid/Map)
     participant CPU as wgpu CPU/Vertex Pipeline (Targets)
 
-    %% Ingestão
-    Host->>DS: Injetar novos pings de radar (target_update)
-    DS->>Ctrl: Atualizar dados no InterpolationEngine
+    %% Ingestion
+    Host->>DS: Inject new radar pings (target_update)
+    DS->>Ctrl: Update data in InterpolationEngine
     
-    %% Loop de Renderização
+    %% Rendering Loop
     rect rgb(240, 248, 255)
-        Note over Ctrl, Host: Loop de Redesenho (Frame Rendering)
-        Ctrl->>Ctrl: get_target_fps() (Ajusta FPS baseado no estado)
-        Ctrl->>GPU: Atualizar View-Projection Matrix (Uniform Buffer)
+        Note over Ctrl, Host: Redraw Loop (Frame Rendering)
+        Ctrl->>Ctrl: get_target_fps() (Adjusts FPS based on state)
+        Ctrl->>GPU: Update View-Projection Matrix (Uniform Buffer)
         
-        %% Renderizar Camadas Estáticas / Grade
-        Ctrl->>GPU: Renderizar linhas da grade (Draw Call de Linhas)
+        %% Render Static Layers / Grid
+        Ctrl->>GPU: Render grid lines (Line Draw Call)
         
-        %% Renderizar Camadas Dinâmicas / Alvos
+        %% Render Dynamic Layers / Targets
         Ctrl->>Ctrl: interpolate_all(current_time)
-        Ctrl-->>CPU: Lista de alvos interpolados
+        Ctrl-->>CPU: List of interpolated targets
         
-        loop Para cada alvo
+        loop For each target
             Ctrl->>CPU: project_lla_to_screen(target_lla)
-            CPU-->>CPU: Coordenadas de tela X, Y (2D/2.5D/3D)
-            CPU->>CPU: Plotar ícones, vetor de rumo e caixa de dados (egui/canvas)
+            CPU-->>CPU: Screen coordinates X, Y (2D/2.5D/3D)
+            CPU->>CPU: Plot icons, heading vector, and data boxes (egui/canvas)
         end
         
-        CPU->>Host: Apresenta o frame finalizado na tela do usuário
+        CPU->>Host: Presents the finished frame on the user screen
     end
 ```

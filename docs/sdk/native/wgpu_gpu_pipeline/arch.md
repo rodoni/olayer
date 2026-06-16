@@ -1,36 +1,36 @@
-# Arquitetura: wgpu GPU Pipeline
+# Architecture: wgpu GPU Pipeline
 
-Este documento detalha o design arquitetural e a especificação técnica do componente **wgpu GPU Pipeline** do SDK Nativo do Olayer.
+This document details the architectural design and technical specification of the **wgpu GPU Pipeline** component of the Olayer Native SDK.
 
 ---
 
-## 1. Visão Geral
+## 1. Overview
 
-O **wgpu GPU Pipeline** é o motor de renderização gráfica acelerada por hardware do SDK Nativo, implementado através da biblioteca multiplataforma `wgpu` em Rust. Ele é projetado para desenhar elementos geográficos de grande escala com alta taxa de quadros e baixa latência de barramento (CPU/GPU), aproveitando APIs nativas como Vulkan, Metal e DirectX 12.
+The **wgpu GPU Pipeline** is the hardware-accelerated graphics rendering engine of the Native SDK, implemented through the multiplatform `wgpu` library in Rust. It is designed to draw large-scale geographic elements with high frame rates and low bus latency (CPU/GPU), leveraging native APIs such as Vulkan, Metal, and DirectX 12.
 
 ```mermaid
 graph LR
-    Core[Rust Core Matrizes] -->|Uniform Buffer| GPU[GPU Pipeline]
+    Core[Rust Core Matrices] -->|Uniform Buffer| GPU[GPU Pipeline]
     Grid[Grid Vertices] -->|Vertex Buffer| GPU
     GPU -->|Render Pass| Surface[Screen Surface]
 ```
 
 ---
 
-## 2. Configuração e Inicialização
+## 2. Configuration and Initialization
 
-1. **Instância WGPU:** Criada com o descritor padrão.
-2. **Superfície:** Vinculada à janela nativa do `winit`.
-3. **Adaptador & Dispositivo:** Requisitados com preferência para alta performance (`HighPerformance`).
-4. **Configuração da Superfície:** Define a largura/altura e o formato de cores com base nas dimensões da janela física.
-O processo de inicialização do WGPU e criação da superfície ocorre de forma nativa e síncrona no ponto de entrada [main.rs](file:///c:/Users/rafae/projects/rust/olayer/sdk/native/demo/src/main.rs):
+1. **WGPU Instance:** Created with the default descriptor.
+2. **Surface:** Bound to the native `winit` window.
+3. **Adapter & Device:** Requested with preference for high performance (`HighPerformance`).
+4. **Surface Configuration:** Defines width/height and color format based on the physical window dimensions.
+The WGPU initialization and surface creation process occurs natively and synchronously at the entry point [main.rs](file:///c:/Users/rafae/projects/rust/olayer/sdk/native/demo/src/main.rs):
 
 ---
 
-## 3. Pipeline de Desenho e Shader WGSL
+## 3. Drawing Pipeline and WGSL Shader
 
-### 3.1 Shader WGSL
-O shader de grade base (linhas de latitude e longitude) é escrito na linguagem de sombreamento WGSL e compilado em tempo de execução:
+### 3.1 WGSL Shader
+The base grid shader (latitude and longitude lines) is written in the WGSL shading language and compiled at runtime:
 ```rust
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
@@ -56,16 +56,16 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 }
 ```
 
-### 3.2 Alocação de Buffers e Pipeline de Renderização
-* **Uniform Buffer:** Aloca 80 bytes (64 bytes para a matriz de projeção `view_proj` e 16 bytes para o vetor de cor `grid_color`).
-* **Vertex Buffer:** Gerenciado em `rebuild_grid_buffers`. Reconstrói os pontos de linhas de grade e os envia à GPU quando a projeção ativa é alterada.
-* **Pipeline de Renderização:** Configurado com topologia `LineList` para desenho rápido de linhas, blend de cores habilitado (`ALPHA_BLENDING`) e escrita em todos os canais de cores.
+### 3.2 Buffer Allocation and Rendering Pipeline
+* **Uniform Buffer:** Allocates 80 bytes (64 bytes for the `view_proj` projection matrix and 16 bytes for the `grid_color` color vector).
+* **Vertex Buffer:** Managed in `rebuild_grid_buffers`. Rebuilds grid line points and sends them to the GPU when the active projection is changed.
+* **Rendering Pipeline:** Configured with `LineList` topology for fast line drawing, enabled color blending (`ALPHA_BLENDING`), and writing to all color channels.
 
 ---
 
-## 4. Integração no Frame Rendering Loop
+## 4. Integration in the Frame Rendering Loop
 
-Durante a repintura (Redraw), o `CommandEncoder` e o `RenderPass` correspondente desenham a grade na GPU aplicando os buffers apropriados:
+During repainting (Redraw), the `CommandEncoder` and corresponding `RenderPass` draw the grid on the GPU applying the appropriate buffers:
 
 ```rust
 render_pass.set_pipeline(&pipeline);

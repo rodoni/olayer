@@ -1,144 +1,143 @@
-# Plano de Desenvolvimento: Olayer
-## Cronograma de Implementação e Milestones do Framework GIS Híbrido
+# Development Plan: Olayer
+## Implementation Schedule and Milestones of the Hybrid GIS Framework
 
-Este documento estabelece o plano de desenvolvimento modular para a construção do **Olayer**, dividindo o projeto em fases incrementais e marcos de entrega (*milestones*). O planejamento segue a separação estrita de responsabilidades definida na [Arquitetura do Sistema (arch.md)](file:///c:/Users/rafae/projects/rust/olayer/docs/arch.md) e na [Especificação Técnica (spec.md)](file:///c:/Users/rafae/projects/rust/olayer/docs/spec.md).
+This document establishes the modular development plan for the construction of **Olayer**, dividing the project into incremental phases and delivery milestones (*milestones*). The planning follows the strict separation of responsibilities defined in the [System Architecture (arch.md)](file:///c:/Users/rafae/projects/rust/olayer/docs/arch.md) and the [Technical Specification (spec.md)](file:///c:/Users/rafae/projects/rust/olayer/docs/spec.md).
 
 ---
 
-## 🗺️ Visão Geral do Roteiro (Roadmap)
+## Overview of the Roadmap (Roadmap)
 
 ```mermaid
 gantt
-    title Cronograma Estimado do Olayer
+    title Estimated Olayer Schedule
     dateFormat  YYYY-MM-DD
-    section Fase 1: Core Geodésico
-    Matemática e Geodésia (WGS84)   :active, des1, 2026-06-01, 10d
-    section Fase 2: Projeções & Estilos
-    Projeções LCC/Estereográfica     : des2, after des1, 12d
-    Parser de Estilos SLD            : des3, after des1, 8d
-    section Fase 3: Terreno & Alvos
-    Engine DTED O(1) e Perfil 2.5D   : des4, after des2, 15d
+    section Phase 1: Geodetic Core
+    Mathematics and Geodesy (WGS84)   :active, des1, 2026-06-01, 10d
+    section Phase 2: Projections & Styles
+    LCC/Stereographic Projections     : des2, after des1, 12d
+    SLD Style Parser            : des3, after des1, 8d
+    section Phase 3: Terrain & Targets
+    O(1) DTED Engine and 2.5D Profile   : des4, after des2, 15d
     Dead Reckoning (Interpolator)    : des5, after des2, 8d
-    section Fase 4: Bindings WASM
-    Ponte wasm-bindgen & Memória     : des6, after des5, 10d
-    section Fase 5: SDK TypeScript
-    Loop de Controle (FPS) & Canvas  : des7, after des6, 12d
-    Pipelines de Renderização (GPU/CPU): des8, after des7, 18d
-    section Fase 6: SDK Desktop Nativo
-    Wrapper wgpu / Nativo            : des9, after des8, 15d
-    section Fase 7: Integração & QA
-    Testes de Carga & Validação      : des10, after des9, 10d
+    section Phase 4: WASM Bindings
+    wasm-bindgen Bridge & Memory     : des6, after des5, 10d
+    section Phase 5: TypeScript SDK
+    Control Loop (FPS) & Canvas  : des7, after des6, 12d
+    Rendering Pipelines (GPU/CPU): des8, after des7, 18d
+    section Phase 6: Native Desktop SDK
+    wgpu / Native Wrapper            : des9, after des8, 15d
+    section Phase 7: Integration & QA
+    Load Tests & Validation      : des10, after des9, 10d
 ```
 
 ---
 
-## 🛠️ Detalhamento das Fases
+## Phase Details
 
-### Fase 1: Core Geodésico e Matemática WGS84
-* **Objetivo:** Estabelecer a precisão matemática do framework, implementando o cálculo geodésico puro.
-* **Tarefas:**
-  * [ ] Criar estrutura de dados para coordenadas Geodésicas $(\phi, \lambda, h)$ e ECEF $(X, Y, Z)$ em precisão `f64`.
-  * [ ] Implementar conversões bidirecionais geodésicas $\leftrightarrow$ ECEF.
-  * [ ] Implementar cálculos de distância de grande círculo (Fórmula de Vincenty / Haversine) e Azimute.
-  * [ ] Criar suite de testes unitários validando contra dados reais do elipsoide WGS84.
-* **Plano de Testes:**
-  * [ ] Executar suite de testes unitários em Rust comparando os cálculos de distância e conversões com ferramentas de referência (GeographicLib / PROJ) exigindo tolerância menor que 1mm.
-  * [ ] Validar comportamento matemático em pontos limítrofes (polos geográficos, Equador e transição do Antimeridiano +-180°).
-* **Marcos (Milestone 1):** Validação matemática aprovada, com erro acumulado menor que 1 milímetro.
+### Phase 1: Geodetic Core and WGS84 Mathematics
+* **Objective:** Establish the mathematical precision of the framework, implementing pure geodetic calculation.
+* **Tasks:**
+  * [ ] Create data structures for Geodetic coordinates $(\phi, \lambda, h)$ and ECEF $(X, Y, Z)$ in `f64` precision.
+  * [ ] Implement bidirectional geodetic conversions $\leftrightarrow$ ECEF.
+  * [ ] Implement great circle distance calculations (Vincenty Formula / Haversine) and Azimuth.
+  * [ ] Create unit test suite validating against real WGS84 ellipsoid data.
+* **Test Plan:**
+  * [ ] Run Rust unit test suite comparing distance calculations and conversions with reference tools (GeographicLib / PROJ) requiring tolerance less than 1mm.
+  * [ ] Validate mathematical behavior at boundary points (geographic poles, Equator, and Antimeridian transition +-180°).
+* **Milestones (Milestone 1):** Mathematical validation approved, with accumulated error less than 1 millimeter.
 
-### Fase 2: Projeções Cartográficas, Parser SLD e Biblioteca de Símbolos
-### Fase 2: Projeções Cartográficas, Parser SLD, Biblioteca de Símbolos e Camera Engine
-* **Objetivo:** Permitir a tradução de coordenadas do globo para planos bidimensionais, configurar a engine de estilização, resolver simbologias estruturadas e gerenciar dinamicamente a atitude da câmera.
-* **Tarefas:**
-  * [ ] Implementar a projeção **Lambert Conformal Conic (LCC)** com paralelos padrão configuráveis.
-  * [ ] Implementar a projeção **Estereográfica Azimutal** com foco no centro do radar (TMA).
-  * [ ] Implementar a projeção **Web Mercator** (EPSG:3857) para fundos de mapa padrão.
-  * [ ] Desenvolver o parser XML para o padrão OGC **SLD (Styled Layer Descriptor)**, traduzindo estilos geográficos em dicionários de estilos simples.
-  * [ ] Desenvolver o módulo **`Symbol Registry`** para decodificação e validação de códigos táticos militares (SIDC NATO) e auxílios-rádio civis (ICAO).
-  * [ ] Desenvolver o componente **`Camera Engine`** (`core::camera`) gerenciando `CameraState` (com zoom, bearing, pitch, roll) e calculando as matrizes de View-Projection para os modos 2D, 2.5D (com inclinação declinada) e 3D.
-* **Plano de Testes:**
-  * [ ] Executar testes de reprojeção cruzada (projetar e desprojetar pontos conhecidos para verificar reversibilidade matemática).
-  * [ ] Testar parse de SLD contendo tags inválidas ou corrompidas para certificar que o parser não causa pânicos na aplicação.
-  * [ ] Validar a correta resolução de SIDC NATO (APP-6) para afiliações e tipos variados, testando comportamento diante de códigos SIDC desconhecidos ou mal-formados.
-  * [ ] Validar matrizes geradas pelo `Camera Engine` verificando o correto mapeamento de pontos conhecidos para o espaço NDC sob rotação, inclinação e escala.
-* **Marcos (Milestone 2):** Algoritmos de projeção validados, parser SLD lendo arquivos sem exceções, gerador de símbolos composto estruturado e Camera Engine provendo matrizes matemáticas robustas.
+### Phase 2: Cartographic Projections, SLD Parser, Symbol Library, and Camera Engine
+* **Objective:** Allow the translation of globe coordinates to 2D planes, configure the styling engine, resolve structured symbologies, and dynamically manage camera attitude.
+* **Tasks:**
+  * [ ] Implement the **Lambert Conformal Conic (LCC)** projection with configurable standard parallels.
+  * [ ] Implement the **Azimuthal Stereographic** projection with focus on the radar center (TMA).
+  * [ ] Implement the **Web Mercator** projection (EPSG:3857) for standard background maps.
+  * [ ] Develop the XML parser for the OGC **SLD (Styled Layer Descriptor)** standard, translating geographic styles into simple style dictionaries.
+  * [ ] Develop the **`Symbol Registry`** module for decoding and validation of military tactical codes (NATO SIDC) and civil radio-aids (ICAO).
+  * [ ] Develop the **`Camera Engine`** component (`core::camera`) managing `CameraState` (with zoom, bearing, pitch, roll) and calculating View-Projection matrices for 2D, 2.5D (with declined tilt), and 3D modes.
+* **Test Plan:**
+  * [ ] Run cross-projection tests (project and unproject known points to verify mathematical reversibility).
+  * [ ] Test SLD parsing containing invalid or corrupted tags to certify that the parser does not cause panics in the application.
+  * [ ] Validate correct NATO SIDC (APP-6) resolution for affiliations and varied types, testing behavior against unknown or malformed SIDC codes.
+  * [ ] Validate matrices generated by the `Camera Engine` verifying correct mapping of known points to NDC space under rotation, tilt, and scale.
+* **Milestones (Milestone 2):** Projection algorithms validated, SLD parser reading files without exceptions, structured symbol generator composed, and Camera Engine providing robust mathematical matrices.
 
-### Fase 3: Engine de Terreno DTED e Interpolação de Alvos
-* **Objetivo:** Adicionar elevação geográfica passiva e estimativa cinemática contínua de movimento das aeronaves.
-* **Tarefas:**
-  * [ ] Criar indexador espacial em memória (Grid Index) para arquivos binários DTED.
-  * [ ] Implementar busca por coordenada geográfica em tempo $O(1)$ retornando a altitude do solo.
-  * [ ] Desenvolver algoritmo de perfil de corte vertical do terreno (Visão 2.5D).
-  * [ ] Implementar o módulo `Target Interpolator` (Dead Reckoning) usando cinemática linear para suavizar trajetórias de alvos dinâmicos.
-* **Plano de Testes:**
-  * [ ] Testar a consistência do parser de arquivos DTED a partir de buffers binários falsificados na memória.
-  * [ ] Validar a precisão física da interpolação cinemática em intervalos de tempo fracionados (ex: verificar posição estimada no instante $T+0.250s$).
-  * [ ] Medir a latência do cálculo de MSAW para garantir integridade sob alta taxa de consultas operacionais.
-* **Marcos (Milestone 3):** Simulação de radar interpolada e checagem de altimetria operando em tempo constante no Core Rust.
+### Phase 3: DTED Terrain Engine and Target Interpolation
+* **Objective:** Add passive geographic elevation and continuous kinematic estimation of aircraft movement.
+* **Tasks:**
+  * [ ] Create in-memory spatial indexer (Grid Index) for binary DTED files.
+  * [ ] Implement geographic coordinate lookup in $O(1)$ time returning ground altitude.
+  * [ ] Develop vertical terrain cut profile algorithm (2.5D View).
+  * [ ] Implement the `Target Interpolator` module (Dead Reckoning) using linear kinematics to smooth trajectories of dynamic targets.
+* **Test Plan:**
+  * [ ] Test the consistency of the DTED file parser from faked binary buffers in memory.
+  * [ ] Validate the physical precision of kinematic interpolation in fractional time intervals (e.g., verify estimated position at instant $T+0.250s$).
+  * [ ] Measure the latency of MSAW calculation to guarantee integrity under high operational query rates.
+* **Milestones (Milestone 3):** Interpolated radar simulation and altimetry checking operating in constant time in the Rust Core.
 
-### Fase 4: Camadas de Interoperabilidade (WASM e C-FFI) e Gestão de Memória
-* **Objetivo:** Preparar o Core Rust para ser consumido tanto em navegadores (via WASM/TS) quanto em hosts locais (C++/C via FFI), garantindo vazamento zero de recursos.
-* **Tarefas:**
-  * [ ] Configurar a compilação do `wasm-pack` e expor funções e estruturas do Core via `wasm-bindgen`.
-  * [ ] Integrar o `cbindgen` no processo de build nativo para gerar cabeçalhos C-compatíveis (`libolayer_native.h`) a partir das diretivas FFI do Core.
-  * [ ] Implementar pontes otimizadas para transferência de grandes volumes de dados (buffers binários DTED e MVT) usando memória linear compartilhada.
-  * [ ] Implementar política de desalocação explícita de memória (chamadas a `.free()`) na SDK TS e mapeamento de destruidores nativos FFI (conforme ADR-004).
-  * [ ] Configurar cache LRU de tiles DTED com expurgo de memória ativa na heap do WASM e cache nativo.
-* **Plano de Testes:**
-  * [ ] Executar testes automatizados no navegador headless via `wasm-bindgen-test` para homologar as assinaturas WebAssembly.
-  * [ ] Compilar um programa em C++ simples para validar os cabeçalhos `.h` autogerados e atestar a correta passagem de structs geodésicas via FFI.
-  * [ ] Testes de vazamento (Leak Checking) automatizados monitorando o crescimento do heap do WASM/C após criar e destruir massivamente estruturas dinâmicas.
-* **Marcos (Milestone 4):** Pacotes WASM e bibliotecas dinâmicas/estáticas nativas geradas com FFI validado e testes de vazamento aprovados.
+### Phase 4: Interoperability Layers (WASM and C-FFI) and Memory Management
+* **Objective:** Prepare the Rust Core to be consumed both in browsers (via WASM/TS) and in local hosts (C++/C via FFI), guaranteeing zero resource leaks.
+* **Tasks:**
+  * [ ] Configure `wasm-pack` compilation and expose Core functions and structures via `wasm-bindgen`.
+  * [ ] Integrate `cbindgen` into the native build process to generate C-compatible headers (`libolayer_native.h`) from the Core's FFI directives.
+  * [ ] Implement optimized bridges for transferring large volumes of data (binary DTED and MVT buffers) using shared linear memory.
+  * [ ] Implement explicit memory deallocation policy (`.free()` calls) in the TS SDK and mapping of native FFI destructors (per ADR-004).
+  * [ ] Configure LRU tile cache for DTED with active memory eviction on the WASM heap and native cache.
+* **Test Plan:**
+  * [ ] Run automated tests in headless browser via `wasm-bindgen-test` to homologate WebAssembly signatures.
+  * [ ] Compile a simple C++ program to validate the auto-generated `.h` headers and attest correct passing of geodetic structs via FFI.
+  * [ ] Automated Leak Checking tests monitoring the growth of the WASM/C heap after massively creating and destroying dynamic structures.
+* **Milestones (Milestone 4):** WASM packages and native dynamic/static libraries generated with validated FFI and approved leak tests.
 
-### Fase 5: SDK TypeScript (Ambiente Web)
-* **Objetivo:** Construir o framework visual consumido na Web, gerenciando o ciclo de exibição e interação.
-* **Tarefas:**
-  * [ ] Configurar repositório TS (Vite, esbuild, TypeScript) e carregar o módulo WASM de forma assíncrona.
-  * [ ] Desenvolver o `TS Controller` e o loop de renderização inteligente com suporte a taxas de FPS dinâmicas (15 FPS ocioso / 60 FPS ativo).
-  * [ ] Criar o **`Layer Manager`** para coordenar a pilha de camadas (Layer Stack) e segregar a repintura das camadas estáticas e dinâmicas.
-  * [ ] Criar o `Data Provider Manager` para requisições assíncronas do GeoServer (MVT, WMTS, SLD) e servidor de terreno (DTED).
-  * [ ] Desenvolver o `GPU Pipeline` (WebGL 2.0 / WebGPU) para renderização em tempo real de matrizes, terreno e camadas vetoriais MVT com cache em texturas de Framebuffer.
-  * [ ] Implementar a compilação dinâmica do **Texture Atlas** na GPU e renderização de alvos via chamadas instanciadas (`drawElementsInstanced`).
-  * [ ] Desenvolver o `CPU Pipeline` para plotagem pixel-perfect de alvos e implementar o algoritmo de **Anti-cluttering** de etiquetas na thread do navegador.
-  * [ ] Implementar controles de câmera interativos na interface (zoom, bearing, pitch, roll) e sincronização bidirecional com gestos de mouse (botão direito / Shift+drag para inclinar e rotacionar).
-* **Plano de Testes:**
-  * [ ] Testes de regressão visual automatizados (Snapshot Testing) comparando capturas de tela do Canvas 2D/WebGL contra frames de referência aprovados.
-  * [ ] Testar unitariamente a segregação de renderização das camadas estáticas vs dinâmicas no `Layer Manager`.
-  * [ ] Simular eventos contínuos de mouse/pan para verificar se o `TS Controller` de fato limita a taxa de quadros e retorna ao modo ocioso (15 FPS) de forma autônoma.
-* **Marcos (Milestone 5):** Tela radar funcional no navegador rodando a 60 FPS com renderização híbrida ativa e controle dinâmico total da câmera.
+### Phase 5: TypeScript SDK (Web Environment)
+* **Objective:** Build the visual framework consumed on the Web, managing the display lifecycle and interaction.
+* **Tasks:**
+  * [ ] Configure TS repository (Vite, esbuild, TypeScript) and load the WASM module asynchronously.
+  * [ ] Develop the `TS Controller` and intelligent rendering loop with support for dynamic FPS rates (15 FPS idle / 60 FPS active).
+  * [ ] Create the **`Layer Manager`** to coordinate the layer stack (Layer Stack) and segregate repainting of static and dynamic layers.
+  * [ ] Create the `Data Provider Manager` for asynchronous GeoServer requests (MVT, WMTS, SLD) and terrain server (DTED).
+  * [ ] Develop the `GPU Pipeline` (WebGL 2.0 / WebGPU) for real-time rendering of matrices, terrain, and MVT vector layers with Framebuffer texture caching.
+  * [ ] Implement dynamic **Texture Atlas** compilation on the GPU and target rendering via instanced calls (`drawElementsInstanced`).
+  * [ ] Develop the `CPU Pipeline` for pixel-perfect target plotting and implement the **Anti-cluttering** label algorithm on the browser thread.
+  * [ ] Implement interactive camera controls on the interface (zoom, bearing, pitch, roll) and bidirectional synchronization with mouse gestures (right button / Shift+drag to tilt and rotate).
+* **Test Plan:**
+  * [ ] Automated visual regression tests (Snapshot Testing) comparing Canvas 2D/WebGL screen captures against approved reference frames.
+  * [ ] Unit test the rendering segregation of static vs dynamic layers in the `Layer Manager`.
+  * [ ] Simulate continuous mouse/pan events to verify if the `TS Controller` actually limits the frame rate and returns to idle mode (15 FPS) autonomously.
+* **Milestones (Milestone 5):** Functional radar screen in the browser running at 60 FPS with active hybrid rendering and full dynamic camera control.
 
-### Fase 6: SDK Rust Nativo (Ambiente Desktop)
-* **Objetivo:** Viabilizar o uso do framework em aplicativos desktop locais de altíssima performance (Rust nativo e FFI).
-* **Tarefas:**
-  * [ ] Implementar o wrapper local da SDK conectando diretamente com as APIs estáticas do Core Rust (sem WASM).
-  * [ ] Desenvolver o `Native Controller` utilizando a crate `winit` para gerenciamento nativo de loop de renderização e janelas.
-  * [ ] Criar o `Native Layer Manager` para controle e composição da pilha de camadas (estáticas e dinâmicas) no ambiente desktop.
-  * [ ] Desenvolver a pipeline gráfica local utilizando a biblioteca `wgpu` para suporte a Vulkan, Metal e DirectX 12.
-  * [ ] Implementar a compilação dinâmica do Texture Atlas local e renderização instanciada via pipeline nativo do `wgpu`.
-  * [ ] Configurar a leitura assíncrona direta de arquivos DTED no disco rígido local da aplicação.
-  * [ ] Adaptar a SDK nativa e controles locais para expor a atitude completa de câmera (zoom, bearing, pitch, roll).
-* **Plano de Testes:**
-  * [ ] Executar testes de renderização nativos salvando buffers wgpu locais como imagens PNG e fazendo diff visual.
-  * [ ] Executar a suite de testes gráficos locais em ambientes CI utilizando adaptadores gráficos emulados por software (como o llvmpipe/lavapipe) para garantir funcionamento estável em headless.
-* **Marcos (Milestone 6):** Aplicação Desktop nativa compilada com sucesso exibindo os mesmos recursos visuais da versão web, com suporte a FFI atestado.
+### Phase 6: Native Rust SDK (Desktop Environment)
+* **Objective:** Enable the use of the framework in local desktop applications of ultra-high performance (native Rust and FFI).
+* **Tasks:**
+  * [ ] Implement the local SDK wrapper connecting directly with the Core Rust static APIs (without WASM).
+  * [ ] Develop the `Native Controller` using the `winit` crate for native rendering loop and window management.
+  * [ ] Create the `Native Layer Manager` for control and composition of the layer stack (static and dynamic) in the desktop environment.
+  * [ ] Develop the local graphics pipeline using the `wgpu` library for support to Vulkan, Metal, and DirectX 12.
+  * [ ] Implement dynamic local Texture Atlas compilation and instanced rendering via the native `wgpu` pipeline.
+  * [ ] Configure asynchronous direct reading of DTED files from the local application hard disk.
+  * [ ] Adapt the native SDK and local controls to expose the full camera attitude (zoom, bearing, pitch, roll).
+* **Test Plan:**
+  * [ ] Run native rendering tests saving local wgpu buffers as PNG images and performing visual diff.
+  * [ ] Run the local graphics test suite in CI environments using software-emulated graphics adapters (such as llvmpipe/lavapipe) to guarantee stable headless operation.
+* **Milestones (Milestone 6):** Native Desktop application compiled successfully displaying the same visual resources as the web version, with attested FFI support.
 
-### Fase 7: Testes Integrados, Validação Operacional e Benchmarks
-* **Objetivo:** Homologar o framework em cenários reais simulados de alta carga.
-* **Tarefas:**
-  * [ ] Criar cenário de teste integrando o framework com um servidor **GeoServer** ativo.
-  * [ ] Executar benchmark de stress injetando mais de 5.000 aeronaves ativas simultaneamente com Dead Reckoning a 60 FPS.
-  * [ ] Medir e validar a latência de transferência de dados através da ponte JS/WASM.
-  * [ ] Validar cenários de MSAW (alertas de colisão com o relevo) em tempo de execução.
-* **Plano de Testes:**
-  * [ ] Teste de Carga Extrema: Injeção contínua de 5.000+ alvos com atualização a 1 Hz, exigindo renderização a 60 FPS sem queda abrupta na taxa de atualização.
-  * [ ] Teste de Endurance: Execução ininterrupta da aplicação por 24 horas simulando tráfego real para auditar crescimento de memória RAM no host e no navegador (ferramentas: Chrome DevTools Profiler / Valgrind / Instruments).
-* **Marcos (Milestone 7):** Relatório de homologação técnica atestando estabilidade de FPS e consumo de memória estável após 24 horas de stress contínuo.
+### Phase 7: Integrated Tests, Operational Validation, and Benchmarks
+* **Objective:** Homologate the framework in simulated real-world high-load scenarios.
+* **Tasks:**
+  * [ ] Create test scenario integrating the framework with an active **GeoServer**.
+  * [ ] Run stress benchmark injecting more than 5,000 active aircraft simultaneously with Dead Reckoning at 60 FPS.
+  * [ ] Measure and validate data transfer latency through the JS/WASM bridge.
+  * [ ] Validate MSAW scenarios (terrain collision alerts) at runtime.
+* **Test Plan:**
+  * [ ] Extreme Load Test: Continuous injection of 5,000+ targets with update at 1 Hz, requiring rendering at 60 FPS without abrupt drop in update rate.
+  * [ ] Endurance Test: Uninterrupted execution of the application for 24 hours simulating real traffic to audit memory RAM growth in the host and browser (tools: Chrome DevTools Profiler / Valgrind / Instruments).
+* **Milestones (Milestone 7):** Technical homologation report attesting FPS stability and stable memory consumption after 24 hours of continuous stress.
 
 ---
 
-## 📈 Critérios de Aceitação de Entrega Geral
+## General Delivery Acceptance Criteria
 
-Para que o framework seja considerado pronto para produção:
-1. **Zero Memory Leaks:** Sem vazamento de memória residual do WASM na heap ou na CPU em execução prolongada de 24 horas.
-2. **Estabilidade de Frame Rate:** Manter 60 FPS estáveis durante interações de pan/zoom com mais de 2.000 aeronaves plotadas.
-3. **Consistência Visual:** Alvos de radar, etiquetas e simbologias de SLD devem se comportar de maneira visualmente idêntica nos modos 2D, 2.5D e 3D.
+For the framework to be considered ready for production:
+1. **Zero Memory Leaks:** No residual memory leaks from WASM in the heap or CPU in prolonged 24-hour execution.
+2. **Frame Rate Stability:** Maintain stable 60 FPS during pan/zoom interactions with more than 2,000 plotted aircraft.
+3. **Visual Consistency:** Radar targets, labels, and SLD symbologies must behave in a visually identical manner in 2D, 2.5D, and 3D modes.

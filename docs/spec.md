@@ -1,194 +1,193 @@
 
-# Especificação Técnica: Olayer
-# Framework GIS Híbrido para Controle de Tráfego Aéreo (ATC)
+# Technical Specification: Olayer
+# Hybrid GIS Framework for Air Traffic Control (ATC)
 
-## 1. Visão Geral e Escopo
+## 1. Overview and Scope
 
-O objetivo deste projeto é o desenvolvimento de um framework GIS de missão crítica para cenários de controle de tráfego aéreo (ATC) em 2D, com suporte nativo a visões em 2.5D (Perfil de Voo) e 3D (Globo Digital).
+The objective of this project is the development of a mission-critical GIS framework for air traffic control (ATC) scenarios in 2D, with native support for 2.5D (Flight Profile) and 3D (Digital Globe) views.
 
-O framework deve ser **estritamente focado no domínio GIS** (processamento geográfico, transformações matemáticas, renderização e indexação de terreno), delegando inteiramente a ingestão de dados brutos de rede (como protocolos Asterix ou feeds ADS-B) para a aplicação hospedeira (*Host*).
-
----
-
-## 2. Premissas Arquiteturais e Stack Tecnológica
-
-Para garantir segurança de memória, portabilidade e performance próxima à nativa em ambiente web e local, o projeto adotará uma abordagem multi-linguagem:
-
-* **Core Agnóstico (Rust):** Todo o motor de cálculo geodésico, algoritmos de projeção, parser de estilos SLD e indexação de arquivos DTED serão escritos em Rust puro.
-* **Distribuição Híbrida (WebAssembly + Native):** * **Navegadores:** O Core em Rust será compilado para **WebAssembly (WASM)**, provendo uma camada de bindings para ser consumida via **TypeScript**.
-* **Sistemas Locais:** O Core será consumido diretamente como uma dependência nativa em Rust.
-
-
-* **Abstração Matemática:** O motor de cálculo será 100% agnóstico de projeção de tela. Ele operará exclusivamente em coordenadas geodésicas baseadas no elipsoide WGS84 ($\phi, \lambda, h$) e coordenadas cartesianas geocêntricas ECEF ($X, Y, Z$) com precisão de ponto flutuante de 64 bits (`f64`).
+The framework must be **strictly focused on the GIS domain** (geographic processing, mathematical transformations, rendering, and terrain indexing), delegating the ingestion of raw network data (such as Asterix protocols or ADS-B feeds) entirely to the host application (*Host*).
 
 ---
 
-## 3. Design de Camadas (Arquitetura)
+## 2. Architectural Assumptions and Technology Stack
+
+To guarantee memory safety, portability, and near-native performance in both web and local environments, the project will adopt a multi-language approach:
+
+* **Agnostic Core (Rust):** All geodetic calculation engines, projection algorithms, SLD style parsers, and DTED file indexing will be written in pure Rust.
+* **Hybrid Distribution (WebAssembly + Native):** * **Browsers:** The Rust Core will be compiled to **WebAssembly (WASM)**, providing a binding layer to be consumed via **TypeScript**.
+* **Local Systems:** The Core will be consumed directly as a native dependency in Rust.
+
+
+* **Mathematical Abstraction:** The calculation engine will be 100% agnostic to screen projection. It will operate exclusively in geodetic coordinates based on the WGS84 ellipsoid ($\phi, \lambda, h$) and geocentric Cartesian ECEF coordinates ($X, Y, Z$) with 64-bit floating point precision (`f64`).
+
+---
+
+## 3. Layer Design (Architecture)
 
 ```
 +---------------------------------------------------------------+
-|                      Camada de Aplicação                      |
-|       (Host App: TypeScript Web / Rust Local Aplicativo)      |
+|                      Application Layer                      |
+|       (Host App: TypeScript Web / Rust Local Application)      |
 +---------------------------------------------------------------+
-                               |
-                               v
+                                |
+                                v
 +---------------------------------------------------------------+
-|                 Camada de Abstração Visual                    |
-|       (Pipeline Híbrido: Matrizes GPU & Coordenadas CPU)      |
+|                 Visual Abstraction Layer                    |
+|       (Hybrid Pipeline: GPU Matrices & CPU Coordinates)      |
 +---------------------------------------------------------------+
-                               |
-                               v
+                                |
+                                v
 +---------------------------------------------------------------+
-|                Core Agnóstico em Rust (WASM)                  |
-|     (Cálculos Geodésicos, Predição de Estado, Cache DTED)     |
+|                Agnostic Rust Core (WASM)                  |
+|     (Geodetic Calculations, State Prediction, DTED Cache)     |
 +---------------------------------------------------------------+
-                               |
-                               v
+                                |
+                                v
 +---------------------------------------------------------------+
-|                      Provedores de Dados                      |
-|         (Buffers MVT/WMS do GeoServer, Buffers DTED)          |
+|                      Data Providers                      |
+|         (MVT/WMS Buffers from GeoServer, DTED Buffers)          |
 +---------------------------------------------------------------+
 
 ```
 
 ---
 
-## 4. Pipeline de Renderização Híbrido
+## 4. Hybrid Rendering Pipeline
 
-Para otimizar o balanço entre performance gráfica de larga escala e precisão na plotagem de alvos, o framework implementará uma **estratégia híbrida de renderização**:
+To optimize the balance between large-scale graphics performance and plotting precision of targets, the framework will implement a **hybrid rendering strategy**:
 
-### A. Canal de Matrizes (Orientado à GPU)
+### A. Matrix Channel (GPU-oriented)
 
-* **Uso:** Renderização de terreno denso (DTED) e mapas de fundo vetoriais ou ráster originados do **GeoServer** (MVT - Mapbox Vector Tiles / WMS).
-* **Mecanismo:** O Core calcula e exporta matrizes de transformação $4 \times 4$ baseadas na projeção ativa e estado da câmera. A aplicação *Host* injeta estas matrizes diretamente nos Shaders da GPU (WebGL / WebGPU / Vulkan). Operações de *zoom* e *pan* atualizam a matriz sem reprocessar os vértices na CPU.
+* **Use:** Rendering of dense terrain (DTED) and vector or raster background maps originating from **GeoServer** (MVT - Mapbox Vector Tiles / WMS).
+* **Mechanism:** The Core calculates and exports $4 \times 4$ transformation matrices based on the active projection and camera state. The *Host* application injects these matrices directly into the GPU Shaders (WebGL / WebGPU / Vulkan). *Zoom* and *pan* operations update the matrix without reprocessing vertices on the CPU.
 
-### B. Canal de Vértices Projetados (Orientado à CPU)
+### B. Projected Vertex Channel (CPU-oriented)
 
-* **Uso:** Renderização de plotas de radar, etiquetas de dados (*data blocks*), vetores de rumo e símbolos de alvos dinâmicos.
-* **Mecanismo:** A interpolação física dos alvos (Dead Reckoning) ocorre estritamente em coordenadas geodésicas 3D no elipsoide WGS84. Para a renderização, a SDK do cliente (TypeScript ou Native) consulta as posições geodésicas interpoladas (`LatLon`) e as converte em coordenadas de tela $(X, Y)$ e profundidade utilizando o resolvedor de projeção ativo (Projections Engine) do Olayer Core.
-* **Vantagem Operacional:** Mantém a lógica cinemática completamente agnóstica de exibição, evita distorções de perspectiva nos símbolos em visualizações 3D (efeito *Billboard* automático na renderização) e permite a execução de algoritmos de anti-sobreposição (*anti-cluttering*) de etiquetas na CPU de forma estável.
+* **Use:** Rendering of radar plots, data labels (*data blocks*), heading vectors, and dynamic target symbols.
+* **Mechanism:** The physical interpolation of targets (Dead Reckoning) occurs strictly in 3D geodetic coordinates on the WGS84 ellipsoid. For rendering, the client SDK (TypeScript or Native) queries the interpolated geodetic positions (`LatLon`) and converts them into screen coordinates $(X, Y)$ and depth using the active projection resolver (Projections Engine) of the Olayer Core.
+* **Operational Advantage:** Keeps the kinematic logic completely agnostic of display, avoids perspective distortions on symbols in 3D views (automatic *Billboard* effect in rendering), and allows the execution of label anti-overlap (*anti-cluttering*) algorithms on the CPU in a stable manner.
 
-### C. Estrutura de Renderização Baseada em Camadas (Layer Stack)
+### C. Layer-based Rendering Structure (Layer Stack)
 
-Para prover flexibilidade operacional e otimizar a carga de trabalho de rendering, a visualização é estruturada em uma pilha de **Camadas (Layers)** com ciclos e frequências de repintura segregados:
-* **Camadas Dinâmicas (Alvos Táticos, Radar Meteorológico e Réguas Interativas):** Atualizadas em tempo real em cada ciclo de animação da tela (até 60 FPS) sobrepondo-se à textura composta das camadas estáticas, sem custo de reprocessamento do fundo.
-
----
-
-## 5. Requisitos de Funcionalidades GIS
-
-### 5.1 Suporte a Projeções, Visões e Controle de Câmera
-
-O framework deve suportar a alternância dinâmica em tempo de execução entre as seguintes projeções cartográficas e modos de exibição, com gerenciamento unificado através do **Camera Engine**:
-
-* **Estereográfica Azimutal:** Foco em radares de aproximação (TMA) e preservação de ângulos locais.
-* **Lambert Conformal Conic (LCC):** Foco em mapas de rota En-Route de longa distância.
-* **Mercator / Web Mercator:** Compatibilidade macro padrão.
-* **Visão 2.5D (Mapa de Perspectiva Plana Inclinada):** Projeção perspectiva tridimensional sobreposta a um plano projetado. Utiliza uma inclinação (pitch/tilt) padrão de **35 graus** (perspectiva declinada de topo/bird's-eye view, melhorando a visualização de alvos e relevo em comparação com o antigo ângulo estático de 55 graus).
-* **Visão 3D (Globo Virtual):** Transformação direta de coordenadas elipsoidais para cartesianas ECEF.
-
-#### Controle Dinâmico da Câmera (Zoom, Bearing, Pitch, Roll)
-O **Camera Engine** (`core::camera`) do Olayer Core provê controle unificado sobre a atitude da câmera em radianos, integrado às seguintes matrizes View-Projection:
-- **Zoom (escala linear):** Aplicado nos modos 2D, 2.5D e 3D.
-- **Bearing / Rotação (yaw):** Controla a orientação azimutal da câmera nos modos 2D, 2.5D e 3D.
-- **Pitch / Tilt (inclinação vertical):** Controla a inclinação do horizonte nos modos 2.5D (0° a 85°) e 3D (-90° a 90°).
-- **Roll (rolagem lateral):** Disponível nos modos 2.5D e 3D para suporte a movimentação em atitude de vôo completa.
-
-### 5.2 Simbologia Padronizada (ICAO e NATO) e Registro de Símbolos
-
-O framework gerencia bibliotecas de símbolos profissionais para aviação civil e defesa de forma performática e modular, dividindo as responsabilidades entre compilação offline de vetores (SVG) e carregamento dinâmico de imagens rasterizadas (PNG):
-
-* **Compilação e Importação de Símbolos Vetoriais (SVG):**
-  - Para manter a leveza do Core WASM e evitar o uso de interpretadores pesados de SVG em tempo de execução, a importação e tratamento de arquivos SVG são feitos no processo de build por meio da ferramenta CLI **`tools/symbol-compiler`**.
-  - O compilador faz o parse recursivo de caminhos, círculos, textos e estilos (incluindo cores CSS, opacidades e tracejados) dos arquivos SVG, mapeando-os para um JSON de biblioteca declarativa no padrão `DeclarativeLibraryDto` do Core.
-  - O Core Rust consome esta biblioteca no formato consolidado através do `DeclarativeProvider` registrado no `SymbolRegistry`.
-* **Carregamento de Símbolos Rasterizados (PNG/JPG) via SDK:**
-  - Símbolos contendo imagens PNG ou JPG são injetados diretamente na SDK TypeScript através do método `TextureAtlasManager::registerImageSymbol`. 
-  - A SDK utiliza as APIs nativas do navegador para carregar e renderizar os pixels de forma assíncrona, desenhando-os diretamente no Canvas do Texture Atlas para upload na GPU. A lógica de decodificação raster fica inteiramente a cargo do browser, não alterando a estrutura do Core em WASM.
-* **Simbologia Civil (ICAO) e Militar (NATO APP-6 / MIL-STD-2525):**
-  - Os pacotes de símbolos civis padrão (VOR, NDB, DME, TACAN, etc.) e táticos militares (molduras de afiliação, ícones de caça, cargueiro, etc.) são providos como SVGs base modulares pré-compilados pela ferramenta de build ou injetáveis via JSON compilado.
-* **Estratégia de Performance (Atlas de Texturas & Instanciamento):**
-  - Para evitar a sobrecarga de draw calls, a SDK compila os símbolos gerados sob demanda (primitivos vetoriais do WASM ou imagens carregadas via PNG) em uma textura compartilhada única na GPU (**Texture Atlas / Spritesheet**).
-  - A plotagem de milhares de alvos de radar faz uso de uma única chamada de desenho instanciada (`drawElementsInstanced`) que referencia as coordenadas UV do Atlas, eliminando gargalos de CPU e transferências extras.
-  - O renderizador final aplica *Billboard Shaders* para manter os símbolos planos e orientados de frente para o controlador, mesmo em visualizações 3D ou 2.5D inclinadas do globo.
-* **Compatibilidade com Streams 2D/3D:**
-  - O Texture Atlas e a projeção de símbolos são nativamente compatíveis com todos os modos de visão (2D plano, 2.5D de perfil e 3D do globo virtual). 
-  - No fluxo **2D/2.5D**, os símbolos do Atlas são renderizados diretamente como sprites planos nas coordenadas de tela.
-  - No fluxo **3D**, o renderizador projeta a origem tridimensional da aeronave e desenha os símbolos utilizando *Billboards* no espaço tridimensional, garantindo que permaneçam legíveis e com escala visual consistente sem distorção angular de perspectiva.
-* **Estilização SLD:** O Core contém um parser XML para arquivos **SLD (Styled Layer Descriptor)** que converte regras estáticas de estilização em metadados de estilo aplicados dinamicamente sobre as regras dos símbolos resolvidos no Registro de Símbolos.
-
-### 5.3 Integração Passiva com DTED
-
-* O motor GIS não fará requisições de I/O para ler arquivos do disco no modo web. Ele aceitará a injeção passiva de pedaços de elevação via buffers de memória (`ArrayBuffer` ou estruturas mapeadas).
-* O Core proverá buscas de complexidade $O(1)$ para determinar a altitude do solo e calcular o *Clearance* vertical de segurança de uma aeronave (alertas de MSAW).
+To provide operational flexibility and optimize rendering workload, the visualization is structured in a stack of **Layers** with segregated cycles and repaint frequencies:
+* **Dynamic Layers (Tactical Targets, Weather Radar, and Interactive Rulers):** Updated in real-time in each screen animation cycle (up to 60 FPS) overlapping the composited texture of the static layers, without cost of reprocessing the background.
 
 ---
 
-## 6. Sincronismo de Tempo e Controle Dinâmico de FPS
+## 5. GIS Functional Requirements
 
-O sistema deve desacoplar rigidamente o recebimento de dados do sensor (tipicamente na taxa de 1 Hz) da renderização na tela, permitindo o controle estrito de frames por segundo (FPS).
+### 5.1 Projection, View, and Camera Control Support
 
-### 6.1 Interpolação Preditiva (Dead Reckoning)
+The framework must support dynamic runtime switching between the following cartographic projections and display modes, with unified management through the **Camera Engine**:
 
-Os alvos dinâmicos serão registrados no Core Rust através de um **Vetor de Estado** (`TargetState`), contendo a posição elipsoidal do último *ping* (WGS84 `LatLon`), rumo real em radianos, velocidade horizontal em metros/segundo, velocidade vertical em metros/segundo e o *timestamp* da captura.
-Quando a aplicação *Host* solicitar a renderização de um frame, ela passará o *timestamp* atual do sistema. O Core computará a posição estimada do alvo (3D geodésico) de forma linear e suave (utilizando o elipsoide de referência e as funções do `Geodesy Engine`) entre as atualizações de sensor, sem acoplamento com projeções.
+* **Azimuthal Stereographic:** Focus on approach radars (TMA) and preservation of local angles.
+* **Lambert Conformal Conic (LCC):** Focus on long-distance En-Route route maps.
+* **Mercator / Web Mercator:** Standard macro compatibility.
+* **2.5D View (Tilted Flat Perspective Map):** Three-dimensional perspective projection overlaid on a projected plane. Uses a standard tilt (pitch/tilt) of **35 degrees** (declined top/bird's-eye perspective, improving target and relief visualization compared to the old static angle of 55 degrees).
+* **3D View (Virtual Globe):** Direct transformation of ellipsoidal coordinates to Cartesian ECEF.
 
-### 6.2 Gerenciamento de FPS
+#### Dynamic Camera Control (Zoom, Bearing, Pitch, Roll)
+The **Camera Engine** (`core::camera`) of the Olayer Core provides unified control over camera attitude in radians, integrated with the following View-Projection matrices:
+- **Zoom (linear scale):** Applied in 2D, 2.5D, and 3D modes.
+- **Bearing / Rotation (yaw):** Controls the azimuthal orientation of the camera in 2D, 2.5D, and 3D modes.
+- **Pitch / Tilt (vertical inclination):** Controls the inclination of the horizon in 2.5D (0° to 85°) and 3D (-90° to 90°) modes.
+- **Roll (lateral roll):** Available in 2.5D and 3D modes for full flight attitude movement support.
 
-A aplicação *Host* controlará o passo de tempo (*time-step throttling*), permitindo alterar a taxa de atualização dinamicamente para preservação de recursos do hardware:
+### 5.2 Standardized Symbology (ICAO and NATO) and Symbol Registry
 
-* **Modo Econômico (Ex: 15-20 FPS):** Ativado quando a tela e a câmera estão estáticas. A suavidade do movimento das aeronaves é mantida via interpolação.
-* **Modo Responsivo (Ex: 60 FPS):** Ativado sob demanda via eventos de interface do usuário (enquanto o controlador arrasta o mapa ou altera o zoom), retornando ao modo econômico de forma automática após a estabilização da tela.
+The framework manages professional symbol libraries for civil aviation and defense in a performant and modular way, dividing responsibilities between offline vector compilation (SVG) and dynamic rasterized image loading (PNG):
+
+* **Compilation and Import of Vector Symbols (SVG):**
+  - To keep the WASM Core lightweight and avoid heavy SVG interpreters at runtime, the import and handling of SVG files are done at build time via the CLI tool **`tools/symbol-compiler`**.
+  - The compiler recursively parses paths, circles, texts, and styles (including CSS colors, opacities, and dash patterns) from SVG files, mapping them to a declarative library JSON in the Core's `DeclarativeLibraryDto` standard.
+  - The Rust Core consumes this library in consolidated format through the `DeclarativeProvider` registered in the `SymbolRegistry`.
+* **Loading of Rasterized Symbols (PNG/JPG) via SDK:**
+  - Symbols containing PNG or JPG images are injected directly into the TypeScript SDK through the `TextureAtlasManager::registerImageSymbol` method.
+  - The SDK uses browser native APIs to load and render pixels asynchronously, drawing them directly into the Texture Atlas Canvas for upload to the GPU. The raster decoding logic is entirely handled by the browser, without altering the WASM Core structure.
+* **Civil (ICAO) and Military (NATO APP-6 / MIL-STD-2525) Symbology:**
+  - Standard civil symbol packages (VOR, NDB, DME, TACAN, etc.) and military tactical packages (affiliation frames, fighter icons, cargo, etc.) are provided as modular base SVGs pre-compiled by the build tool or injectable via compiled JSON.
+* **Performance Strategy (Texture Atlas & Instancing):**
+  - To avoid draw call overhead, the SDK compiles on-demand generated symbols (WASM vector primitives or images loaded via PNG) into a single shared GPU texture (**Texture Atlas / Spritesheet**).
+  - The plotting of thousands of radar targets uses a single instanced draw call (`drawElementsInstanced`) referencing the Atlas UV coordinates, eliminating CPU bottlenecks and extra transfers.
+  - The final renderer applies *Billboard Shaders* to keep symbols flat and front-facing to the controller, even in 3D or inclined 2.5D globe views.
+* **Compatibility with 2D/3D Streams:**
+  - The Texture Atlas and symbol projection are natively compatible with all view modes (2D flat, 2.5D profile, and 3D virtual globe).
+  - In the **2D/2.5D** flow, Atlas symbols are rendered directly as flat sprites in screen coordinates.
+  - In the **3D** flow, the renderer projects the 3D origin of the aircraft and draws symbols using *Billboards* in 3D space, ensuring they remain readable and with consistent visual scale without angular perspective distortion.
+* **SLD Styling:** The Core contains an XML parser for **SLD (Styled Layer Descriptor)** files that converts static styling rules into dynamic style metadata applied over the rules of symbols resolved in the Symbol Registry.
+
+### 5.3 Passive Integration with DTED
+
+* The GIS engine will not make I/O requests to read files from disk in web mode. It will accept passive injection of elevation chunks via memory buffers (`ArrayBuffer` or mapped structures).
+* The Core will provide $O(1)$ complexity lookups to determine ground altitude and calculate the vertical *Clearance* safety margin of an aircraft (MSAW alerts).
+
 ---
 
-## 7. Infraestrutura de Servidor de Mapas (Data Providers)
+## 6. Time Synchronization and Dynamic FPS Control
 
-Para alimentar o framework com dados cartográficos e estruturais de aviação, o projeto adotará a seguinte pilha de servidores:
+The system must rigidly decouple sensor data reception (typically at 1 Hz) from screen rendering, allowing strict frames per second (FPS) control.
 
-### 7.1 Servidor de Aplicação: GeoServer
-* **Versão Recomendada:** 2.22.x ou superior (com suporte estável a extensões de Vector Tiles).
-* **Protocolos Consumidos:** * **WMTS / MVT (Mapbox Vector Tiles):** Usado para a carga massiva de fundos de mapa vetoriais (fronteiras, litorais, áreas urbanas) e aerovias de alta densidade. O Core Rust aplicará a projeção ativa (ex: LCC) sobre os vértices do MVT.
-  * **WFS (Web Feature Service):** Usado para consultas pontuais de metadados críticos (ex: buscar coordenadas exatas de uma cabeceira de pista ou informações de um rádio-auxílio/VOR).
-* **Estilização:** O GeoServer centralizará os arquivos `.sld` estruturais que o framework consumirá via API para sincronizar a identidade visual.
+### 6.1 Predictive Interpolation (Dead Reckoning)
 
-### 7.2 Armazenamento: PostgreSQL + PostGIS
-* O banco de dados geográfico armazenará feições espaciais complexas com indexação `GIST` para otimizar requisições de renderização de setores.
+Dynamic targets will be registered in the Rust Core through a **State Vector** (`TargetState`), containing the ellipsoidal position of the last *ping* (WGS84 `LatLon`), real heading in radians, horizontal speed in meters/second, vertical speed in meters/second, and the *timestamp* of capture.
+When the *Host* application requests a frame render, it passes the current system *timestamp*. The Core computes the estimated target position (3D geodetic) linearly and smoothly (using the reference ellipsoid and `Geodesy Engine` functions) between sensor updates, without coupling to projections.
 
-### 7.3 Otimização de Entrega: GeoWebCache (GWC)
-* Toda requisição de mapa de fundo vinda do framework deve obrigatoriamente bater na camada do GeoWebCache em formato MVT ou WMTS (Ráster, para imagens de satélite). Fica proibido o uso de WMS puro/dinâmico para telas operacionais em tempo real para evitar sobrecarga do servidor de mapas.
+### 6.2 FPS Management
 
-### 7.4 Pilha de Dados de Mapa (Map Data Stack)
-Para isolar a rede e o gerenciamento de arquivos da renderização WebGL e cálculos do radar, as SDKs implementam a pilha de dados baseada em `MapDataSource`:
-* **`VectorTileSource` (MVT / GeoServer):** Gerencia a paginação e o cálculo geométrico dos limites visíveis (Bounding Box) da câmera em tempo real, realizando buscas paralelas de blocos vetoriais no GeoServer.
-* **`RasterTileSource` (WMTS / OSM):** Controla o download de imagens de mapa e o upload de texturas para a GPU de forma assíncrona.
-* **`TerrainTileSource` (DTED / Terreno):** Paginação automática baseada na posição do controlador. Substitui a injeção passiva pura por um resolvedor de rede dinâmico com fila de downloads e algoritmo de despejo de memória LRU (Least Recently Used) para garantir consumo estável de memória RAM/WASM.
-* **Desacoplamento por Concorrência:** A decodificação de formatos geográficos complexos (MVT/DTED) será executada em threads de suporte (Web Workers no navegador, Threads locais em desktop) para que a thread de renderização principal nunca bloqueie o tráfego do radar.
+The *Host* application controls the *time-step throttling*, allowing dynamic update rate changes for hardware resource preservation:
+
+* **Economic Mode (Ex: 15-20 FPS):** Activated when the screen and camera are static. Smoothness of aircraft movement is maintained via interpolation.
+* **Responsive Mode (Ex: 60 FPS):** Activated on demand via user interface events (while the controller drags the map or changes zoom), automatically returning to economic mode after screen stabilization.
+---
+
+## 7. Map Server Infrastructure (Data Providers)
+
+To feed the framework with cartographic and aviation structural data, the project will adopt the following server stack:
+
+### 7.1 Application Server: GeoServer
+* **Recommended Version:** 2.22.x or higher (with stable Vector Tiles extension support).
+* **Consumed Protocols:** * **WMTS / MVT (Mapbox Vector Tiles):** Used for massive loading of vector background maps (borders, coastlines, urban areas) and high-density airways. The Rust Core will apply the active projection (e.g., LCC) over the MVT vertices.
+  * **WFS (Web Feature Service):** Used for point metadata queries (e.g., fetching exact coordinates of a runway threshold or information of a radio-aid/VOR).
+* **Styling:** GeoServer will centralize the structural `.sld` files that the framework will consume via API to synchronize visual identity.
+
+### 7.2 Storage: PostgreSQL + PostGIS
+* The geographic database will store complex spatial features with `GIST` indexing to optimize sector rendering requests.
+
+### 7.3 Delivery Optimization: GeoWebCache (GWC)
+* Every background map request from the framework must mandatorily hit the GeoWebCache layer in MVT or WMTS format (Raster, for satellite images). Use of pure/dynamic WMS for real-time operational screens is prohibited to avoid map server overload.
+
+### 7.4 Map Data Stack (Map Data Stack)
+To isolate the network and file management from WebGL rendering and radar calculations, the SDKs implement the data stack based on `MapDataSource`:
+* **`VectorTileSource` (MVT / GeoServer):** Manages paging and geometric calculation of the camera's visible limits (Bounding Box) in real-time, performing parallel searches of vector blocks in GeoServer.
+* **`RasterTileSource` (WMTS / OSM):** Controls map image download and asynchronous texture upload to the GPU.
+* **`TerrainTileSource` (DTED / Terrain):** Automatic paging based on controller position. Replaces pure passive injection with a dynamic network resolver with download queues and LRU (Least Recently Used) memory eviction algorithm to ensure stable RAM/WASM consumption.
+* **Decoupling by Concurrency:** Complex geographic format decoding (MVT/DTED) will be executed in support threads (Web Workers in browser, local threads in desktop) so that the main rendering thread never blocks radar traffic.
 
 ---
 
-## 8. Estrutura Proposta de Código do Repositório
+## 8. Proposed Code Repository Structure
 
 ```text
-├── core/                  # Código Rust Puro (Agnóstico e Matemático)
+├── core/                  # Pure Rust Code (Agnostic and Mathematical)
 │   ├── Cargo.toml
 │   └── src/
-│       ├── geodesy/       # Módulo de Fórmulas Geodésicas e ECEF (WGS84)
-│       ├── camera/        # Gerenciamento de CameraState e matrizes View-Proj para 2D/2.5D/3D
-│       ├── terrain/       # Parse de arquivos DTED e Índice de Altitude O(1)
-│       ├── sld/           # Parser XML de arquivos Styled Layer Descriptor
-│       └── projections/   # Algoritmos das projeções (Estereográfica, LCC, Mercator)
+│       ├── geodesy/       # Geodetic Formulas and ECEF Module (WGS84)
+│       ├── camera/        # CameraState Management and View-Proj Matrices for 2D/2.5D/3D
+│       ├── terrain/       # DTED File Parsing and O(1) Altitude Index
+│       ├── sld/           # XML Parser for Styled Layer Descriptor Files
+│       └── projections/   # Projection Algorithms (Stereographic, LCC, Mercator)
 │
 └── sdk/
-    ├── ts/                # SDK TypeScript para Navegadores
-    │   └── wasm/          # Camada de exportação wasm-bindgen para TypeScript
+    ├── ts/                # TypeScript SDK for Browsers
+    │   └── wasm/          # wasm-bindgen export layer for TypeScript
     │
-    └── native/            # SDK Nativo Desktop e C-FFI
-        ├── c_ffi_bridge/  # Exportação C-FFI (cbindgen)
-        └── desktop/       # Aplicação nativa desktop (WGPU/winit/egui)
+    └── native/            # Native Desktop SDK and C-FFI
+        ├── c_ffi_bridge/  # C-FFI Export (cbindgen)
+        └── desktop/       # Native desktop application (WGPU/winit/egui)
 ```
 
 ---
-
 
 
 

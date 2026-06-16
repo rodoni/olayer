@@ -1,46 +1,46 @@
-# Arquitetura: Native Layer Manager
+# Architecture: Native Layer Manager
 
-Este documento detalha o design arquitetural e a especificação técnica do componente **Native Layer Manager** do SDK Nativo do Olayer.
-
----
-
-## 1. Visão Geral
-
-O **Native Layer Manager** gerencia a pilha de camadas de visualização cartográfica e operacional no ambiente nativo desktop. O objetivo principal deste componente é coordenar quais camadas são visíveis, qual a ordem de renderização (compositing) e quando redesenhar cada elemento gráfico para obter eficiência máxima de CPU e GPU.
+This document details the architectural design and technical specification of the **Native Layer Manager** component of the Olayer Native SDK.
 
 ---
 
-## 2. Estrutura de Camadas e Compositing
+## 1. Overview
 
-As camadas são desenhadas em ordem estrita de profundidade (back-to-front):
+The **Native Layer Manager** manages the stack of cartographic and operational visualization layers in the native desktop environment. The main objective of this component is to coordinate which layers are visible, what the rendering order is (compositing), and when to redraw each graphic element to achieve maximum CPU and GPU efficiency.
+
+---
+
+## 2. Layer Structure and Compositing
+
+Layers are drawn in strict depth order (back-to-front):
 
 ```
-       [ Topo ]
-   ┌───────────────┐
-   │ egui HUD / UI │  <-- Camada 3: Controle Interativo e Painéis
-   └───────────────┘
-   ┌───────────────┐
-   │ Radar Targets │  <-- Camada 2: Desenho de Aeronaves e Vetores
-   └───────────────┘
-   ┌───────────────┐
-   │ Grid Geodésico│  <-- Camada 1: Linhas de Longitude e Latitude
-   └───────────────┘
-   ┌───────────────┐
-   │ Background    │  <-- Camada 0: Cor de Fundo de Tela ATC (Limpeza)
-   └───────────────┘
-      [ Fundo ]
+       [ Top ]
+    ┌───────────────┐
+    │ egui HUD / UI │  <-- Layer 3: Interactive Control and Panels
+    └───────────────┘
+    ┌───────────────┐
+    │ Radar Targets │  <-- Layer 2: Aircraft and Vectors Drawing
+    └───────────────┘
+    ┌───────────────┐
+    │ Geodetic Grid │  <-- Layer 1: Longitude and Latitude Lines
+    └───────────────┘
+    ┌───────────────┐
+    │ Background    │  <-- Layer 0: ATC Screen Background Color (Clear)
+    └───────────────┘
+       [ Bottom ]
 ```
 
-### 2.1 Segregação de Ciclos de Renderização
-Para evitar redesenhar geometrias de larga escala que mudam raramente (como a grade geodésica), o loop de renderização utiliza o seguinte padrão:
-* **Camadas Estáticas (Grade / Mapa Base):** Apenas são regeneradas na CPU e reenviadas para buffers da GPU se a câmera sofrer pan, zoom ou se a projeção ativa for alterada. Do contrário, o pipeline WGPU faz apenas o redesenho rápido a partir de buffers já alocados.
-* **Camadas Dinâmicas (Alvos / Interface):** Redesenhadas em todos os frames usando o ciclo de renderização ativa da interface gráfica (`egui` e `egui_wgpu`).
+### 2.1 Rendering Cycle Segregation
+To avoid redrawing large-scale geometries that rarely change (such as the geodetic grid), the rendering loop uses the following pattern:
+* **Static Layers (Grid / Base Map):** Only regenerated on the CPU and resent to GPU buffers if the camera undergoes pan, zoom, or if the active projection is changed. Otherwise, the WGPU pipeline only performs a quick redraw from the already allocated buffers.
+* **Dynamic Layers (Targets / Interface):** Redrawn in all frames using the active interface graphics rendering cycle (`egui` and `egui_wgpu`).
 
 ---
 
-## 3. Implementação e Fluxo de Desenho
+## 3. Implementation and Drawing Flow
 
-O loop de renderização nativa (descrito em [main.rs](file:///c:/Users/rafae/projects/rust/olayer/sdk/native/demo/src/main.rs)) realiza o seguinte fluxo a cada frame:
+The native rendering loop (described in [main.rs](file:///c:/Users/rafae/projects/rust/olayer/sdk/native/demo/src/main.rs)) performs the following flow at each frame:
 
 ```mermaid
 sequenceDiagram
@@ -48,19 +48,54 @@ sequenceDiagram
     participant WGPU as wgpu Render Pass
     participant Egui as egui Renderer
     
-    Main->>Main: Prepara matrizes de projeção
-    Main->>WGPU: Inicia CommandEncoder & RenderPass
-    Main->>WGPU: Limpa tela com cor de fundo ATC
-    Main->>WGPU: Desenha Grid Geodésico (Vertex Buffer)
-    Main->>Egui: Tessela formas da interface e alvos
-    Main->>Egui: Renderiza UI e Overlay de Targets na GPU
-    Main->>WGPU: Finaliza e envia comandos para Queue
+    Main->>Main: Prepares projection matrices
+    Main->>WGPU: Starts CommandEncoder & RenderPass
+    Main->>WGPU: Clears screen with ATC background color
+    Main->>WGPU: Draws Geodetic Grid (Vertex Buffer)
+    Main->>Egui: Tessellates interface shapes and targets
+    Main->>Egui: Renders UI and Target Overlay on GPU
+    Main->>WGPU: Finalizes and sends commands to Queue
 ```
 
 ---
 
-## 4. Interfaces e Integração
+## 4. Interfaces and Integration
 
-O desenho é segmentado pelas seguintes áreas de código:
-* **Desenho da Grade:** Método `rebuild_grid_buffers` reconstrói o `grid_vertex_buffer` dinamicamente com base no modo de projeção atual (2D/2.5D/3D).
-* **Desenho de Alvos e UI:** O método `egui::Context::begin_frame` inicia o contexto no qual o Painter de tela (`egui_ctx.layer_painter`) plota os alvos do radar e caixas de dados, enquanto painéis UI HUD fornecem controles operacionais.
+### 4.1 `Layer` Trait
+Every layer in the native stack implements the `Layer` trait (defined in `native_layer_manager/mod.rs`):
+```rust
+pub trait Layer {
+    fn id(&self) -> &str;
+    fn is_visible(&self) -> bool;
+    fn set_visible(&mut self, visible: bool);
+    fn is_static(&self) -> bool;
+}
+```
+* **Static layers** (`is_static() == true`) are regenerated only when the camera changes pan, zoom, or projection.
+* **Dynamic layers** (`is_static() == false`) are redrawn every frame.
+
+### 4.2 `NativeLayerManager` API
+The manager stores layers in a `Vec<Box<dyn Layer>>` and maintains a `HashMap<String, usize>` index for O(1) lookups.
+```rust
+pub struct NativeLayerManager {
+    layers: Vec<Box<dyn Layer>>,
+    index: HashMap<String, usize>,
+    pub show_grid: bool,
+    pub show_targets: bool,
+    pub show_hud: bool,
+    pub show_terrain: bool,
+}
+```
+Key methods:
+* `add_layer(layer: Box<dyn Layer>) -> Result<(), String>` — Adds a layer to the top of the stack.
+* `remove_layer(id: &str) -> bool` — Removes a layer by ID.
+* `reorder_layer(id: &str, new_index: usize) -> Result<(), String>` — Moves a layer to a new position.
+* `visible_static_layers() -> Vec<&dyn Layer>` — Returns visible static layers.
+* `visible_dynamic_layers() -> Vec<&dyn Layer>` — Returns visible dynamic layers.
+* `set_layer_visibility(id: &str, visible: bool) -> Result<(), String>` — Toggles a single layer.
+* `set_all_visibility(visible: bool)` — Toggles all layers.
+
+### 4.3 Drawing Segmentation
+Drawing is segmented by the following code areas:
+* **Grid Drawing:** `rebuild_grid_buffers` method rebuilds the `grid_vertex_buffer` dynamically based on the current projection mode (2D/2.5D/3D).
+* **Target and UI Drawing:** The `egui::Context::begin_frame` method initiates the context in which the screen Painter (`egui_ctx.layer_painter`) plots radar targets and data boxes, while HUD UI panels provide operational controls.

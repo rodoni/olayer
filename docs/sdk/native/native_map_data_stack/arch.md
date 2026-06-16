@@ -1,42 +1,68 @@
-# Arquitetura: Native Map Data Stack
+# Architecture: Native Map Data Stack
 
-Este documento detalha o design arquitetural e a especificação técnica do componente **Native Map Data Stack** do SDK Nativo do Olayer.
+This document details the architectural design and technical specification of the **Native Map Data Stack** component of the Olayer Native SDK.
 
 ---
 
-## 1. Visão Geral
+## 1. Overview
 
-O **Native Map Data Stack** é a camada de infraestrutura de dados da SDK Nativa. Sua responsabilidade é fornecer, decodificar e gerenciar buffers de memória contendo informações geoespaciais (dados de terreno DTED) e dados dinâmicos de alvos operacionais (radar/ADS-B), alimentando os respectivos motores matemáticos do Core.
+The **Native Map Data Stack** is the data infrastructure layer of the Native SDK. Its responsibility is to provide, decode, and manage memory buffers containing geospatial information (DTED terrain data) and dynamic operational target data (radar/ADS-B), feeding the respective mathematical engines of the Core.
 
 ```mermaid
 graph LR
-    Disk[(Disco Local)] -->|Carregamento de DTED| TE[TerrainEngine]
-    Feed[Feed de Radar 1Hz] -->|Ingestão de Alvos| IE[InterpolationEngine]
+    Disk[(Local Disk)] -->|DTED Loading| TE[TerrainEngine]
+    Feed[1Hz Radar Feed] -->|Target Ingestion| IE[InterpolationEngine]
 ```
 
 ---
 
-## 2. Ingestão de Terreno (DTED)
+## 2. Data Source Abstraction (`MapDataSource`)
 
-Ao contrário da versão WebAssembly (que consome tiles de elevação via requisições HTTP gerenciadas por TypeScript), o SDK Nativo realiza leituras locais e diretas de disco:
-* **Formato:** Suporta a leitura de arquivos binários padrão DTED (Level 0, 1 ou 2).
-* **Grid espacial:** A SDK lê o cabeçalho UHL do arquivo, extrai a latitude/longitude do tile e repassa o buffer binário bruto para o `TerrainEngine` do Core através de [load_tile](file:///c:/Users/rafae/projects/rust/olayer/core/src/terrain).
-* **Inicialização:** Em [main.rs](file:///c:/Users/rafae/projects/rust/olayer/sdk/native/demo/src/main.rs), é feita a leitura/geração de mock tiles para a área do TMA São Paulo e sua injeção subsequente no controlador.
+The native stack uses a generic `MapDataSource` trait to register multiple providers (terrain, raster, vector) behind a unified registry:
+```rust
+pub trait MapDataSource {
+    fn id(&self) -> &str;
+    fn clear_cache(&mut self);
+    fn cache_size(&self) -> usize;
+}
+```
+* `NativeMapDataStack` holds a `HashMap<String, Box<dyn MapDataSource>>` and provides:
+  * `register_source(source: Box<dyn MapDataSource>) -> Result<(), String>`
+  * `get_source(id: &str) -> Option<&dyn MapDataSource>`
+  * `clear_cache()` — clears all registered sources.
+  * `get_cache_size() -> usize` — aggregate cache size.
 
 ---
 
-## 3. Ingestão de Alvos Dinâmicos (Radar Feed)
+## 3. Terrain Ingestion (DTED)
 
-Os pacotes de telemetria das aeronaves no espaço aéreo (geralmente recebidos de feeds de radar ou ADS-B a uma frequência de 1 Hz) são injetados no sistema:
-* **Dead Reckoning Setup:** O estado atual (latitude, longitude, altitude, velocidade, rumo e timestamp) é enviado para o `InterpolationEngine` via [update_target](file:///c:/Users/rafae/projects/rust/olayer/core/src/interpolator).
-* **Atualização:** Em [main.rs](file:///c:/Users/rafae/projects/rust/olayer/sdk/native/demo/src/main.rs), um timer simula a atualização de posições a cada segundo, atualizando o modelo físico geodésico correspondente.
+Unlike the WebAssembly version (which consumes elevation tiles via HTTP requests managed by TypeScript), the Native SDK performs local and direct disk readings:
+* **Format:** Supports reading of standard binary DTED files (Level 0, 1, or 2).
+* **Spatial grid:** The SDK reads the UHL file header, extracts the tile's latitude/longitude, and passes the raw binary buffer to the Core's `TerrainEngine` through [load_tile](file:///c:/Users/rafae/projects/rust/olayer/core/src/terrain).
+* **Direct helpers:** `NativeMapDataStack` provides backward-compatible helpers:
+  * `load_dted_file(path: &str, terrain: &mut TerrainEngine) -> Result<(), String>`
+  * `load_dted_buffer(buffer: &[u8], terrain: &mut TerrainEngine) -> Result<(), String>`
+* **Concrete source:** `TerrainDataSource` wraps a `TerrainEngine` and tracks loaded tiles so it can implement `clear_cache` and `cache_size`:
+  * `load_file(path: &str) -> Result<(), String>`
+  * `load_buffer(buffer: &[u8]) -> Result<(), String>`
+  * `unload_tile(lat_deg: i32, lon_deg: i32) -> bool`
+  * `get_elevation(lat_deg: f64, lon_deg: f64) -> Result<f64, String>`
+* **Initialization:** In [main.rs](file:///c:/Users/rafae/projects/rust/olayer/sdk/native/demo/src/main.rs), mock tile reading/generation is performed for the São Paulo TMA area and its subsequent injection into the controller.
 
 ---
 
-## 4. Integração C-FFI para Sistemas Host
+## 4. Dynamic Target Ingestion (Radar Feed)
 
-Para aplicações hosts escritas em C/C++, o carregamento e manipulação desses dados são expostos através de funções FFI seguras localizadas em [c_ffi_bridge/mod.rs](file:///c:/Users/rafae/projects/rust/olayer/sdk/native/src/c_ffi_bridge/mod.rs):
+Aircraft telemetry packets in the airspace (usually received from radar or ADS-B feeds at a frequency of 1 Hz) are injected into the system:
+* **Dead Reckoning Setup:** The current state (latitude, longitude, height, speed, heading, and timestamp) is sent to the `InterpolationEngine` via [update_target](file:///c:/Users/rafae/projects/rust/olayer/core/src/interpolator).
+* **Update:** In [main.rs](file:///c:/Users/rafae/projects/rust/olayer/sdk/native/demo/src/main.rs), a timer simulates position updates every second, updating the corresponding geodetic physical model.
 
-* **Carregar Terreno:** `olayer_terrain_engine_load_tile`
-* **Descarregar Terreno:** `olayer_terrain_engine_unload_tile`
-* **Atualizar Alvo:** `olayer_interpolator_update`
+---
+
+## 5. C-FFI Integration for Host Systems
+
+For C/C++ host applications, the loading and manipulation of these data are exposed through safe FFI functions located in [c_ffi_bridge/mod.rs](file:///c:/Users/rafae/projects/rust/olayer/sdk/native/src/c_ffi_bridge/mod.rs):
+
+* **Load Terrain:** `olayer_terrain_engine_load_tile`
+* **Unload Terrain:** `olayer_terrain_engine_unload_tile`
+* **Update Target:** `olayer_interpolator_update`

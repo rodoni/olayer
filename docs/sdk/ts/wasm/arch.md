@@ -1,14 +1,14 @@
-# Arquitetura: Bridge WebAssembly (WASM)
+# Architecture: WebAssembly (WASM) Bridge
 
-Este documento descreve o design detalhado, a estrutura de interfaces e a gestão de recursos da ponte de interoperabilidade **WebAssembly (WASM)** do Olayer, localizada em [wasm](file:///c:/Users/rafae/projects/rust/olayer/sdk/ts/wasm).
+This document describes the detailed design, interface structure, and resource management of the **WebAssembly (WASM)** interoperability bridge of Olayer, located in [wasm](file:///c:/Users/rafae/projects/rust/olayer/sdk/ts/wasm).
 
-Este componente é responsável por traduzir dados e expor as capacidades do [Olayer Core](file:///c:/Users/rafae/projects/rust/olayer/core) para o SDK TypeScript rodando no navegador.
+This component is responsible for translating data and exposing the capabilities of the [Olayer Core](file:///c:/Users/rafae/projects/rust/olayer/core) to the TypeScript SDK running in the browser.
 
 ---
 
-## 1. Diagrama do Contêiner WASM (C4 Model - Nível 3)
+## 1. WASM Container Diagram (C4 Model - Level 3)
 
-A ponte WASM atua como um adaptador bidirecional entre o runtime do JavaScript (Engine V8) e o motor em Rust compilado para código de máquina WASM.
+The WASM bridge acts as a bidirectional adapter between the JavaScript runtime (V8 Engine) and the Rust engine compiled to WASM machine code.
 
 ```mermaid
 graph TB
@@ -22,8 +22,8 @@ graph TB
     end
 
     subgraph WASM_Bridge_Boundary ["sdk/ts/wasm (wasm-bindgen)"]
-        wasm_bindgen["🔗 wasm-bindgen Wrappers<br>(Classes e Métodos Exportados)"]:::wasm
-        wasm_memory["💾 Memória Linear WASM<br>(Heap Compartilhada)"]:::wasm
+        wasm_bindgen["🔗 wasm-bindgen Wrappers<br>(Exported Classes and Methods)"]:::wasm
+        wasm_memory["💾 WASM Linear Memory<br>(Shared Heap)"]:::wasm
     end
 
     subgraph Rust_Core_Engine ["Olayer Core (Rust)"]
@@ -33,43 +33,43 @@ graph TB
         interpolator["⏱️ Target Interpolator"]:::core
     end
 
-    %% Fluxos de Dados
-    ts_sdk -->|1. Instancia wrappers e invoca APIs| wasm_bindgen
-    js_heap -->|"2. Injeta referências de buffers (MVT/DTED)"| wasm_memory
-    wasm_bindgen -->|3. Mapeia e opera na| wasm_memory
+    %% Data Flows
+    ts_sdk -->|1. Instantiates wrappers and invokes APIs| wasm_bindgen
+    js_heap -->|"2. Injects buffer references (MVT/DTED)"| wasm_memory
+    wasm_bindgen -->|3. Maps and operates on| wasm_memory
     
-    %% Conexões com o Core Rust
-    wasm_bindgen -->|4. Delega cálculos geodesia| geodesy
-    wasm_bindgen -->|5. Projeta coordenadas/matrizes| projections
-    wasm_bindgen -->|6. Gerencia/Consulta terreno| terrain
-    wasm_bindgen -->|7. Atualiza/Interpola alvos| interpolator
+    %% Connections with Rust Core
+    wasm_bindgen -->|4. Delegates geodesy calculations| geodesy
+    wasm_bindgen -->|5. Projects coordinates/matrices| projections
+    wasm_bindgen -->|6. Manages/Queries terrain| terrain
+    wasm_bindgen -->|7. Updates/Interpolates targets| interpolator
 
     linkStyle 0,1,2,3,4,5,6 stroke:#555,stroke-width:1.5px;
 ```
 
 ---
 
-## 2. Responsabilidades
+## 2. Responsibilities
 
-O componente **WASM Bridge** possui as seguintes atribuições principais:
-1. **Exposição de APIs do Core:** Empacotar tipos internos do Rust em estruturas marcadas com `#[wasm_bindgen]` para que fiquem disponíveis como classes JavaScript normais.
-2. **Tradução e Marshaling de Dados:** Converter estruturas dinâmicas complexas utilizando a ponte de serialização rápida `serde-wasm-bindgen` ou mapeando arrays de tipos primitivos (*flat-arrays*).
-3. **Gerenciamento Otimizado de I/O de Terreno e Mapas (Zero-Copy):** Mapear arrays binários do navegador (`ArrayBuffer`/`Uint8Array`) diretamente como slices de bytes do Rust (`&[u8]`) no heap do WASM sem realizar cópia física de dados.
-4. **Gerenciamento de Ciclo de Vida da Heap WASM:** Fornecer ganchos claros para desalocação de memória de structs nativas do Rust a partir da thread principal do JavaScript.
+The **WASM Bridge** component has the following main assignments:
+1. **Core API Exposure:** Package internal Rust types into structures marked with `#[wasm_bindgen]` so they are available as normal JavaScript classes.
+2. **Data Translation and Marshaling:** Convert complex dynamic structures using the fast serialization bridge `serde-wasm-bindgen` or mapping primitive type arrays (*flat-arrays*).
+3. **Optimized Terrain and Map I/O Management (Zero-Copy):** Map browser binary arrays (`ArrayBuffer`/`Uint8Array`) directly as Rust byte slices (`&[u8]`) on the WASM heap without performing physical data copy.
+4. **WASM Heap Lifecycle Management:** Provide clear hooks for deallocating memory of native Rust structs from the main JavaScript thread.
 
 ---
 
-## 3. Interfaces Projetadas (WASM Exports)
+## 3. Designed Interfaces (WASM Exports)
 
-Os wrappers definidos na pasta [wasm](file:///c:/Users/rafae/projects/rust/olayer/sdk/ts/wasm) atuam como fachadas de conversão para as estruturas reais do Rust Core:
+The wrappers defined in the [wasm](file:///c:/Users/rafae/projects/rust/olayer/sdk/ts/wasm) folder act as conversion facades for the real structures of the Rust Core:
 
-### 3.1 Coordenadas
+### 3.1 Coordinates
 ```rust
 #[wasm_bindgen]
 pub struct WasmLatLon {
-    pub lat: f64,    // em radianos
-    pub lon: f64,    // em radianos
-    pub height: f64, // em metros
+    pub lat: f64,    // in radians
+    pub lon: f64,    // in radians
+    pub height: f64, // in meters
 }
 
 #[wasm_bindgen]
@@ -87,8 +87,8 @@ pub struct WasmTileKey {
 }
 ```
 
-### 3.2 Engine de Terreno (DTED)
-Para o carregamento de dados geográficos densos, a interface WASM consome ponteiros diretos do buffer para obter a máxima performance de I/O.
+### 3.2 Terrain Engine (DTED)
+For the loading of dense geographic data, the WASM interface consumes direct buffer pointers for maximum I/O performance.
 ```rust
 #[wasm_bindgen]
 pub struct WasmTerrainEngine {
@@ -102,27 +102,27 @@ impl WasmTerrainEngine {
         WasmTerrainEngine { inner: TerrainEngine::new() }
     }
 
-    /// Carrega o buffer binário de elevação de forma passiva.
-    /// O parâmetro data mapeia diretamente um Uint8Array do JS como slice Rust.
-    /// Retorna a chave do tile (coordenadas de origem em graus inteiros).
+    /// Loads the elevation binary buffer passively.
+    /// The data parameter maps a JS Uint8Array directly as a Rust slice.
+    /// Returns the tile key (origin coordinates in integer degrees).
     pub fn load_tile(&mut self, data: &[u8]) -> Result<WasmTileKey, JsValue> { ... }
 
-    /// Remove um tile pelo seu índice de graus inteiros.
+    /// Removes a tile by its integer degree index.
     pub fn unload_tile(&mut self, lat_deg: i32, lon_deg: i32) -> bool { ... }
 
-    /// Retorna a elevação interpolada para coordenadas geográficas em **graus decimais**.
+    /// Returns the interpolated elevation for geographic coordinates in **decimal degrees**.
     pub fn get_elevation(&self, lat_deg: f64, lon_deg: f64) -> Result<f64, JsValue> { ... }
 
-    /// Gera um perfil vertical de terreno ao longo de uma rota.
-    /// As coordenadas de entrada devem ser passadas como um array plano em **graus decimais**:
+    /// Generates a terrain vertical profile along a route.
+    /// Input coordinates must be passed as a flat array in **decimal degrees**:
     /// [lat0, lon0, height0, lat1, lon1, height1, ...]
-    /// O retorno é um array plano com 5 elementos por ponto:
+    /// The return is a flat array with 5 elements per point:
     /// [distance0, elevation0, lat0, lon0, height0, distance1, elevation1, lat1, lon1, height1, ...]
     pub fn get_vertical_profile(&self, route_coords: &[f64], step_meters: f64) -> Result<Vec<f64>, JsValue> { ... }
 }
 ```
 
-### 3.3 Interpolação de Alvos (Dead Reckoning)
+### 3.3 Target Interpolation (Dead Reckoning)
 ```rust
 #[wasm_bindgen]
 pub struct WasmInterpolationEngine {
@@ -136,7 +136,7 @@ impl WasmInterpolationEngine {
         WasmInterpolationEngine { inner: InterpolationEngine::new() }
     }
 
-    /// Construtor alternativo com limiar de obsolescência customizado (segundos).
+    /// Alternative constructor with custom obsolescence threshold (seconds).
     #[wasm_bindgen(constructor)]
     pub fn with_stale_threshold(stale_threshold: f64) -> WasmInterpolationEngine {
         WasmInterpolationEngine {
@@ -144,8 +144,8 @@ impl WasmInterpolationEngine {
         }
     }
 
-    /// Atualiza ou insere o estado de um alvo.
-    /// As coordenadas lat/lon devem ser passadas em **radianos**; altitude em metros.
+    /// Updates or inserts a target state.
+    /// Lat/lon coordinates must be passed in **radians**; altitude in meters.
     pub fn update_target(
         &mut self,
         id: &str,
@@ -158,58 +158,58 @@ impl WasmInterpolationEngine {
         last_ping_time: f64,
     ) -> Result<(), JsValue> { ... }
 
-    /// Remove um alvo pelo identificador.
+    /// Removes a target by identifier.
     pub fn remove_target(&mut self, id: &str) -> bool { ... }
 
-    /// Executa o Dead Reckoning de todos os alvos e retorna um array JSON serializado.
+    /// Executes Dead Reckoning of all targets and returns a serialized JSON array.
     pub fn interpolate_all(&self, current_time: f64) -> Result<JsValue, JsValue> { ... }
 }
 ```
 
 ---
 
-## 4. Gestão de Memória na Web (ADR-004)
+## 4. Web Memory Management (ADR-004)
 
-WebAssembly gerencia a execução através de uma **Memória Linear**. Objetos de Rust criados dentro do WASM (usando `new WasmTerrainIndex()`, por exemplo) residem no heap interno do WASM e não são monitorados pelo Garbage Collector (GC) do JavaScript.
+WebAssembly manages execution through a **Linear Memory**. Rust objects created within the WASM (using `new WasmTerrainEngine()`, for example) reside in the WASM's internal heap and are not monitored by the JavaScript Garbage Collector (GC).
 
-### 4.1 Ciclo de Desalocação
-* **Regra Rígida da SDK:** Ao instanciar qualquer objeto Rust na SDK TypeScript, o desenvolvedor host deve chamar explicitamente `.free()` para liberar os recursos do heap do WASM quando o componente for destruído.
+### 4.1 Deallocation Cycle
+* **Strict SDK Rule:** When instantiating any Rust object in the TypeScript SDK, the host developer must explicitly call `.free()` to release the WASM heap resources when the component is destroyed.
   ```typescript
-  // Exemplo correto na SDK TS
+  // Correct example in the TS SDK
   const terrain = new WasmTerrainEngine();
   try {
       const tileKey = terrain.load_tile(dtedBuffer);
       const elevation = terrain.get_elevation(-23.5, -46.6);
   } finally {
-      terrain.free(); // Desaloca os dados de Rust na heap linear
+      terrain.free(); // Deallocates Rust data on the linear heap
   }
   ```
-* Se o método `.free()` não for chamado, a memória linear do WebAssembly se expandirá a cada nova criação de dados até atingir o limite físico da aba do navegador, causando um crash catastrófico (*Out of Memory*).
+* If the `.free()` method is not called, the WebAssembly linear memory will expand with each new data creation until reaching the physical limit of the browser tab, causing a catastrophic crash (*Out of Memory*).
 
 ### 4.2 LRU Tile Eviction
-* Para o relevo global (DTED), a SDK TS deve gerenciar o cache contendo no máximo $N$ tiles ativos.
-* Ao remover um tile antigo do cache LRU na SDK, a SDK deve chamar `terrain.unload_tile(lat_deg, lon_deg)` para remover a matriz de elevações, liberando o espaço correspondente do heap do WASM.
+* For global relief (DTED), the TS SDK must manage the cache containing at most $N$ active tiles.
+* When removing an old tile from the LRU cache in the SDK, the SDK must call `terrain.unload_tile(lat_deg, lon_deg)` to remove the elevation matrix, freeing the corresponding space from the WASM heap.
 
 ---
 
-## 5. Estratégia de Performance: Zero-Copy Transfers
+## 5. Performance Strategy: Zero-Copy Transfers
 
-Para manter taxas de 60 FPS operacionais no navegador durante interações geográficas densas, a transferência de dados do JS para o Rust utiliza a flexibilidade da memória linear compartilhada.
+To maintain operational 60 FPS rates in the browser during dense geographic interactions, data transfer from JS to Rust uses the flexibility of the shared linear memory.
 
 ```
 +-------------------------------------------------------------+
-|               Memória Linear do WebAssembly                 |
+|               WebAssembly Linear Memory                 |
 |                                                             |
 |   [ JS Uint8Array View ]                                    |
-|   Permite que o JavaScript escreva na memória do WASM       |
+|   Allows JavaScript to write to WASM memory       |
 |                                                             |
 |   [ Rust Slice &[u8] ]                                      |
-|   Mapeia diretamente sobre o endereço da View sem copiar     |
+|   Maps directly over the View address without copying     |
 +-------------------------------------------------------------+
 ```
 
-* Ao transferir um buffer DTED (geralmente $1.5\text{ MB}$ por bloco Nível 1):
-  1. A SDK TS lê o arquivo binário como um `ArrayBuffer` usando o navegador (`fetch`).
-  2. A ponte WASM recebe a referência do array tipado (`Uint8Array`) do JavaScript.
-  3. A biblioteca `wasm-bindgen` converte a referência diretamente em um slice seguro `&[u8]` apontando para os bytes residentes na memória compartilhada.
-  4. O Rust Core processa e monta o grid diretamente desse slice geográfico sem alocações adicionais no buffer, poupando ciclos de CPU.
+* When transferring a DTED buffer (usually $1.5\text{ MB}$ per Level 1 block):
+  1. The TS SDK reads the binary file as an `ArrayBuffer` using the browser (`fetch`).
+  2. The WASM bridge receives the typed array reference (`Uint8Array`) from JavaScript.
+  3. The `wasm-bindgen` library converts the reference directly into a safe `&[u8]` slice pointing to the bytes residing in the shared memory.
+  4. The Rust Core processes and builds the grid directly from this geographic slice without additional buffer allocations, saving CPU cycles.

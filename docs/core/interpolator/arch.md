@@ -1,20 +1,20 @@
-# Arquitetura do Componente: Target Interpolator (`core::interpolator`)
+# Component Architecture: Target Interpolator (`core::interpolator`)
 
-Este documento detalha o design técnico, as equações cinemáticas geodésicas e as estruturas de dados do componente **Target Interpolator** do Olayer Core. Este módulo é responsável por sincronizar e prever a trajetória tridimensional de alvos dinâmicos geodésicos (aeronaves, veículos terrestres, embarcações, UAVs, etc.) em tempo de execução usando *Dead Reckoning*.
-
----
-
-## 1. Responsabilidades
-
-O **Target Interpolator** opera como um motor de predição cinemática passiva de alto desempenho, encarregado de:
-1. **Rastreamento de Estados de Alvos:** Armazenar uma tabela indexada em memória com os estados físicos reais (`TargetState`) relatados periodicamente pelos sensores (radar, ADS-B, GPS) para cada alvo tático.
-2. **Predição Cinemática 3D Geodésica (*Dead Reckoning*):** Calcular a posição tridimensional $(\phi, \lambda, h)$ estimada no globo a partir do tempo decorrido desde o último ping do sensor, utilizando o modelo elipsoidal do WGS84.
-3. **Desacoplamento de Projeção:** Manter a estimativa física dos alvos estritamente no espaço geodésico, livre de coordenadas ou limites de tela 2D. A projeção e translação final de tela são de responsabilidade da SDK cliente, que consome os dados e aplica a projeção cartográfica ativa do Olayer Core.
-4. **Atualizações Assíncronas:** Lidar de forma transparente com atualizações de sensores recebidas em taxas de frequência variáveis e baixas (ex: ~1 Hz) e interpolá-las continuamente para a taxa de quadros de exibição do cliente (15 a 60 FPS).
+This document details the technical design, geodetic kinematic equations, and data structures of the **Target Interpolator** component of the Olayer Core. This module is responsible for synchronizing and predicting the three-dimensional trajectory of dynamic geodetic targets (aircraft, ground vehicles, vessels, UAVs, etc.) at runtime using *Dead Reckoning*.
 
 ---
 
-## 2. Diagrama de Estruturas e Relacionamento
+## 1. Responsibilities
+
+The **Target Interpolator** operates as a passive, high-performance kinematic prediction engine, responsible for:
+1. **Target State Tracking:** Store an in-memory indexed table with the physical real states (`TargetState`) reported periodically by sensors (radar, ADS-B, GPS) for each tactical target.
+2. **3D Geodetic Kinematic Prediction (*Dead Reckoning*):** Calculate the estimated three-dimensional position $(\phi, \lambda, h)$ on the globe from the elapsed time since the last sensor ping, using the WGS84 ellipsoidal model.
+3. **Projection Decoupling:** Maintain the physical estimate of targets strictly in geodetic space, free of 2D screen coordinates or boundaries. The final screen projection and translation are the responsibility of the client SDK, which consumes the data and applies the active Olayer Core cartographic projection.
+4. **Asynchronous Updates:** Transparently handle sensor updates received at variable and low frequencies (e.g., ~1 Hz) and interpolate them continuously to the client's display frame rate (15 to 60 FPS).
+
+---
+
+## 2. Structure and Relationship Diagram
 
 ```mermaid
 classDiagram
@@ -51,58 +51,58 @@ classDiagram
         GeodesyFailure(GeodesyError)
     }
 
-    %% Relações
-    InterpolationEngine "1" *-- "*" TargetState : gerencia
-    InterpolationEngine ..> InterpolatedTarget : computa
-    TargetState "1" *-- "1" LatLon : posicionada em
-    InterpolatedTarget "1" *-- "1" LatLon : posicionada em
+    %% Relationships
+    InterpolationEngine "1" *-- "*" TargetState : manages
+    InterpolationEngine ..> InterpolatedTarget : computes
+    TargetState "1" *-- "1" LatLon : positioned in
+    InterpolatedTarget "1" *-- "1" LatLon : positioned in
 ```
 
 ---
 
-## 3. Estrutura Física do Módulo (`core/src/interpolator`)
+## 3. Physical Module Structure (`core/src/interpolator`)
 
-A organização física das fontes em Rust segue o padrão modular do framework:
+The physical Rust source organization follows the framework's modular pattern:
 
 ```text
 core/src/interpolator/
-├── mod.rs               # Facade do módulo (Re-exports)
-├── errors.rs            # Enum de erros (InterpolatorError)
-├── state.rs             # Estruturas TargetState e InterpolatedTarget
-├── engine.rs            # Lógica do InterpolationEngine
-└── tests.rs             # Testes de cinemática e extrapolação
+├── mod.rs               # Module facade (Re-exports)
+├── errors.rs            # Error enum (InterpolatorError)
+├── state.rs             # TargetState and InterpolatedTarget structures
+├── engine.rs            # InterpolationEngine logic
+└── tests.rs             # Kinematics and extrapolation tests
 ```
 
 ---
 
-## 4. Formulação Matemática do *Dead Reckoning*
+## 4. *Dead Reckoning* Mathematical Formulation
 
-A cada atualização ou solicitação de frame, o motor de interpolação estima a nova coordenada para o timestamp do sistema $t_{\text{current}}$ com base no timestamp do sensor $t_{\text{last\_ping}}$:
+At each update or frame request, the interpolation engine estimates the new coordinate for the system timestamp $t_{\text{current}}$ based on the sensor timestamp $t_{\text{last\_ping}}$:
 
-### 4.1 Delta de Tempo ($dt$)
+### 4.1 Time Delta ($dt$)
 $$dt = t_{\text{current}} - t_{\text{last\_ping}}$$
-*Se $dt < 0$, o alvo correspondente é ignorado e omitido da resposta daquele frame para evitar que desvios temporais de um único sensor interfiram no restante do lote de alvos (clock skew).*
+*If $dt < 0$, the corresponding target is ignored and omitted from that frame's response to avoid a single sensor's temporal deviations interfering with the rest of the target batch (clock skew).*
 
-### 4.2 Translação Horizontal Geodésica
-A movimentação horizontal do alvo sobre o elipsoide WGS84 é obtida resolvendo o **Problema Geodésico Direto**:
-1. Distância horizontal percorrida:
+### 4.2 Horizontal Geodetic Translation
+The target's horizontal movement over the WGS84 ellipsoid is obtained by solving the **Direct Geodetic Problem**:
+1. Horizontal distance traveled:
    $$d = v_{\text{horizontal}} \times dt$$
-2. O ponto de origem $p_0 = (\phi_{\text{last}}, \lambda_{\text{last}})$, o rumo/azimute inicial $\alpha = \psi_{\text{inicial}}$, e a distância $d$ são passados ao **Vincenty Solver** (ou Haversine Solver em caso de fallback) da `Geodesy Engine`:
+2. The origin point $p_0 = (\phi_{\text{last}}, \lambda_{\text{last}})$, the initial heading/azimuth $\alpha = \psi_{\text{initial}}$, and the distance $d$ are passed to the **Vincenty Solver** (or Haversine Solver in case of fallback) of the `Geodesy Engine`:
    $$p_{\text{interpolated}} = \text{direct}(p_0, \alpha, d, \text{WGS84})$$
    $$\phi_{\text{new}} = p_{\text{interpolated}}.\phi, \quad \lambda_{\text{new}} = p_{\text{interpolated}}.\lambda$$
 
-### 4.3 Variação Vertical de Altitude
-A altitude acima do elipsoide ($h$) é extrapolada linearmente pela taxa de subida ou descida vertical:
+### 4.3 Vertical Altitude Variation
+The altitude above the ellipsoid ($h$) is extrapolated linearly by the rate of climb or descent:
 $$h_{\text{new}} = h_{\text{last}} + (v_{\text{vertical}} \times dt)$$
 
-### 4.4 Rumo Interpolado
-Em manobras lineares simples, o rumo é assumido constante:
-$$\psi_{\text{new}} = \psi_{\text{inicial}}$$
+### 4.4 Interpolated Heading
+In simple linear maneuvers, the heading is assumed constant:
+$$\psi_{\text{new}} = \psi_{\text{initial}}$$
 
 ---
 
-## 5. Critérios de Performance e Robusteza
+## 5. Performance and Robustness Criteria
 
-1. **Evitar Alocações no Heap em Loop:** A lista retornada por `interpolate_all` é pré-alocada com capacidade baseada no número de alvos ativos (`Vec::with_capacity(self.targets.len())`) para eliminar alocações redundantes a cada frame.
-2. **Tolerância a Atrasos de Sensor:** Se um alvo não receber pings por um intervalo longo (ex: $dt > 30.0\text{ segundos}$), a engine pode suspendê-lo do cálculo dinâmico (*stale target*) para evitar extrapolações físicas irreais.
-3. **Precisão e Velocidade:** Para alvos em altas velocidades (aeronaves supersônicas/caças), o uso do resolvedor preciso de Vincenty garante que a extrapolação siga trajetórias reais de grande círculo, evitando desvios significativos presentes em aproximações planas simplificadas.
+1. **Avoid Heap Allocations in Loop:** The list returned by `interpolate_all` is pre-allocated with capacity based on the number of active targets (`Vec::with_capacity(self.targets.len())`) to eliminate redundant allocations at each frame.
+2. **Sensor Delay Tolerance:** If a target does not receive pings for a long interval (e.g., $dt > 30.0\text{ seconds}$), the engine may suspend it from dynamic calculation (*stale target*) to avoid physically unrealistic extrapolations.
+3. **Precision and Speed:** For targets at high speeds (supersonic aircraft/fighter jets), using the precise Vincenty resolver ensures that extrapolation follows real great circle trajectories, avoiding significant deviations present in simplified planar approximations.

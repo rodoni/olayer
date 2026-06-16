@@ -1,20 +1,20 @@
-# Componente SDK TS: Controller (`sdk/ts/src/controller`)
+# SDK TS Component: Controller (`sdk/ts/src/controller`)
 
-O **TS Controller** é o maestro e o ponto de entrada principal do SDK TypeScript. Ele coordena o ciclo de vida do elemento visual do mapa, captura a interação do usuário e orquestra o ritmo do loop de frames.
-
----
-
-## 1. Responsabilidades
-* **Loop de Animação Principal:** Controla as chamadas de pintura periódicas usando a API `requestAnimationFrame` do navegador.
-* **Throttling Dinâmico de FPS (FPS Throttling):** Alterna autonomamente a taxa de quadros para poupar recursos computacionais e bateria:
-  * **Modo Ativo (60 FPS):** Ativado enquanto o usuário interage (zoom, pan, órbita) ou alvos estão mudando ativamente.
-  * **Modo Econômico (15 FPS):** Ativado automaticamente após o tempo limite de estabilização da câmera ou ociosidade.
-* **Processamento de Inputs do Usuário:** Intercepta e decodifica cliques do mouse, movimentos, rolagem de roda (wheel) e cliques de toque.
-* **Gerenciamento de Atitude da Câmera:** Mantém variáveis de câmera (`center`, `zoom`, `bearing`, `pitch`, `roll`) e as envia à ponte WASM para computação matricial.
+The **TS Controller** is the maestro and main entry point of the TypeScript SDK. It coordinates the map visual element lifecycle, captures user interaction, and orchestrates the frame loop rhythm.
 
 ---
 
-## 2. Interfaces e Estrutura de Classes
+## 1. Responsibilities
+* **Main Animation Loop:** Controls periodic paint calls using the browser's `requestAnimationFrame` API.
+* **Dynamic FPS Throttling (FPS Throttling):** Autonomously toggles the frame rate to save computational resources and battery:
+  * **Active Mode (60 FPS):** Activated while the user interacts (zoom, pan, orbit) or targets are actively changing.
+  * **Economic Mode (15 FPS):** Activated automatically after the camera stabilization or idleness timeout.
+* **User Input Processing:** Intercepts and decodes mouse clicks, movements, wheel scroll (wheel), and touch clicks.
+* **Camera Attitude Management:** Maintains camera variables (`center`, `zoom`, `bearing`, `pitch`, `roll`) and sends them to the WASM bridge for matrix computation.
+
+---
+
+## 2. Interfaces and Class Structure
 
 ```typescript
 import {
@@ -51,8 +51,8 @@ export class OlayerController {
   public readonly layerManager: LayerManager;
   public readonly dataManager: MapDataStack;
 
-  private centerLat: number; // radianos
-  private centerLon: number; // radianos
+  private centerLat: number; // radians
+  private centerLon: number; // radians
   private centerHeight: number = 0.0;
   private zoom: number;
   private rotation: number = 0.0; // bearing
@@ -94,7 +94,7 @@ export class OlayerController {
 
 ---
 
-## 3. Fluxo de Processamento (Sequência de FPS Throttling)
+## 3. Processing Flow (FPS Throttling Sequence)
 
 ```mermaid
 sequenceDiagram
@@ -103,19 +103,19 @@ sequenceDiagram
     participant SDK as TS Controller
     participant Browser as Browser (requestAnimationFrame)
 
-    Note over SDK, Browser: Loop de Animação Ativo (Contínuo a ~60Hz ou mais)
+    Note over SDK, Browser: Active Animation Loop (Continuous at ~60Hz or more)
     Browser->>SDK: loop(timestamp)
-    SDK->>SDK: tick(): Modo Econômico (15 FPS)<br>Ignora frames se elapsed < 66.6ms
-    SDK->>SDK: renderFrame(): Renderiza (15 FPS)
+    SDK->>SDK: tick(): Economic Mode (15 FPS)<br>Ignores frames if elapsed < 66.6ms
+    SDK->>SDK: renderFrame(): Renders (15 FPS)
 
-    Note over Host, SDK: Interação do Usuário (Pan/Zoom/Orbit)
-    Host->>SDK: Evento de Input (Mouse / Touch)
-    SDK->>SDK: triggerActive(): Ativa Modo Ativo (60 FPS)<br>Reseta timer de inatividade
+    Note over Host, SDK: User Interaction (Pan/Zoom/Orbit)
+    Host->>SDK: Input Event (Mouse / Touch)
+    SDK->>SDK: triggerActive(): Activates Active Mode (60 FPS)<br>Resets inactivity timer
 
     Browser->>SDK: loop(timestamp)
-    SDK->>SDK: tick(): Modo Ativo (60 FPS)<br>Processa frame a cada 16.6ms (sem pular)
-    SDK->>SDK: renderFrame(): Renderiza (60 FPS)
+    SDK->>SDK: tick(): Active Mode (60 FPS)<br>Processes frame every 16.6ms (no skipping)
+    SDK->>SDK: renderFrame(): Renders (60 FPS)
 
-    Note over SDK: Inatividade > 1000ms (Active Timeout)
-    SDK->>SDK: tick(): Retorna para Modo Econômico (15 FPS)
+    Note over SDK: Inactivity > 1000ms (Active Timeout)
+    SDK->>SDK: tick(): Returns to Economic Mode (15 FPS)
 ```

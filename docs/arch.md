@@ -1,64 +1,64 @@
-# Arquitetura de Software: Olayer
-## Framework GIS Híbrido para Controle de Tráfego Aéreo (ATC)
+# Software Architecture: Olayer
+## Hybrid GIS Framework for Air Traffic Control (ATC)
 
-Este documento descreve a arquitetura inicial do projeto **Olayer**, mapeada a partir dos requisitos definidos na [Especificação Técnica (spec.md)](file:///c:/Users/rafae/projects/rust/olayer/docs/spec.md). O design utiliza o modelo **C4 Model** (Contexto, Contêineres, Componentes e Processos/Código) para ilustrar a divisão de responsabilidades, fluxos de dados e decisões estruturais de missão crítica.
+This document describes the initial architecture of the **Olayer** project, mapped from the requirements defined in the [Technical Specification (spec.md)](file:///c:/Users/rafae/projects/rust/olayer/docs/spec.md). The design uses the **C4 Model** (Context, Containers, Components, and Processes/Code) to illustrate the division of responsibilities, data flows, and mission-critical structural decisions.
 
 ---
 
-## 1. Nível 1: Diagrama de Contexto do Sistema
+## 1. Level 1: System Context Diagram
 
-O diagrama de contexto descreve como o framework Olayer se posiciona em relação aos atores (desenvolvedores e operadores) e aos sistemas externos da solução ATC.
+The context diagram describes how the Olayer framework positions itself in relation to the actors (developers and operators) and external systems of the ATC solution.
 
 ```mermaid
 graph TB
-    %% Estilos de nós do C4
+    %% C4 node styles
     classDef person fill:#08427B,stroke:#073b6e,color:#ffffff,stroke-width:2px;
     classDef system fill:#1168BD,stroke:#0f5ca7,color:#ffffff,stroke-width:2px;
     classDef external fill:#999999,stroke:#888888,color:#ffffff,stroke-width:2px;
 
-    %% Atores
-    user["👩‍✈️ Controlador de Tráfego Aéreo<br>[Usuário Final]"]:::person
-    dev["💻 Desenvolvedor Host<br>[Engenheiro de Software]"]:::person
+    %% Actors
+    user["👩‍✈️ Air Traffic Controller<br>[End User]"]:::person
+    dev["💻 Host Developer<br>[Software Engineer]"]:::person
     
-    %% Sistema Principal (Fronteira Olayer)
-    subgraph Olayer_Boundary ["Framework Olayer"]
-        olayer["🌍 Olayer GIS ATC Framework<br>[Software System]<br>Framework GIS para processamento e projeção espacial de alta performance."]:::system
+    %% Main System (Olayer Boundary)
+    subgraph Olayer_Boundary ["Olayer Framework"]
+        olayer["🌍 Olayer GIS ATC Framework<br>[Software System]<br>GIS framework for high-performance spatial processing and projection."]:::system
     end
     
-    %% Sistemas Externos
-    host_app["📱 Aplicação Host ATC<br>[Software System]<br>Aplicação cliente ou console ATC (Web/Desktop) que consome o Olayer."]:::system
-    geoserver["🗺️ GeoServer / GeoWebCache<br>[External System]<br>Servidor de mapas que fornece MVT, WMTS e estilização SLD."]:::external
-    sensor_feed["📡 Feed de Sensores ATC<br>[External System]<br>Provedor de dados brutos (ADS-B, ASTERIX, feeds de radar)."]:::external
-    terrain_source["🏔️ Servidor / Repositório de Terreno<br>[External System]<br>Fornece dados de elevação (arquivos DTED) via HTTP ou local."]:::external
+    %% External Systems
+    host_app["📱 ATC Host Application<br>[Software System]<br>Client or ATC console application (Web/Desktop) that consumes Olayer."]:::system
+    geoserver["🗺️ GeoServer / GeoWebCache<br>[External System]<br>Map server providing MVT, WMTS, and SLD styling."]:::external
+    sensor_feed["📡 ATC Sensor Feed<br>[External System]<br>Raw data provider (ADS-B, ASTERIX, radar feeds)."]:::external
+    terrain_source["🏔️ Terrain Server / Repository<br>[External System]<br>Provides elevation data (DTED files) via HTTP or locally."]:::external
     
-    %% Relacionamentos
-    dev -->|Integra e configura no código| host_app
-    user -->|Visualiza alvos e interage com o mapa| host_app
-    host_app -->|Delega cálculos GIS e renderização| olayer
-    host_app -->|Consome e decodifica dados brutos| sensor_feed
-    olayer -->|Consome camadas de mapa e estilos| geoserver
-    olayer -->|Consome dados de elevação DTED| terrain_source
+    %% Relationships
+    dev -->|Integrates and configures in code| host_app
+    user -->|Views targets and interacts with the map| host_app
+    host_app -->|Delegates GIS calculations and rendering| olayer
+    host_app -->|Consumes and decodes raw data| sensor_feed
+    olayer -->|Consumes map layers and styles| geoserver
+    olayer -->|Consumes DTED elevation data| terrain_source
 
     linkStyle 0,1,2,3,4,5 stroke:#555,stroke-width:2px;
 ```
 
-### Atores e Sistemas
+### Actors and Systems
 
-| Elemento | Tipo | Descrição |
+| Element | Type | Description |
 | :--- | :--- | :--- |
-| **Controlador de Tráfego Aéreo** | Usuário | Operador final que utiliza a tela do radar para monitorar rotas, desvios e alertas de segurança. |
-| **Desenvolvedor Host** | Usuário | Desenvolvedor que integra a SDK do Olayer no aplicativo cliente (Web ou Desktop). |
-| **Olayer GIS ATC Framework** | Sistema | O escopo do projeto: framework responsável por cálculos geodésicos, projeções, renderização de alvos/terreno e checagens GIS. |
-| **Aplicação Host ATC** | Sistema Externo | O software hospedeiro (ex: terminal de controle de aproximação TMA ou centro de rota). Gerencia sockets, regras de negócio e interfaces gerais. |
-| **GeoServer / GeoWebCache** | Sistema Externo | Servidor de mapas que centraliza arquivos geográficos (limites de setores, aerovias) e distribui em pedaços otimizados (Tiles). |
-| **Feed de Sensores ATC** | Sistema Externo | Infraestrutura de rede que injeta feeds de radar ou ADS-B na aplicação host. O Olayer é agnóstico a esta rede. |
-| **Servidor / Repositório de Terreno** | Sistema Externo | Servidor de arquivos ou armazenamento local que fornece os dados de elevação do terreno (DTED) requisitados. |
+| **Air Traffic Controller** | User | Final operator who uses the radar screen to monitor routes, deviations, and safety alerts. |
+| **Host Developer** | User | Developer who integrates the Olayer SDK into the client application (Web or Desktop). |
+| **Olayer GIS ATC Framework** | System | The project scope: framework responsible for geodetic calculations, projections, target/terrain rendering, and GIS checks. |
+| **ATC Host Application** | External System | The host software (e.g., TMA approach control terminal or en-route center). Manages sockets, business rules, and general interfaces. |
+| **GeoServer / GeoWebCache** | External System | Map server that centralizes geographic files (sector boundaries, airways) and distributes them in optimized chunks (Tiles). |
+| **ATC Sensor Feed** | External System | Network infrastructure that injects radar or ADS-B feeds into the host application. Olayer is agnostic to this network. |
+| **Terrain Server / Repository** | External System | File server or local storage that provides terrain elevation data (DTED) upon request. |
 
 ---
 
-## 2. Nível 2: Diagrama de Contêineres
+## 2. Level 2: Container Diagram
 
-O Olayer é projetado como um framework híbrido. Ele divide-se em um núcleo compartilhado em Rust e bindings específicos para ambientes web (WebAssembly) e desktop (Nativo).
+Olayer is designed as a hybrid framework. It divides itself into a shared Rust core and specific bindings for web (WebAssembly) and desktop (Native) environments.
 
 ```mermaid
 graph TB
@@ -66,65 +66,65 @@ graph TB
     classDef external fill:#999999,stroke:#888888,color:#ffffff,stroke-width:2px;
     classDef host fill:#1168BD,stroke:#0f5ca7,color:#ffffff,stroke-width:2px;
 
-    subgraph Web_Browser ["Ambiente do Navegador (Web Client)"]
+    subgraph Web_Browser ["Browser Environment (Web Client)"]
         host_web["📱 Host App Web<br>[TypeScript/React/Vue]"]:::host
-        ts_sdk["📦 Olayer TS SDK<br>[TypeScript Container]<br>Gerencia a pipeline WebGL, inputs e o loop de renderização."]:::container
-        wasm_bind["🔗 WASM Bindings<br>[Rust/JS Bridge]<br>Exportações wasm-bindgen e gerenciamento de buffers de memória."]:::container
-        wasm_core["⚙️ Olayer Core (Rust WASM)<br>[WASM Module]<br>Motor lógico compilado para WebAssembly. Geodesia, projeções e indexação DTED."]:::container
+        ts_sdk["📦 Olayer TS SDK<br>[TypeScript Container]<br>Manages the WebGL pipeline, inputs, and rendering loop."]:::container
+        wasm_bind["🔗 WASM Bindings<br>[Rust/JS Bridge]<br>wasm-bindgen exports and memory buffer management."]:::container
+        wasm_core["⚙️ Olayer Core (Rust WASM)<br>[WASM Module]<br>Logic engine compiled to WebAssembly. Geodesy, projections, and DTED indexing."]:::container
     end
     
-    subgraph Desktop_OS ["Ambiente Desktop Nativo"]
-        host_rust["🖥️ Host App Nativo<br>[Rust / C++]"]:::host
-        native_sdk["📦 Olayer Native SDK<br>[Rust Container]<br>Wrapper nativo que expõe APIs locais e pipeline wgpu/Vulkan."]:::container
-        rust_core["⚙️ Olayer Core (Nativo)<br>[Rust Library]<br>Compilação nativa do core direto para a arquitetura alvo (x86_64/ARM)."]:::container
-        local_disk["💽 Armazenamento DTED Local<br>[File System]<br>Arquivos de terreno DTED no disco local."]:::external
+    subgraph Desktop_OS ["Native Desktop Environment"]
+        host_rust["🖥️ Native Host App<br>[Rust / C++]"]:::host
+        native_sdk["📦 Olayer Native SDK<br>[Rust Container]<br>Native wrapper exposing local APIs and wgpu/Vulkan pipeline."]:::container
+        rust_core["⚙️ Olayer Core (Native)<br>[Rust Library]<br>Native compilation of the core for the target architecture (x86_64/ARM)."]:::container
+        local_disk["💽 Local DTED Storage<br>[File System]<br>DTED terrain files on local disk."]:::external
     end
     
-    subgraph Map_Server_Stack ["Pilha de Dados de Mapa"]
-        geoserver["🗺️ GeoServer + GWC<br>[GeoServer Container]<br>Fornece Vector Tiles (MVT), WMTS e estilos SLD."]:::external
-        postgis[("🗄️ PostgreSQL + PostGIS<br>[Database]<br>Armazena feições geográficas espaciais.")]:::external
-        terrain_repo["🏔️ Repositório DTED Estático<br>[Data Store]<br>Armazena arquivos binários de elevação de terreno (DTED) via HTTP."]:::external
+    subgraph Map_Server_Stack ["Map Data Stack"]
+        geoserver["🗺️ GeoServer + GWC<br>[GeoServer Container]<br>Provides Vector Tiles (MVT), WMTS, and SLD styles."]:::external
+        postgis[("🗄️ PostgreSQL + PostGIS<br>[Database]<br>Stores spatial geographic features.")]:::external
+        terrain_repo["🏔️ Static DTED Repository<br>[Data Store]<br>Stores binary terrain elevation files (DTED) via HTTP."]:::external
     end
     
-    %% Fluxos Web
-    host_web -->|Instancia e inicializa| ts_sdk
-    ts_sdk -->|Chama via JS| wasm_bind
-    wasm_bind -->|Executa rotinas no core| wasm_core
-    ts_sdk -->|Consome MVT/WMTS e SLD via HTTP| geoserver
-    ts_sdk -->|Baixa arquivos DTED via HTTP| terrain_repo
+    %% Web Flows
+    host_web -->|Instantiates and initializes| ts_sdk
+    ts_sdk -->|Calls via JS| wasm_bind
+    wasm_bind -->|Executes core routines| wasm_core
+    ts_sdk -->|Consumes MVT/WMTS and SLD via HTTP| geoserver
+    ts_sdk -->|Downloads DTED files via HTTP| terrain_repo
     
-    %% Fluxos Nativo
-    host_rust -->|Importa e inicializa| native_sdk
-    native_sdk -->|Chamada direta de função estática| rust_core
-    native_sdk -->|Consome MVT/WMTS e SLD via HTTP| geoserver
-    native_sdk -->|Lê arquivos DTED do disco| local_disk
+    %% Native Flows
+    host_rust -->|Imports and initializes| native_sdk
+    native_sdk -->|Direct static function call| rust_core
+    native_sdk -->|Consumes MVT/WMTS and SLD via HTTP| geoserver
+    native_sdk -->|Reads DTED files from disk| local_disk
 
-    %% Infra de Dados
-    geoserver -->|Consulta espacial via SQL| postgis
+    %% Data Infrastructure
+    geoserver -->|Spatial query via SQL| postgis
 
     linkStyle 0,1,2,3,4,5,6,7,8,9 stroke:#555,stroke-width:2px;
 ```
 
-### Contêineres do Framework
+### Framework Containers
 
-1. **Olayer Core (Rust - compilável para WASM e Nativo):**
-   * **Responsabilidade:** Todo o motor matemático de missão crítica. Não possui acesso a I/O direto para arquivos ou rede na versão WASM (passivo), processando apenas estruturas de memória fornecidas pela camada hospedeira.
-   * **Tecnologia:** Rust puro (`f64`).
+1. **Olayer Core (Rust - compilable to WASM and Native):**
+   * **Responsibility:** All mission-critical mathematical engine. Has no direct I/O access to files or network in the WASM version (passive), processing only memory structures provided by the host layer.
+   * **Technology:** Pure Rust (`f64`).
 2. **WASM Bindings (wasm-bindgen):**
-   * **Responsabilidade:** Ponte de transição de memória entre a máquina virtual JS e a memória linear do WASM. Minimiza cópias usando referências diretas de buffers (`ArrayBuffer` para DTED/MVT).
-   * **Tecnologia:** `wasm-bindgen`, `js-sys`, `web-sys`.
+   * **Responsibility:** Memory transition bridge between the JS virtual machine and the WASM linear memory. Minimizes copies using direct buffer references (`ArrayBuffer` for DTED/MVT).
+   * **Technology:** `wasm-bindgen`, `js-sys`, `web-sys`.
 3. **Olayer TS SDK (TypeScript):**
-   * **Responsabilidade:** SDK/Framework cliente consumido por aplicações Web. Gerencia o ciclo de vida do elemento visual `<canvas>`, orquestra shaders WebGL/WebGPU e cuida dos cálculos de anti-sobreposição de etiquetas (anti-cluttering) na CPU.
-   * **Tecnologia:** TypeScript, WebGL 2.0 / WebGPU, Canvas 2D API.
+   * **Responsibility:** Client SDK/Framework consumed by web applications. Manages the visual `<canvas>` element lifecycle, orchestrates WebGL/WebGPU shaders, and handles anti-overlapping label calculations (anti-cluttering) on the CPU.
+   * **Technology:** TypeScript, WebGL 2.0 / WebGPU, Canvas 2D API.
 4. **Olayer Native SDK (Rust):**
-   * **Responsabilidade:** Invólucro para aplicações Desktop nativas. Facilita o uso do Core com engines de renderização locais.
-   * **Tecnologia:** Rust, opcionalmente bindings C/C++ (`cbindgen`).
+   * **Responsibility:** Wrapper for native desktop applications. Facilitates Core usage with local rendering engines.
+   * **Technology:** Rust, optionally C/C++ bindings (`cbindgen`).
 
 ---
 
-## 3. Nível 3: Diagrama de Componentes (Internos do Core e SDK)
+## 3. Level 3: Component Diagram (Internals of Core and SDK)
 
-Este diagrama foca na organização modular interna do **Olayer Core** e do **Olayer TS SDK**, ilustrando como os componentes cooperam para realizar projeções cartográficas e renderizações em tempo real.
+This diagram focuses on the internal modular organization of the **Olayer Core** and **Olayer TS SDK**, illustrating how components cooperate to perform cartographic projections and real-time rendering.
 
 ```mermaid
 graph TB
@@ -133,41 +133,41 @@ graph TB
     classDef wasmBridge fill:#FFF9C4,stroke:#FBC02D,color:#5D4037,stroke-width:2px;
     classDef nativeComponent fill:#C8E6C9,stroke:#388E3C,color:#1B5E20,stroke-width:2px;
 
-    subgraph TS_SDK_Comp ["SDK TypeScript (Web)"]
-        ts_controller["🎮 TS Controller<br>Loop (15/60 FPS) & Eventos"]:::component
-        ts_layer_manager["🥞 TS Layer Manager<br>Composição e controle de layers"]:::component
-        ts_map_data_stack["📥 TS Map Data Stack<br>Gerenciador de Sources & Cache (MVT/WMTS/DTED)"]:::component
-        ts_gpu_pipe["🎨 WebGL/WebGPU Pipe<br>Desenho estático base map"]:::component
-        ts_cpu_pipe["🎯 WebGL/Canvas 2D Pipe<br>Símbolos (Atlas) & Anti-clutter"]:::component
+    subgraph TS_SDK_Comp ["TypeScript SDK (Web)"]
+        ts_controller["🎮 TS Controller<br>Loop (15/60 FPS) & Events"]:::component
+        ts_layer_manager["🥞 TS Layer Manager<br>Composition and layer control"]:::component
+        ts_map_data_stack["📥 TS Map Data Stack<br>Sources & Cache Manager (MVT/WMTS/DTED)"]:::component
+        ts_gpu_pipe["🎨 WebGL/WebGPU Pipe<br>Static base map drawing"]:::component
+        ts_cpu_pipe["🎯 WebGL/Canvas 2D Pipe<br>Symbols (Atlas) & Anti-clutter"]:::component
     end
     
-    subgraph WASM_Bridge_Comp ["Interop Web"]
-        wasm_bridge["🔗 Bridge WASM (wasm-bindgen)<br>Ponte de memória TS/JS -> Rust"]:::wasmBridge
+    subgraph WASM_Bridge_Comp ["Web Interop"]
+        wasm_bridge["🔗 Bridge WASM (wasm-bindgen)<br>TS/JS -> Rust memory bridge"]:::wasmBridge
     end
 
-    subgraph Native_SDK_Comp ["SDK Nativa (Desktop)"]
-        native_controller["🎮 Native Controller<br>Loop nativo & Janela (winit)"]:::nativeComponent
-        native_layer_manager["🥞 Native Layer Manager<br>Composição e controle de layers nativo"]:::nativeComponent
-        native_map_data_stack["📥 Native Map Data Stack<br>Gerenciador de Sources & Cache Nativo"]:::nativeComponent
-        native_gpu_pipe["🎨 wgpu Pipe (Matrix)<br>Renderização de terreno/fundo (Vulkan/Metal/DX)"]:::nativeComponent
-        native_cpu_pipe["🎯 wgpu Pipe (Vertex)<br>Símbolos (Atlas) & Anti-clutter nativo"]:::nativeComponent
+    subgraph Native_SDK_Comp ["Native SDK (Desktop)"]
+        native_controller["🎮 Native Controller<br>Native loop & Window (winit)"]:::nativeComponent
+        native_layer_manager["🥞 Native Layer Manager<br>Native layer composition and control"]:::nativeComponent
+        native_map_data_stack["📥 Native Map Data Stack<br>Native Sources & Cache Manager"]:::nativeComponent
+        native_gpu_pipe["🎨 wgpu Pipe (Matrix)<br>Terrain/background rendering (Vulkan/Metal/DX)"]:::nativeComponent
+        native_cpu_pipe["🎯 wgpu Pipe (Vertex)<br>Symbols (Atlas) & Native anti-clutter"]:::nativeComponent
     end
 
-    subgraph FFI_Bridge_Comp ["Interop Nativo"]
-        ffi_bridge["🔗 C-FFI Bridge (cbindgen)<br>Exports C-compatible para C++ Host"]:::wasmBridge
+    subgraph FFI_Bridge_Comp ["Native Interop"]
+        ffi_bridge["🔗 C-FFI Bridge (cbindgen)<br>C-compatible exports for C++ Host"]:::wasmBridge
     end
 
-    subgraph Rust_Core_Comp ["Módulos do Core Agnóstico (Rust)"]
-        geodesy["📐 Geodesy Module<br>Conversões geodésicas ECEF/WGS84"]:::coreComponent
-        camera["📷 Camera Module<br>Gerenciamento de CameraState e matrizes View-Proj para 2D/2.5D/3D"]:::coreComponent
-        projections["🗺️ Projections Module<br>LCC, Estereográfica, Web Mercator"]:::coreComponent
-        terrain["⛰️ Terrain Engine (DTED)<br>Índice espacial & Altitude O(1)"]:::coreComponent
-        sld_parser["📄 SLD Parser<br>Parser XML e estilos de símbolos"]:::coreComponent
-        symbol_registry["🎖️ Symbol Registry<br>Registro e resolução de simbologias agnósticas"]:::coreComponent
-        interpolator["⏱️ Target Interpolator<br>Dead Reckoning de alvos dinâmicos"]:::coreComponent
+    subgraph Rust_Core_Comp ["Agnostic Core Modules (Rust)"]
+        geodesy["📐 Geodesy Module<br>ECEF/WGS84 geodetic conversions"]:::coreComponent
+        camera["📷 Camera Module<br>CameraState management and View-Proj matrices for 2D/2.5D/3D"]:::coreComponent
+        projections["🗺️ Projections Module<br>LCC, Stereographic, Web Mercator"]:::coreComponent
+        terrain["⛰️ Terrain Engine (DTED)<br>Spatial index & O(1) Altitude"]:::coreComponent
+        sld_parser["📄 SLD Parser<br>XML parser and symbol styles"]:::coreComponent
+        symbol_registry["🎖️ Symbol Registry<br>Agnostic symbology registry and resolution"]:::coreComponent
+        interpolator["⏱️ Target Interpolator<br>Dead Reckoning of dynamic targets"]:::coreComponent
     end
 
-    %% Relações SDK TS
+    %% TS SDK Relationships
     ts_controller --> ts_layer_manager
     ts_layer_manager --> ts_gpu_pipe
     ts_layer_manager --> ts_cpu_pipe
@@ -176,7 +176,7 @@ graph TB
     ts_gpu_pipe --> wasm_bridge
     ts_cpu_pipe --> wasm_bridge
 
-    %% Relações SDK Nativa
+    %% Native SDK Relationships
     native_controller --> native_layer_manager
     native_layer_manager --> native_gpu_pipe
     native_layer_manager --> native_cpu_pipe
@@ -185,27 +185,27 @@ graph TB
     native_gpu_pipe --> ffi_bridge
     native_cpu_pipe --> ffi_bridge
     
-    %% Relações Internas da Bridge WASM para o Core
+    %% Internal WASM Bridge to Core
     wasm_bridge --> camera
     wasm_bridge --> terrain
     wasm_bridge --> sld_parser
     wasm_bridge --> symbol_registry
     wasm_bridge --> interpolator
 
-    %% Relações Internas da Bridge FFI para o Core
+    %% Internal FFI Bridge to Core
     ffi_bridge --> camera
     ffi_bridge --> terrain
     ffi_bridge --> sld_parser
     ffi_bridge --> symbol_registry
     ffi_bridge --> interpolator
     
-    %% Relações diretas Rust-to-Rust (SDK Nativa para o Core)
+    %% Direct Rust-to-Rust (Native SDK to Core)
     native_gpu_pipe --> camera
     native_gpu_pipe --> terrain
     native_cpu_pipe --> symbol_registry
     native_cpu_pipe --> interpolator
 
-    %% Dependências internas do Rust Core
+    %% Internal Rust Core Dependencies
     camera --> geodesy
     camera --> projections
     projections --> geodesy
@@ -216,221 +216,221 @@ graph TB
     linkStyle 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33 stroke:#333,stroke-dasharray: 2 2;
 ```
 
-### Detalhamento dos Componentes
+### Component Details
 
-#### 1. Módulos do Core Rust
-* **[Geodesy Module](file:///c:/Users/rafae/projects/rust/olayer/core/src/geodesy):** Fornece as funções matemáticas baseadas no elipsoide de referência WGS84. Realiza transformações bidirecionais entre coordenadas geográficas $(\phi, \lambda, h)$ e cartesianas ECEF $(X, Y, Z)$.
-* **[Camera Module](file:///c:/Users/rafae/projects/rust/olayer/core/src/camera):** Gerencia o estado tridimensional de navegação geográfica e atitude da câmera (centro, zoom, bearing/yaw, pitch, roll) e calcula as matrizes de visualização e projeção (View-Projection) 2D, 2.5D e 3D de forma unificada e performática.
-* **[Projections Module](file:///c:/Users/rafae/projects/rust/olayer/core/src/projections):** Contém as fórmulas matemáticas para projetar pontos tridimensionais ou geodésicos em planos 2D. Implementa as equações das projeções Estereográfica, LCC e Mercator.
-* **[Terrain Engine (DTED)](file:///c:/Users/rafae/projects/rust/olayer/core/src/terrain):** Gerencia arquivos DTED em memória. Constrói um índice espacial 2D simplificado (Grid) onde cada célula aponta para os bytes de elevação carregados. Permite que consultas de altitude em coordenadas arbitrárias rodem em tempo constante $O(1)$.
-* **[SLD Parser](file:///c:/Users/rafae/projects/rust/olayer/core/src/sld):** Analisador sintático (Parser) de XML que converte o padrão OGC SLD (Styled Layer Descriptor) em metadados de estilo estruturados.
-* **[Symbol Registry](file:///c:/Users/rafae/projects/rust/olayer/core/src/symbol_registry):** Registro unificado e agnóstico de simbologia que resolve códigos de símbolos (como VOR ou caças) utilizando primitivas vetoriais simplificadas geradas a partir de arquivos de biblioteca JSON consolidados. Esses arquivos JSON de símbolos são pré-compilados a partir de arquivos SVG usando a ferramenta CLI `tools/symbol-compiler`. Símbolos rasterizados (PNG/JPG) são injetados diretamente na SDK cliente no Atlas de Texturas, mantendo o core leve e livre de decodificadores raster.
-* **[Target Interpolator](file:///c:/Users/rafae/projects/rust/olayer/core/src/interpolator):** Mantém a tabela de estado de alvos dinâmicos no espaço geodésico 3D. Para cada alvo, registra o último vetor de estado conhecido. Computa posições interpoladas via Dead Reckoning tridimensional baseada no tempo do sistema (WGS84 LatLon e heading), de forma totalmente desacoplada da projeção de tela.
+#### 1. Rust Core Modules
+* **[Geodesy Module](file:///c:/Users/rafae/projects/rust/olayer/core/src/geodesy):** Provides the mathematical functions based on the WGS84 reference ellipsoid. Performs bidirectional transformations between geographic coordinates $(\phi, \lambda, h)$ and Cartesian ECEF $(X, Y, Z)$.
+* **[Camera Module](file:///c:/Users/rafae/projects/rust/olayer/core/src/camera):** Manages the three-dimensional geographic navigation state and camera attitude (center, zoom, bearing/yaw, pitch, roll) and calculates the View-Projection matrices for 2D, 2.5D, and 3D in a unified and performant manner.
+* **[Projections Module](file:///c:/Users/rafae/projects/rust/olayer/core/src/projections):** Contains the mathematical formulas to project three-dimensional or geodetic points onto 2D planes. Implements the equations for Stereographic, LCC, and Mercator projections.
+* **[Terrain Engine (DTED)](file:///c:/Users/rafae/projects/rust/olayer/core/src/terrain):** Manages DTED files in memory. Builds a simplified 2D spatial index (Grid) where each cell points to the loaded elevation bytes. Allows altitude queries at arbitrary coordinates to run in constant time $O(1)$.
+* **[SLD Parser](file:///c:/Users/rafae/projects/rust/olayer/core/src/sld):** Syntactic parser (Parser) of XML that converts the OGC SLD (Styled Layer Descriptor) standard into structured style metadata.
+* **[Symbol Registry](file:///c:/Users/rafae/projects/rust/olayer/core/src/symbol_registry):** Unified and agnostic symbology registry that resolves symbol codes (such as VOR or fighter jets) using simplified vector primitives generated from consolidated JSON library files. These JSON symbol files are pre-compiled from SVG files using the CLI tool `tools/symbol-compiler`. Rasterized symbols (PNG/JPG) are injected directly into the client SDK in the Texture Atlas, keeping the core lightweight and free of raster decoders.
+* **[Target Interpolator](file:///c:/Users/rafae/projects/rust/olayer/core/src/interpolator):** Maintains the state table of dynamic targets in 3D geodetic space. For each target, records the last known state vector. Computes interpolated positions via 3D Dead Reckoning based on system time (WGS84 LatLon and heading), completely decoupled from screen projection.
 
-#### 2. Componentes da SDK TypeScript (Web Client)
-* **TS Controller:** Controla o loop de animação da tela no navegador utilizando `requestAnimationFrame` e gerencia a modulação dinâmica de FPS (15 FPS ocioso / 60 FPS ativo).
-* **TS Layer Manager:** Coordena a pilha de camadas (Layer Stack) na Web, gerindo o ciclo de pintura otimizado com isolamento de camadas estáticas e dinâmicas.
-* **TS Map Data Stack:** Gerencia a infraestrutura de dados de mapa na web. Implementa as abstrações de `MapDataSource` e gerencia sub-provedores como `VectorTileSource` (para MVT/GeoServer), `RasterTileSource` (WMTS/OpenStreetMap) e `TerrainTileSource` (paginação dinâmica de terreno). Controla filas de requisições, concorrência no navegador e cache local LRU.
-* **WebGL/WebGPU GPU Pipeline:** Vincula buffers de vértices estáticos e renderiza na GPU a partir de matrizes $4 \times 4$ enviadas pela ponte WASM.
-* **WebGL/Canvas 2D CPU Pipeline:** Renderiza alvos dinâmicos resolvendo os sprites no *Atlas de Texturas* da GPU e calculando a anti-sobreposição de etiquetas.
+#### 2. TypeScript SDK Components (Web Client)
+* **TS Controller:** Controls the screen animation loop in the browser using `requestAnimationFrame` and manages dynamic FPS modulation (15 FPS idle / 60 FPS active).
+* **TS Layer Manager:** Coordinates the layer stack (Layer Stack) on the Web, managing the optimized paint cycle with isolation of static and dynamic layers.
+* **TS Map Data Stack:** Manages the web map data infrastructure. Implements the `MapDataSource` abstractions and manages sub-providers such as `VectorTileSource` (for MVT/GeoServer), `RasterTileSource` (WMTS/OpenStreetMap), and `TerrainTileSource` (dynamic terrain paging). Controls request queues, browser concurrency, and local LRU cache.
+* **WebGL/WebGPU GPU Pipeline:** Binds static vertex buffers and renders on the GPU from $4 \times 4$ matrices sent by the WASM bridge.
+* **WebGL/Canvas 2D CPU Pipeline:** Renders dynamic targets by resolving sprites in the GPU *Texture Atlas* and calculating label anti-overlapping.
 
-#### 3. Componentes da SDK Nativa (Desktop Client)
-* **Native Controller:** Controla o loop nativo de frames e gerencia a criação de janelas desktop locais (utilizando a crate `winit` ou o loop de mensagens da aplicação host).
-* **Native Layer Manager:** Gerencia a pilha de camadas nativas para controle de visibilidade, mesclagem e repintura em nível nativo.
-* **Native Map Data Stack:** Equivalente de infraestrutura de dados para plataformas Desktop. Gerencia conexões de rede de alto desempenho (via `reqwest`), decodificação de formatos táticos e I/O de disco local eficiente para arquivos DTED.
-* **wgpu GPU Pipeline:** Compila pipelines e renderiza na GPU (Vulkan, Metal ou DirectX 12) através da biblioteca Rust `wgpu` para desenhar terrenos tridimensionais e mapas de fundo vetoriais.
-* **wgpu CPU/Vertex Pipeline:** Renderiza os alvos dinâmicos no desktop usando chamadas instanciadas e *billboards* a partir de um atlas de textura local.
+#### 3. Native SDK Components (Desktop Client)
+* **Native Controller:** Controls the native frame loop and manages local desktop window creation (using the `winit` crate or the host application's message loop).
+* **Native Layer Manager:** Manages the native layer stack for visibility, blending, and repainting at the native level.
+* **Native Map Data Stack:** Desktop equivalent of data infrastructure. Manages high-performance network connections (via `reqwest`), tactical format decoding, and efficient local disk I/O for DTED files.
+* **wgpu GPU Pipeline:** Compiles pipelines and renders on the GPU (Vulkan, Metal, or DirectX 12) through the Rust `wgpu` library to draw 3D terrain and vector background maps.
+* **wgpu CPU/Vertex Pipeline:** Renders dynamic targets on the desktop using instanced calls and *billboards* from a local texture atlas.
 
-#### 4. Camadas de Interoperabilidade (Bridges)
-* **Bridge WASM (wasm-bindgen):** Ponte de transição de memória e FFI que exporta funções do Core Rust para o formato TypeScript/JavaScript no navegador, usando referências diretas de memória.
-* **C-FFI Bridge (cbindgen):** Ponte de exportação C-API (`libolayer_native.h`) gerada pelo `cbindgen`, expondo interfaces compatíveis com vinculação direta para hospedeiros em C, C++ ou outras linguagens compiladas.
+#### 4. Interoperability Layers (Bridges)
+* **WASM Bridge (wasm-bindgen):** Memory transition and FFI bridge that exports Core Rust functions to the TypeScript/JavaScript format in the browser, using direct memory references.
+* **C-FFI Bridge (cbindgen):** C-API export bridge (`libolayer_native.h`) generated by `cbindgen`, exposing interfaces compatible with direct binding for hosts in C, C++, or other compiled languages.
 
 ---
 
-## 4. Nível 4: Código e Fluxos de Processo (Sequence Diagrams)
+## 4. Level 4: Code and Process Flows (Sequence Diagrams)
 
-### 4.1 Ingestão de Pings e Loop de Renderização Dinâmico (FPS Throttling)
+### 4.1 Ping Ingestion and Dynamic Rendering Loop (FPS Throttling)
 
-Este diagrama detalha como o sistema lida com o recebimento lento de dados de sensores (geralmente 1 Hz) e o renderiza suavemente na tela (15 a 60 FPS) usando *Dead Reckoning*.
+This diagram details how the system handles slow sensor data reception (usually 1 Hz) and renders it smoothly on the screen (15 to 60 FPS) using *Dead Reckoning*.
 
 ```mermaid
 sequenceDiagram
     autonumber
     participant Host as Host App (TS / C++ / Rust)
     participant SDK as Olayer SDK (TS / Native)
-    participant Core as Olayer Core (WASM / Nativo)
+    participant Core as Olayer Core (WASM / Native)
     participant GPU as GPU (WebGL / WebGPU / wgpu)
 
-    Note over Host, Core: 1. Ingestão de Dados de Sensores (Assíncrono ~1 Hz)
+    Note over Host, Core: 1. Sensor Data Ingestion (Async ~1 Hz)
     Host->>SDK: updateTarget(id, latitude, longitude, altitude, heading, speed, timestamp)
-    SDK->>Core: update_target(TargetState) (Via WASM ou Link Nativo)
-    Core->>Core: Salva no registro de estados (Interpolator)
+    SDK->>Core: update_target(TargetState) (Via WASM or Native Link)
+    Core->>Core: Saves to state registry (Interpolator)
 
-    Note over Host, GPU: 2. Loop de Renderização (Dinâmico: 15 FPS ocioso / 60 FPS ativo)
+    Note over Host, GPU: 2. Rendering Loop (Dynamic: 15 FPS idle / 60 FPS active)
     Host->>SDK: renderFrame(currentSystemTime, cameraState)
     
     rect rgb(230, 245, 255)
-        Note over SDK, Core: Canal de Matrizes (Orientado à GPU - Fundo e Terreno)
+        Note over SDK, Core: Matrix Channel (GPU-oriented - Background and Terrain)
         SDK->>Core: get_view_projection_matrix(cameraState)
-        Core-->>SDK: Matrix4x4 (LCC / Estereográfica / ECEF)
-        SDK->>GPU: Atualiza Uniform / Render Pipeline ('u_viewProjMatrix')
-        SDK->>GPU: DrawInstanced / DrawElements (Mapas de Fundo & Elevações)
+        Core-->>SDK: Matrix4x4 (LCC / Stereographic / ECEF)
+        SDK->>GPU: Update Uniform / Render Pipeline ('u_viewProjMatrix')
+        SDK->>GPU: DrawInstanced / DrawElements (Background Maps & Elevations)
     end
 
     rect rgb(255, 245, 230)
-        Note over SDK, Core: Canal de Vértices Projetados (Orientado à CPU - Alvos e Símbolos)
+        Note over SDK, Core: Projected Vertex Channel (CPU-oriented - Targets and Symbols)
         SDK->>Core: interpolate_all(currentSystemTime)
-        Core->>Core: Calcula Dead Reckoning em 3D geodésico (elipsoide WGS84)
-        Core-->>SDK: Lista de alvos interpolados [id, LatLon, heading_rad]
-        SDK->>Core: project(LatLon) (Para cada alvo)
-        Core-->>SDK: Coordenadas de Tela (X, Y)
-        SDK->>SDK: Resolve símbolos no Atlas de Texturas (ICAO/NATO) e executa Anti-cluttering
-        SDK->>GPU: Renderiza símbolos (Billboards e Instanced sprites) e textos
+        Core->>Core: Calculates Dead Reckoning in 3D geodetic (WGS84 ellipsoid)
+        Core-->>SDK: List of interpolated targets [id, LatLon, heading_rad]
+        SDK->>Core: project(LatLon) (For each target)
+        Core-->>SDK: Screen Coordinates (X, Y)
+        SDK->>SDK: Resolve symbols in Texture Atlas (ICAO/NATO) and execute Anti-cluttering
+        SDK->>GPU: Render symbols (Billboards and Instanced sprites) and texts
     end
 ```
 
-### 4.2 Carga de Terreno DTED e Processamento de Alertas Verticais (MSAW)
+### 4.2 DTED Terrain Loading and Vertical Alert Processing (MSAW)
 
-Este diagrama ilustra o carregamento de arquivos DTED na memória e o cálculo de alertas verticais e perfil de elevação, detalhando a diferença de consumo de dados entre Web e Desktop.
+This diagram illustrates the loading of DTED files into memory and the calculation of vertical alerts and elevation profile, detailing the difference in data consumption between Web and Desktop.
 
 ```mermaid
 sequenceDiagram
     autonumber
     participant Host as Host App (TS / C++ / Rust)
     participant SDK as Olayer SDK (TS / Native)
-    participant Source as Fonte de Terreno (HTTP / Disco)
-    participant Core as Olayer Core (WASM / Nativo)
+    participant Source as Terrain Source (HTTP / Disk)
+    participant Core as Olayer Core (WASM / Native)
 
-    Note over SDK, Source: Fase 1: Carregamento de Terreno (Sob Demanda)
-    alt Para Ambiente Web (TS Client)
-        SDK->>Source: HTTP GET (Tile DTED)
-        Source-->>SDK: ArrayBuffer (Dados binários)
-    else Para Ambiente Nativo (Desktop Client)
-        SDK->>Source: Leitura I/O Local (Caminho do arquivo DTED)
-        Source-->>SDK: Buffer binário de elevação
+    Note over SDK, Source: Phase 1: Terrain Loading (On Demand)
+    alt For Web Environment (TS Client)
+        SDK->>Source: HTTP GET (DTED Tile)
+        Source-->>SDK: ArrayBuffer (Binary data)
+    else For Native Environment (Desktop Client)
+        SDK->>Source: Local I/O Read (DTED file path)
+        Source-->>SDK: Binary elevation buffer
     end
     SDK->>Core: load_dted_buffer(tileCoords, offset, length)
-    Core->>Core: Parseia binário DTED e insere matriz no Grid Index
-    Core-->>SDK: Sucesso (Tile registrado no Cache Espacial)
+    Core->>Core: Parses DTED binary and inserts matrix into Grid Index
+    Core-->>SDK: Success (Tile registered in Spatial Cache)
 
-    Note over Host, Core: Fase 2: Alertas em Tempo Real (MSAW)
+    Note over Host, Core: Phase 2: Real-time Alerts (MSAW)
     Host->>SDK: checkAltimetry(aircraftId)
     SDK->>Core: get_terrain_elevation(lat, lon)
-    Core->>Core: Acesso O(1) no Grid Index do cache ativo
-    Core-->>SDK: altitude_solo (metros WGS84)
-    SDK->>SDK: Compara: (aeronave_alt - altitude_solo) < Margem de Segurança?
-    SDK-->>Host: Retorna Alerta MSAW (Verdadeiro/Falso)
+    Core->>Core: O(1) access in active Grid Index cache
+    Core-->>SDK: ground_altitude (meters WGS84)
+    SDK->>SDK: Compare: (aircraft_alt - ground_altitude) < Safety Margin?
+    SDK-->>Host: Returns MSAW Alert (True/False)
 
-    Note over Host, Core: Fase 3: Geração de Perfil Vertical (Visão 2.5D)
+    Note over Host, Core: Phase 3: Vertical Profile Generation (2.5D View)
     Host->>SDK: getFlightVerticalProfile(routePoints, samplingStep)
     SDK->>Core: compute_vertical_profile(routePoints, samplingStep)
-    loop Para cada ponto amostrado na rota
-        Core->>Core: Consulta altitude do solo no indexador DTED
+    loop For each sampled point on the route
+        Core->>Core: Queries ground altitude in DTED indexer
     end
-    Core-->>SDK: Array de coordenadas de perfil [distancia_acumulada, altitude_solo]
-    SDK-->>Host: Retorna dados para plotagem do perfil de voo 2.5D
+    Core-->>SDK: Array of profile coordinates [cumulative_distance, ground_altitude]
+    SDK-->>Host: Returns data for 2.5D flight profile plotting
 ```
 
 ---
 
-## 5. Decisões Arquiteturais Críticas (ADRs)
+## 5. Critical Architectural Decisions (ADRs)
 
-### ADR-001: Pipeline Híbrido de Renderização (Matrizes vs Vértices)
-* **Contexto:** Desenhar mapas complexos com vetores geográficos gera milhões de vértices. Por outro lado, alvos de radar (aviões) exigem símbolos rotacionados de forma fixa e etiquetas legíveis sem distorção 3D (efeito *Billboard*).
-* **Decisão:** Adotou-se o modelo híbrido.
-  * O fundo do mapa (MVT) e o terreno denso são projetados e renderizados na GPU usando transformações de matrizes $4\times4$ computadas no Rust Core.
-  * Os símbolos de aviões e as etiquetas textuais dinâmicas são projetados de geodésico para coordenadas de tela de 2D $(X,Y)$ no Rust Core. O desenho em si ocorre de forma "achatada" e pixel-perfect na tela, permitindo algoritmos de prevenção de sobreposição de texto (anti-cluttering) eficientes na CPU.
-* **Consequência:** Excelente desempenho gráfico global combinado com legibilidade absoluta e segurança no controle de telas ATC.
+### ADR-001: Hybrid Rendering Pipeline (Matrices vs Vertices)
+* **Context:** Drawing complex maps with geographic vectors generates millions of vertices. On the other hand, radar targets (airplanes) require fixedly rotated symbols and legible labels without 3D distortion (*Billboard* effect).
+* **Decision:** The hybrid model was adopted.
+  * The map background (MVT) and dense terrain are projected and rendered on the GPU using $4\times4$ matrix transformations computed in the Rust Core.
+  * The airplane symbols and dynamic textual labels are projected from geodetic to 2D screen coordinates $(X,Y)$ in the Rust Core. The drawing itself occurs in a "flattened" and pixel-perfect manner on the screen, allowing efficient text anti-overlapping algorithms (anti-cluttering) on the CPU.
+* **Consequence:** Excellent overall graphics performance combined with absolute readability and safety on ATC screens.
 
-### ADR-002: Ingestão Passiva de Recursos no Core Rust (WASM)
-* **Contexto:** Arquivos DTED de terreno e estilos SLD residem em disco ou em servidores geográficos externos. O código em WebAssembly executando nos browsers padrão possui restrições severas de segurança para I/O nativo (file system) e requisições HTTP diretas por parte do Core Rust podem inflar o binário final desnecessariamente.
-* **Decisão:** O Core em Rust é completamente passivo. Ele não possui drivers de rede ou leitores de disco. A SDK TypeScript baixa os recursos (buffers MVT, XML de arquivos SLD e ArrayBuffers DTED) via APIs nativas do navegador (`fetch`) e injeta os ponteiros de memória binária nos métodos expostos pelo WebAssembly.
-* **Consequência:** Binário WASM leve, desacoplamento total da lógica de transporte de dados e segurança de execução aprimorada.
+### ADR-002: Passive Resource Ingestion in Rust Core (WASM)
+* **Context:** DTED terrain files and SLD styles reside on disk or external geographic servers. Code running in standard WebAssembly in browsers has severe security restrictions for native I/O (file system) and direct HTTP requests from the Rust Core could unnecessarily inflate the final binary.
+* **Decision:** The Core in Rust is completely passive. It has no network drivers or disk readers. The TypeScript SDK downloads resources (MVT buffers, SLD XML files, and DTED ArrayBuffers) via native browser APIs (`fetch`) and injects the binary memory pointers into the methods exposed by WebAssembly.
+* **Consequence:** Lightweight WASM binary, complete decoupling of data transport logic, and enhanced execution security.
 
-### ADR-003: Interpolação de Movimento no Lado do Cliente (Dead Reckoning)
-* **Contexto:** Feeds de radar ou ADS-B chegam à aplicação host com intervalos de 1 a 4 segundos. Atualizar as aeronaves na tela diretamente nesses pings causará animações travadas e desconforto visual aos controladores.
-* **Decisão:** Implementar a lógica de estimativa cinemática no Core. O Host apenas reporta as posições reais com seus timestamps históricos. O Core realiza o cálculo de predição linear da posição atual da aeronave com base no tempo de processamento do frame e na velocidade/rumo informados.
-* **Consequência:** Movimento contínuo e suave a 60 FPS, mesmo sob redes instáveis ou atrasos na recepção de pacotes.
+### ADR-003: Motion Interpolation on the Client Side (Dead Reckoning)
+* **Context:** Radar or ADS-B feeds arrive at the host application with intervals of 1 to 4 seconds. Updating aircraft on the screen directly at these pings will cause jerky animations and visual discomfort for controllers.
+* **Decision:** Implement the kinematic estimation logic in the Core. The Host only reports the real positions with their historical timestamps. The Core performs the linear prediction calculation of the aircraft's current position based on the frame processing time and the reported speed/heading.
+* **Consequence:** Continuous and smooth movement at 60 FPS, even under unstable networks or packet reception delays.
 
-### ADR-004: Gerenciamento de Ciclo de Vida e Desalocação de Memória WebAssembly
-* **Contexto:** O WebAssembly (WASM) compartilha uma memória linear com o JavaScript. Objetos criados em Rust (como structs instanciadas via wrapper do `wasm-bindgen`) residem no heap do WASM e não são gerenciados pelo Garbage Collector (GC) do JavaScript. Se a SDK TypeScript instanciar objetos no Rust e perder as referências no JS sem liberá-los explicitamente, a memória do WASM crescerá indefinidamente, gerando *out-of-memory* em execuções de longa duração (essenciais em sistemas ATC).
-* **Decisão:** A SDK TypeScript implementará um controle rígido do ciclo de vida dos objetos Rust/WASM.
-  - Toda estrutura criada no Rust que possua ciclo de vida curto (ex: alvos descartados, perfis de voo de consulta rápida) deverá ter seu método `.free()` invocado explicitamente pela SDK TS.
-  - Para buffers densos e de tamanho variável (como grids DTED de terreno carregados), a SDK gerenciará um cache de tamanho fixo com política de substituição LRU (Least Recently Used). Quando um tile de terreno for descartado do cache, a SDK notificará o Core Rust para liberar a memória correspondente.
-  - O Core Rust usará vetores estáticos pré-alocados para dados altamente dinâmicos (como a lista de alvos interpolados no frame atual), evitando alocações e desalocações repetidas de memória a cada frame de renderização.
-* **Consequência:** Estabilidade de uso de memória a longo prazo, previsibilidade de consumo de RAM do navegador e prevenção de travamentos por exaustão de memória em sessões operacionais contínuas.
+### ADR-004: WebAssembly Memory Lifecycle Management and Deallocation
+* **Context:** WebAssembly (WASM) shares linear memory with JavaScript. Objects created in Rust (such as structs instantiated via `wasm-bindgen` wrapper) reside in the WASM heap and are not managed by the JavaScript Garbage Collector (GC). If the TypeScript SDK instantiates objects in Rust and loses references in JS without explicitly freeing them, the WASM memory will grow indefinitely, generating *out-of-memory* in long-duration executions (essential in ATC systems).
+* **Decision:** The TypeScript SDK will implement strict lifecycle control of Rust/WASM objects.
+  - Every structure created in Rust with a short lifecycle (e.g., discarded targets, quick query flight profiles) must have its `.free()` method explicitly invoked by the TS SDK.
+  - For dense and variable-sized buffers (such as loaded DTED terrain grids), the SDK will manage a fixed-size cache with LRU (Least Recently Used) replacement policy. When a terrain tile is discarded from the cache, the SDK notifies the Rust Core to free the corresponding memory.
+  - The Rust Core will use pre-allocated static vectors for highly dynamic data (such as the list of interpolated targets in the current frame), avoiding repeated memory allocations and deallocations at each rendering frame.
+* **Consequence:** Long-term memory usage stability, predictable browser RAM consumption, and prevention of crashes due to memory exhaustion in continuous operational sessions.
 
-### ADR-005: Segregação de Camadas de Exibição e Otimização Gráfica (Texture Atlases & Framebuffer Cache)
-* **Contexto:** Desenhar mapas completos contendo milhões de polígonos GIS estáticos e texturas de relevo juntamente com alvos dinâmicos em tempo real a 60 FPS causa alta sobrecarga na GPU e CPU devido a trocas frequentes de contexto e excesso de draw calls. Símbolos militares complexos (NATO APP-6) compostos por múltiplos sub-vetores agravam esse problema se renderizados individualmente a cada frame.
-* **Decisão:** O framework adotará uma estratégia de renderização segregada por camadas:
-  - **Separação de Ciclos:** As camadas estáticas de fundo de mapa (MVT e elevação) serão renderizadas e compostas em Framebuffers fora da tela (Offscreen Render Targets) apenas quando a câmera sofrer alteração física. Se a tela estiver estática, a GPU realiza apenas o redesenho rápido dessa textura cacheada (*blitting*).
-  - **Atlas de Texturas Dinâmico:** Os símbolos complexos decodificados pelo `Symbol Registry` serão rasterizados uma única vez na CPU e injetados em um Atlas de Texturas comum na GPU.
-  - **Instanciamento:** Para desenhar milhares de aeronaves e alvos, a SDK enviará um único buffer de dados dinâmicos e fará uma chamada de desenho instanciada (`drawElementsInstanced`) baseada nos offsets de textura do Atlas, reduzindo milhares de draw calls para apenas uma.
-* **Consequência:** Alta taxa de quadros (60 FPS estáveis), tempo de CPU livre na thread principal para processamento tático e baixíssimo consumo de bateria/recursos em painéis de monitoramento estáticos.
+### ADR-005: Display Layer Segregation and Graphics Optimization (Texture Atlases & Framebuffer Cache)
+* **Context:** Drawing complete maps containing millions of static GIS polygons and relief textures together with dynamic targets in real-time at 60 FPS causes high overhead on the GPU and CPU due to frequent context changes and excessive draw calls. Complex military symbols (NATO APP-6) composed of multiple sub-vectors aggravate this problem if rendered individually each frame.
+* **Decision:** The framework will adopt a layer-based segregated rendering strategy:
+  - **Cycle Separation:** Static background map layers (MVT and elevation) will be rendered and composited into offscreen Framebuffers (Offscreen Render Targets) only when the camera undergoes physical changes. If the screen is static, the GPU only performs a quick redraw of this cached texture (*blitting*).
+  - **Dynamic Texture Atlas:** Complex symbols decoded by the `Symbol Registry` will be rasterized once on the CPU and injected into a common Texture Atlas on the GPU.
+  - **Instancing:** To draw thousands of aircraft and targets, the SDK will send a single buffer of dynamic data and perform one instanced draw call (`drawElementsInstanced`) based on the texture offsets of the Atlas, reducing thousands of draw calls to just one.
+* **Consequence:** High frame rate (stable 60 FPS), free CPU time on the main thread for tactical processing, and very low battery/resource consumption on static monitoring panels.
 
-### ADR-006: Importação e Resolução de Símbolos Customizados (SVG e PNG)
-* **Contexto:** Além das simbologias profissionais procedurais padrão (ICAO/NATO), a aplicação host precisa injetar e renderizar ícones customizados fornecidos nos formatos vetorial (SVG) ou rasterizado (PNG). O framework necessita de um fluxo que unifique estas fontes externas e mantenha a consistência de renderização e performance em visualizações 2D e 3D.
-* **Decisão:** Separou-se a responsabilidade de importação de formatos por tipo de asset, otimizando performance e mantendo o core Rust/WASM leve:
-  - **Símbolos Vetoriais (SVG):** Para evitar o custo computacional e dependências pesadas de parsing XML/SVG em tempo de execução no WASM, os arquivos SVG são processados em tempo de build usando a ferramenta CLI **`tools/symbol-compiler`**. Esta ferramenta mapeia os elementos vetoriais SVG para primitivos puros do Olayer em um arquivo JSON consolidado que é alimentado no `DeclarativeProvider` do Core em tempo de execução.
-  - **Símbolos Rasterizados (PNG/JPG):** Imagens rasterizadas não passam pelo Core. O carregamento de PNG/JPG é delegado para a SDK em TypeScript via método `TextureAtlasManager::registerImageSymbol`, que utiliza as APIs nativas de carregamento de imagens do browser e desenha os pixels diretamente no canvas offscreen do Texture Atlas para envio à GPU.
-  - **Unificação nos Streams 2D/3D:** Uma vez carregados no Texture Atlas com suas respectivas coordenadas UV, os símbolos importados utilizam o mesmo pipeline de renderização instanciada. No fluxo 2D, são desenhados como sprites planos comuns. No fluxo 3D, são renderizados usando *Billboard Shaders* que alinham as coordenadas planas à câmera, impedindo distorções tridimensionais de perspectiva e garantindo legibilidade.
-* **Consequência:** Flexibilidade total de personalização visual, zero overhead de decodificadores ou interpretadores de arquivos pesados no WASM do Core, e consistência de alta performance na renderização de milhares de símbolos simultâneos.
+### ADR-006: Importing and Resolving Custom Symbols (SVG and PNG)
+* **Context:** In addition to standard procedural professional symbologies (ICAO/NATO), the host application needs to inject and render custom icons provided in vector (SVG) or rasterized (PNG) formats. The framework requires a workflow that unifies these external sources and maintains rendering consistency and performance in 2D and 3D visualizations.
+* **Decision:** The responsibility for importing formats was separated by asset type, optimizing performance and keeping the Rust Core/WASM lightweight:
+  - **Vector Symbols (SVG):** To avoid the computational cost and heavy dependencies of XML/SVG parsing at runtime in WASM, SVG files are processed at build time using the CLI tool **`tools/symbol-compiler`**. This tool maps SVG vector elements to pure Olayer primitives in a consolidated JSON file that is fed into the Core's `DeclarativeProvider` at runtime.
+  - **Rasterized Symbols (PNG/JPG):** Rasterized images do not go through the Core. PNG/JPG loading is delegated to the TypeScript SDK via the `TextureAtlasManager::registerImageSymbol` method, which uses the browser's native image loading APIs and draws pixels directly into the Texture Atlas's offscreen canvas for submission to the GPU.
+  - **Unification in 2D/3D Streams:** Once loaded into the Texture Atlas with their respective UV coordinates, imported symbols use the same instanced rendering pipeline. In the 2D flow, they are drawn as common flat sprites. In the 3D flow, they are rendered using *Billboard Shaders* that align the flat coordinates to the camera, preventing 3D perspective distortions and ensuring readability.
+* **Consequence:** Full visual customization flexibility, zero overhead of heavy decoders or file interpreters in the WASM Core, and consistent high-performance rendering of thousands of simultaneous symbols.
 
 ---
 
-## 6. Mapeamento da Estrutura de Diretórios com Componentes
+## 6. Directory Structure Mapping with Components
 
-A estrutura física proposta para o repositório é organizada conforme a divisão de responsabilidades da arquitetura:
+The proposed physical repository structure is organized according to the architecture's division of responsibilities:
 
 ```text
 olayer/
 ├── core/                         # [C4 Component: Olayer Core Engine]
 │   ├── Cargo.toml
 │   └── src/
-│       ├── geodesy/              # Módulo de Fórmulas Geodésicas e ECEF (WGS84)
+│       ├── geodesy/              # Geodetic Formulas and ECEF Module (WGS84)
 │       │   └── mod.rs
-│       ├── projections/          # Implementações de Estereográfica, LCC e Mercator
+│       ├── projections/          # Stereographic, LCC, and Mercator Implementations
 │       │   └── mod.rs
-│       ├── terrain/              # Parse de arquivos DTED e Índice de Altitude O(1)
+│       ├── terrain/              # DTED File Parsing and O(1) Altitude Index
 │       │   └── mod.rs
-│       ├── sld/                  # Parser de XML para Estilização SLD
+│       ├── sld/                  # XML Parser for SLD Styling
 │       │   └── mod.rs
-│       └── interpolator/         # Lógica de Dead Reckoning para rastreio de alvos
+│       └── interpolator/         # Dead Reckoning Logic for Target Tracking
 │           └── mod.rs
 │
 sdk/
 ├── ts/                       # [C4 Component: Olayer TS SDK]
 │   ├── package.json
 │   ├── src/
-│   │   ├── controller/       # Gerenciamento de Loop, FPS Throttler e Eventos
-│   │   ├── providers/        # Chamadas de rede WMTS, MVT, SLD e injeção DTED
-│   │   ├── renderer/         # Renderizador WebGL (GPU) e Canvas (CPU)
-│   │   └── index.ts          # API pública da SDK TypeScript
+│   │   ├── controller/       # Loop Management, FPS Throttler, and Events
+│   │   ├── providers/        # WMTS, MVT, SLD network calls, and DTED injection
+│   │   ├── renderer/         # WebGL Renderer (GPU) and Canvas (CPU)
+│   │   └── index.ts          # Public TypeScript SDK API
 │   ├── tsconfig.json
 │   └── wasm/                 # [C4 Component: WASM Bindings Layer]
 │       ├── Cargo.toml
 │       └── src/
-│           └── lib.rs        # Exportações com #[wasm_bindgen] para a SDK TS
+│           └── lib.rs        # Exports with #[wasm_bindgen] for TS SDK
 │
 └── native/                   # [C4 Component: Olayer Native Environment]
     ├── c_ffi_bridge/         # [C4 Component: C-FFI Bridge]
     │   ├── Cargo.toml
     │   └── src/
-    │       └── lib.rs        # Exports C-compatible / cbindgen header
+    │       └── lib.rs        # C-compatible Exports / cbindgen header
     │
     └── desktop/              # [C4 Component: Olayer Native SDK & Demo]
         ├── Cargo.toml
         └── src/
-            ├── lib.rs        # Interface estática nativa / FPS throttler
-            └── main.rs       # Demo nativo wgpu + winit + egui
+            ├── lib.rs        # Native static interface / FPS throttler
+            └── main.rs       # Native demo wgpu + winit + egui
 
 ```
 
 ---
 
-## 7. Próximos Passos de Validação de Arquitetura
+## 7. Next Steps for Architecture Validation
 
-Para ratificar as premissas deste documento de arquitetura, as seguintes atividades experimentais são planejadas:
-1. **Validação Matemática (Geodesia):** Criação de testes unitários no módulo `geodesy` comparando a distância geodésica entre aeroportos conhecidos calculada pelo core com o modelo de referência oficial do WGS84.
-2. **Benchmark WASM-TS Bound:** Medição da latência de transferência de dados ao carregar buffers DTED de 1MB entre a pilha TypeScript e a memória linear do WASM para confirmar a ausência de gargalos na borda.
-3. **Teste de Projeção Dinâmica:** Renderização de um setor de testes com troca rápida em tempo de execução de Lambert Conformal Conic para Estereográfica Azimutal para garantir a atualização correta das matrizes e vértices.
+To ratify the premises of this architecture document, the following experimental activities are planned:
+1. **Mathematical Validation (Geodesy):** Creation of unit tests in the `geodesy` module comparing the geodetic distance between known airports calculated by the core with the official WGS84 reference model.
+2. **WASM-TS Bound Benchmark:** Measurement of data transfer latency when loading 1MB DTED buffers between the TypeScript stack and the WASM linear memory to confirm the absence of bottlenecks at the edge.
+3. **Dynamic Projection Test:** Rendering of a test sector with rapid runtime switching from Lambert Conformal Conic to Azimuthal Stereographic to ensure correct matrix and vertex updates.

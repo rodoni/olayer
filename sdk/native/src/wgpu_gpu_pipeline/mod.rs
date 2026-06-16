@@ -134,13 +134,11 @@ impl WgpuGpuPipeline {
         }
     }
 
-    /// Rebuilds the grid vertex buffers based on the controller view mode and active projection.
-    pub fn rebuild_grid_buffers(
-        &mut self,
-        controller: &NativeController,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-    ) {
+    /// Generates grid line vertices on the CPU without touching GPU buffers.
+    ///
+    /// This is extracted as a pure function so it can be benchmarked independently
+    /// of the wgpu device/queue lifecycle.
+    pub fn generate_grid_vertices(controller: &NativeController) -> Vec<f32> {
         let mut coords: Vec<f32> = Vec::new();
         if controller.view_mode == "3D" {
             let step = 10;
@@ -193,6 +191,18 @@ impl WgpuGpuPipeline {
                 }
             }
         }
+        coords
+    }
+
+    /// Rebuilds the grid vertex buffers based on the controller view mode and active projection.
+    #[inline]
+    pub fn rebuild_grid_buffers(
+        &mut self,
+        controller: &NativeController,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) {
+        let coords = Self::generate_grid_vertices(controller);
 
         if !coords.is_empty() {
             let b = device.create_buffer(&wgpu::BufferDescriptor {
@@ -211,6 +221,7 @@ impl WgpuGpuPipeline {
     }
 
     /// Renders the grid using the compiled pipeline.
+    #[inline]
     pub fn render<'a>(&'a self, render_pass: &mut wgpu::RenderPass<'a>) {
         if let Some(ref buffer) = self.grid_vertex_buffer {
             render_pass.set_pipeline(&self.pipeline);

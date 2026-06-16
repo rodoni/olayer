@@ -1,45 +1,45 @@
-# Arquitetura do Componente: Terrain Engine (`core::terrain`)
+# Component Architecture: Terrain Engine (`core::terrain`)
 
-Este documento descreve a especificação de arquitetura, o design das estruturas de dados e os algoritmos espaciais do **Terrain Engine** do Olayer Core. Este componente fornece o suporte a dados de elevação digital de relevo (DTED) para consultas de altitude em tempo constante $O(1)$ e cálculo de perfil vertical de rotas.
-
----
-
-## 1. Responsabilidades
-
-O **Terrain Engine** é projetado para processar dados altimétricos passivamente no Rust Core, com as seguintes responsabilidades:
-1. **Parser Binário de Arquivos DTED:** Interpretar buffers binários de arquivos no padrão militar DTED (Níveis 0, 1 e 2) sem requisições diretas de I/O em disco (compatível com WASM).
-2. **Indexador Espacial em Memória (Grid Index):** Armazenar e organizar múltiplos tiles de elevação ativos indexados por suas coordenadas geográficas de origem (graus inteiros de latitude/longitude).
-3. **Interpolação Bilinear em Tempo Constante $O(1)$:** Estimar a altitude exata de qualquer coordenada LLA com base nas quatro células do grid mais próximas, suavizando a transição entre pontos de amostragem do relevo.
-4. **Geração de Perfil Vertical (Visão 2.5D):** Calcular um vetor de distâncias acumuladas e altitudes interpoladas do solo ao longo de uma sequência de pontos de rota (percurso de voo).
-5. **MSAW (Minimum Safe Altitude Warning):** Prover a base matemática ultra-rápida para que as SDKs validem se a altitude atual ou projetada da aeronave infringe a margem de segurança do solo.
+This document describes the architecture specification, data structure design, and spatial algorithms of the **Terrain Engine** of the Olayer Core. This component provides support for Digital Terrain Elevation Data (DTED) for altitude queries in constant time $O(1)$ and route vertical profile calculation.
 
 ---
 
-## 2. Detalhamento Técnico do Formato DTED
+## 1. Responsibilities
 
-Os arquivos DTED dividem o globo em blocos de $1^\circ \times 1^\circ$ de arco geográfico. A estrutura física de um arquivo DTED é composta por blocos sequenciais estruturados em Big-Endian:
-
-### 2.1 Cabeçalhos (Headers)
-* **UHL (User Header Label):** Primeiros 80 bytes. Contém a longitude e latitude do canto sudoeste (origem do bloco) e o espaçamento angular horizontal/vertical do grid.
-* **DSI (Data Set Identification):** Próximos 648 bytes. Contém metadados adicionais de precisão, níveis de segurança do dado e nível do DTED.
-* **ACC (Accuracy Description):** Próximos 2700 bytes. Contém descrições de acurácia.
-
-### 2.2 Blocos de Registros de Dados (Data Records)
-Após os cabeçalhos, o arquivo é composto por colunas de dados ordenadas de Oeste para Leste. Cada coluna representa uma longitude fixa e contém valores de altitude ordenados do Sul para o Norte:
-* **Byte de Sentinela (Block ID):** `0xAA` (1 byte).
-* **Contador de Sequência de Longitude:** 3 bytes.
-* **Contador de Sequência de Latitude:** 3 bytes.
-* **Dados de Elevação:** Sequência de inteiros com sinal de 16 bits (`i16` em Big-Endian).
-  * **Level 0:** 121 valores por coluna (espaçamento de 30 arc-sec ~ 900m).
-  * **Level 1:** 1201 valores por coluna (espaçamento de 3 arc-sec ~ 90m).
-  * **Level 2:** 3601 valores por coluna (espaçamento de 1 arc-sec ~ 30m).
-* **Checksum:** 4 bytes no final de cada coluna.
-
-*Nota: O valor `-32767` (ou inferior) é tratado como sentinela para dados nulos ou ausentes (oceano profundo ou falha de leitura).*
+The **Terrain Engine** is designed to process altimetric data passively in the Rust Core, with the following responsibilities:
+1. **Binary File Parser of DTED Files:** Interpret binary buffers of files in the military DTED standard (Levels 0, 1, and 2) without direct disk I/O requests (compatible with WASM).
+2. **In-Memory Spatial Indexer (Grid Index):** Store and organize multiple active elevation tiles indexed by their geographic origin coordinates (integer degrees of latitude/longitude).
+3. **Bilinear Interpolation in Constant Time $O(1)$:** Estimate the exact altitude of any LLA coordinate based on the four nearest grid cells, smoothing the transition between relief sampling points.
+4. **Vertical Profile Generation (2.5D View):** Calculate a vector of accumulated distances and interpolated ground altitudes along a sequence of route points (flight path).
+5. **MSAW (Minimum Safe Altitude Warning):** Provide the ultra-fast mathematical basis for the SDKs to validate whether the current or projected aircraft altitude infringes the ground safety margin.
 
 ---
 
-## 3. Diagrama de Estruturas e Relacionamento
+## 2. Technical Detail of the DTED Format
+
+DTED files divide the globe into blocks of $1^\circ \times 1^\circ$ of geographic arc. The physical structure of a DTED file is composed of sequential blocks structured in Big-Endian:
+
+### 2.1 Headers
+* **UHL (User Header Label):** First 80 bytes. Contains the longitude and latitude of the southwest corner (block origin) and the horizontal/vertical grid angular spacing.
+* **DSI (Data Set Identification):** Next 648 bytes. Contains additional precision metadata, data security levels, and DTED level.
+* **ACC (Accuracy Description):** Next 2700 bytes. Contains accuracy descriptions.
+
+### 2.2 Data Record Blocks
+After the headers, the file is composed of columns of data ordered from West to East. Each column represents a fixed longitude and contains altitude values ordered from South to North:
+* **Sentinel Byte (Block ID):** `0xAA` (1 byte).
+* **Longitude Sequence Counter:** 3 bytes.
+* **Latitude Sequence Counter:** 3 bytes.
+* **Elevation Data:** Sequence of 16-bit signed integers (`i16` in Big-Endian).
+  * **Level 0:** 121 values per column (spacing of 30 arc-sec ~ 900m).
+  * **Level 1:** 1201 values per column (spacing of 3 arc-sec ~ 90m).
+  * **Level 2:** 3601 values per column (spacing of 1 arc-sec ~ 30m).
+* **Checksum:** 4 bytes at the end of each column.
+
+*Note: The value `-32767` (or lower) is treated as a sentinel for null or absent data (deep ocean or read failure).*
+
+---
+
+## 3. Structure and Relationship Diagram
 
 ```mermaid
 classDiagram
@@ -83,17 +83,17 @@ classDiagram
         TileNotLoaded
     }
 
-    TerrainEngine "1" *-- "*" DtedTile : armazena
-    DtedTile ..> TileKey : indexado por
-    TerrainEngine ..> ProfilePoint : computa
-    TerrainEngine ..> TerrainError : pode falhar com
+    TerrainEngine "1" *-- "*" DtedTile : stores
+    DtedTile ..> TileKey : indexed by
+    TerrainEngine ..> ProfilePoint : computes
+    TerrainEngine ..> TerrainError : may fail with
 ```
 
 ---
 
-## 4. Algoritmo de Interpolação Bilinear
+## 4. Bilinear Interpolation Algorithm
 
-Para qualquer coordenada geográfica arbitrária $(\phi, \lambda)$ que resida dentro dos limites de um tile carregado, a altitude exata é estimada interpolando linearmente nos dois eixos com base nas quatro células vizinhas mais próximas.
+For any arbitrary geographic coordinate $(\phi, \lambda)$ that resides within the bounds of a loaded tile, the exact altitude is estimated by linearly interpolating on both axes based on the four nearest neighboring cells.
 
 ```text
        col_i      col_i+1
@@ -104,35 +104,35 @@ row_j+1  P11 ------ P12
 row_j    P01 ------ P02
 ```
 
-### Passos Matemáticos:
-1. Determinar o tile correspondente convertendo a latitude e longitude em inteiros (`floor`).
-2. Calcular os índices fracionários da célula do grid correspondente:
-   $$col_f = \frac{\lambda - \lambda_{origem}}{\Delta\lambda_{spacing}}$$
-   $$row_f = \frac{\phi - \phi_{origem}}{\Delta\phi_{spacing}}$$
-3. Obter os limites inteiros inferiores e superiores:
+### Mathematical Steps:
+1. Determine the corresponding tile by converting latitude and longitude to integers (`floor`).
+2. Calculate the fractional cell indices of the corresponding grid:
+   $$col_f = \frac{\lambda - \lambda_{origin}}{\Delta\lambda_{spacing}}$$
+   $$row_f = \frac{\phi - \phi_{origin}}{\Delta\phi_{spacing}}$$
+3. Obtain the lower and upper integer bounds:
    $$col_0 = \lfloor col_f \rfloor, \quad col_1 = col_0 + 1$$
    $$row_0 = \lfloor row_f \rfloor, \quad row_1 = row_0 + 1$$
-4. Computar os fatores de peso local entre 0.0 e 1.0:
+4. Compute local weight factors between 0.0 and 1.0:
    $$tx = col_f - col_0$$
    $$ty = row_f - row_0$$
-5. Buscar os quatro valores de elevação correspondentes:
+5. Fetch the four corresponding elevation values:
    $$z_{00} = E(row_0, col_0), \quad z_{01} = E(row_0, col_1)$$
    $$z_{10} = E(row_1, col_0), \quad z_{11} = E(row_1, col_1)$$
-6. Aplicar a fórmula de interpolação bilinear:
+6. Apply the bilinear interpolation formula:
    $$z_{left} = z_{00} \cdot (1 - ty) + z_{10} \cdot ty$$
    $$z_{right} = z_{01} \cdot (1 - ty) + z_{11} \cdot ty$$
    $$z_{final} = z_{left} \cdot (1 - tx) + z_{right} \cdot tx$$
 
-Se algum dos quatro pontos vizinhos contiver a sentinela de dados nulos (`-32767`), o ponto correspondente é ignorado ou tratado como altitude 0.0.
+If any of the four neighboring points contains the null data sentinel (`-32767`), the corresponding point is ignored or treated as altitude 0.0.
 
 ---
 
-## 5. Algoritmo de Perfil Vertical (Corte 2.5D)
+## 5. Vertical Profile Algorithm (2.5D Cut)
 
-Para gerar o perfil de corte vertical do relevo ao longo de uma aerovia/rota:
+To generate the terrain vertical cut profile along an airway/route:
 
-1. **Amostragem Geodésica:** Para cada segmento de reta da rota (de um fixo ao outro), calcula-se a distância geodésica acumulada utilizando a `Geodesy Engine` (Vincenty ou Haversine).
-2. **Divisão em Passos (Step Size):** O percurso é discretizado em passos métricos uniformes (ex: a cada $500\text{m}$).
-3. **Interpolação de Posições:** Para cada passo do trajeto, computa-se a coordenada intermediária $(\phi_i, \lambda_i)$ utilizando a projeção direta geodésica.
-4. **Consulta altimétrica:** Executa-se a consulta `get_elevation` para cada uma das coordenadas geradas.
-5. **Retorno estruturado:** O resultado é uma lista sequencial de estruturas `ProfilePoint` contendo a distância total a partir da origem, a elevação do solo e as coordenadas do ponto.
+1. **Geodetic Sampling:** For each straight line segment of the route (from one fix to another), the cumulative geodetic distance is calculated using the `Geodesy Engine` (Vincenty or Haversine).
+2. **Step Division (Step Size):** The path is discretized into uniform metric steps (e.g., every $500\text{m}$).
+3. **Position Interpolation:** For each step of the path, the intermediate coordinate $(\phi_i, \lambda_i)$ is computed using the direct geodetic projection.
+4. **Altimeter Query:** The `get_elevation` query is executed for each of the generated coordinates.
+5. **Structured Return:** The result is a sequential list of `ProfilePoint` structures containing the total distance from the origin, the ground elevation, and the point's coordinates.

@@ -1,13 +1,13 @@
-# SDK TypeScript (Web)
-## Componentes da SDK TypeScript (C4 Model - Nível 3)
+# TypeScript SDK (Web)
+## TypeScript SDK Components (C4 Model - Level 3)
 
-Este documento apresenta a organização de alto nível dos componentes do **Olayer TS SDK** (localizado em `sdk/ts`), servindo como mapa de navegação para a documentação de arquitetura específica de cada submódulo.
+This document presents the high-level organization of the **Olayer TS SDK** components (located in `sdk/ts`), serving as a navigation map for the architecture documentation of each specific submodule.
 
 ---
 
-## 1. Diagrama de Componentes da SDK TS
+## 1. TS SDK Component Diagram
 
-O diagrama abaixo detalha a estrutura interna da SDK TypeScript e suas interações com a ponte WebAssembly, a aplicação Host e as APIs gráficas do navegador.
+The diagram below details the internal structure of the TypeScript SDK and its interactions with the WebAssembly bridge, the Host application, and the browser's graphics APIs.
 
 ```mermaid
 graph TB
@@ -20,63 +20,63 @@ graph TB
     host["📱 Host App Web<br>[TypeScript/React/Vue]"]:::host
 
     subgraph TS_SDK_Boundary ["Olayer TS SDK (sdk/ts)"]
-        %% Componentes Principais
-        controller["🎮 TS Controller<br>[Component]<br>Gerencia o loop de animação, eventos de câmera e controle de FPS."]:::jsComponent
-        layer_manager["🥞 Layer Manager<br>[Component]<br>Gerencia a pilha de camadas (Layer Stack) e segrega a repintura."]:::jsComponent
-        map_data_stack["📥 TS Map Data Stack<br>[Component]<br>Gerencia a infraestrutura de dados de mapa, fontes de dados e caches."]:::jsComponent
+        %% Main Components
+        controller["🎮 TS Controller<br>[Component]<br>Manages the animation loop, camera events, and FPS control."]:::jsComponent
+        layer_manager["🥞 Layer Manager<br>[Component]<br>Manages the layer stack (Layer Stack) and segregates repainting."]:::jsComponent
+        map_data_stack["📥 TS Map Data Stack<br>[Component]<br>Manages map data infrastructure, data sources, and caches."]:::jsComponent
         
-        %% Pipeline Gráfico
-        gpu_pipeline["🎨 GPU Render Pipeline<br>[Component]<br>Renderização de malhas de terreno e mapas estáticos (WebGL2)."]:::jsComponent
-        cpu_pipeline["🎯 CPU/Target Pipeline<br>[Component]<br>Projeção de alvos, anti-cluttering e desenho de etiquetas."]:::jsComponent
-        atlas_manager["🖼️ Texture Atlas Manager<br>[Component]<br>Compila e compacta símbolos (SVG, PNG, procedurais) na GPU."]:::jsComponent
+        %% Graphics Pipeline
+        gpu_pipeline["🎨 GPU Render Pipeline<br>[Component]<br>Rendering of terrain meshes and static maps (WebGL2)."]:::jsComponent
+        cpu_pipeline["🎯 CPU/Target Pipeline<br>[Component]<br>Target projection, anti-cluttering, and label drawing."]:::jsComponent
+        atlas_manager["🖼️ Texture Atlas Manager<br>[Component]<br>Compiles and compacts symbols (SVG, PNG, procedural) on the GPU."]:::jsComponent
     end
 
-    %% Elementos de Borda
+    %% Edge Elements
     wasm_bridge["🔗 Bridge WASM (wasm-bindgen)<br>[WASM Interop]"]:::wasmBridge
     canvas_2d["🖥️ Canvas 2D API<br>[Browser API]"]:::browser
     webgl_ctx["🎮 WebGL2 / WebGPU Context<br>[Browser API]"]:::browser
 
-    %% Fluxos de Entrada e Saída
-    host -->|1. Configura e interage| controller
-    host -->|2. Envia pings de radar| controller
-    controller -->|Registra alvos| wasm_bridge
-    map_data_stack -->|3. Injeta binários de mapa e relevo| wasm_bridge
+    %% Input and Output Flows
+    host -->|1. Configures and interacts| controller
+    host -->|2. Sends radar pings| controller
+    controller -->|Registers targets| wasm_bridge
+    map_data_stack -->|3. Injects map and relief binaries| wasm_bridge
 
-    %% Fluxos Internos da SDK
-    controller -->|Coordenador do ciclo| layer_manager
-    layer_manager -->|Pinta fundo e terreno| gpu_pipeline
-    layer_manager -->|Pinta alvos e etiquetas| cpu_pipeline
+    %% Internal SDK Flows
+    controller -->|Cycle coordinator| layer_manager
+    layer_manager -->|Paints background and terrain| gpu_pipeline
+    layer_manager -->|Paints targets and labels| cpu_pipeline
     
-    gpu_pipeline -->|Consulta matrizes e terreno| wasm_bridge
-    cpu_pipeline -->|Consulta posições interpoladas| wasm_bridge
-    cpu_pipeline -->|Requer coordenadas UV| atlas_manager
+    gpu_pipeline -->|Queries matrices and terrain| wasm_bridge
+    cpu_pipeline -->|Queries interpolated positions| wasm_bridge
+    cpu_pipeline -->|Requires UV coordinates| atlas_manager
 
-    %% Renderização física
-    gpu_pipeline -->|Desenha no buffer| webgl_ctx
-    cpu_pipeline -->|Desenha no buffer| canvas_2d
-    atlas_manager -->|Gera e atualiza textura| webgl_ctx
+    %% Physical rendering
+    gpu_pipeline -->|Draws on buffer| webgl_ctx
+    cpu_pipeline -->|Draws on buffer| canvas_2d
+    atlas_manager -->|Generates and updates texture| webgl_ctx
 
     linkStyle 0,1,2,3,4,5,6,7,8,9,10,11,12 stroke:#555,stroke-width:1.5px;
 ```
 
 ---
 
-## 2. Detalhamento e Arquitetura dos Submódulos
+## 2. Submodule Details and Architecture
 
-Cada componente principal da SDK está documentado em um arquivo de arquitetura detalhado (`arch.md`) localizado em seu respectivo diretório de especificação técnica:
+Each main SDK component is documented in a detailed architecture file (`arch.md`) located in its respective technical specification directory:
 
 ### 🎮 2.1 TS Controller
-Ponto de entrada unificado da SDK. Atua como o maestro do ciclo de vida, loop principal e throttling dinâmico de FPS.
-* Detalhamento técnico completo: [arch.md](file:///c:/Users/rafae/projects/rust/olayer/docs/sdk/ts/controller/arch.md)
+Unified entry point of the SDK. Acts as the maestro of the lifecycle, main loop, and dynamic FPS throttling.
+* Complete technical detail: [arch.md](file:///c:/Users/rafae/projects/rust/olayer/docs/sdk/ts/controller/arch.md)
 
 ### 🥞 2.2 Layer Manager
-Coordenador da pilha de camadas (Layer Stack), responsável pela ordenação e pela otimização de renderização segregada entre elementos dinâmicos e estáticos.
-* Detalhamento técnico completo: [arch.md](file:///c:/Users/rafae/projects/rust/olayer/docs/sdk/ts/layers/arch.md)
+Coordinator of the layer stack (Layer Stack), responsible for ordering and rendering optimization segregation between dynamic and static elements.
+* Complete technical detail: [arch.md](file:///c:/Users/rafae/projects/rust/olayer/docs/sdk/ts/layers/arch.md)
 
 ### 📥 2.3 Map Data Stack (Providers)
-Módulo encarregado do carregamento sob demanda, paginação e cacheamento inteligente (com política LRU) de dados cartográficos (MVT, WMTS) e de terreno (DTED).
-* Detalhamento técnico completo: [arch.md](file:///c:/Users/rafae/projects/rust/olayer/docs/sdk/ts/providers/arch.md)
+Module responsible for on-demand loading, paging, and intelligent caching (with LRU policy) of cartographic data (MVT, WMTS) and terrain (DTED).
+* Complete technical detail: [arch.md](file:///c:/Users/rafae/projects/rust/olayer/docs/sdk/ts/providers/arch.md)
 
 ### 🎨 2.4 Render Pipelines & Texture Atlas
-Motores gráficos de desenho. Contém o pipeline de renderização GPU (WebGL2), o pipeline de radar CPU (com algoritmo de prevenção de sobreposição de etiquetas/anti-cluttering) e o Texture Atlas Manager.
-* Detalhamento técnico completo: [arch.md](file:///c:/Users/rafae/projects/rust/olayer/docs/sdk/ts/renderer/arch.md)
+Graphic drawing engines. Contains the GPU rendering pipeline (WebGL2), the CPU radar pipeline (with anti-overlap algorithm/anti-cluttering), and the Texture Atlas Manager.
+* Complete technical detail: [arch.md](file:///c:/Users/rafae/projects/rust/olayer/docs/sdk/ts/renderer/arch.md)

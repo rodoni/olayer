@@ -51,11 +51,13 @@ impl NativeController {
         }
     }
 
+    #[inline]
     pub fn trigger_active(&mut self) {
         self.is_active = true;
         self.last_active_time = std::time::Instant::now();
     }
 
+    #[inline]
     pub fn check_active(&mut self) -> bool {
         if self.is_active && self.last_active_time.elapsed() > self.active_timeout {
             self.is_active = false;
@@ -63,6 +65,7 @@ impl NativeController {
         self.is_active
     }
 
+    #[inline]
     pub fn get_target_fps(&mut self) -> u32 {
         if self.check_active() {
             60

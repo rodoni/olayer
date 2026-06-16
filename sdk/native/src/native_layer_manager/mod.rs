@@ -126,16 +126,19 @@ impl NativeLayerManager {
     }
 
     /// Returns a slice of all layers in render order (back-to-front).
+    #[inline]
     pub fn get_layers(&self) -> &[Box<dyn Layer>] {
         &self.layers
     }
 
     /// Returns all visible static layers.
+    #[inline]
     pub fn visible_static_layers(&self) -> Vec<&dyn Layer> {
         self.layers.iter().filter(|l| l.is_visible() && l.is_static()).map(|b| b.as_ref()).collect()
     }
 
     /// Returns all visible dynamic layers.
+    #[inline]
     pub fn visible_dynamic_layers(&self) -> Vec<&dyn Layer> {
         self.layers.iter().filter(|l| l.is_visible() && !l.is_static()).map(|b| b.as_ref()).collect()
     }
@@ -143,6 +146,7 @@ impl NativeLayerManager {
     /// Toggles visibility for a specific layer.
     ///
     /// Returns `Err` if the layer is not found.
+    #[inline]
     pub fn set_layer_visibility(&mut self, id: &str, visible: bool) -> Result<(), String> {
         let idx = self.index.get(id).copied().ok_or_else(|| format!("Layer '{}' not found.", id))?;
         self.layers[idx].set_visible(visible);
@@ -150,6 +154,7 @@ impl NativeLayerManager {
     }
 
     /// Toggles all layers on or off.
+    #[inline]
     pub fn set_all_visibility(&mut self, visible: bool) {
         for layer in &mut self.layers {
             layer.set_visible(visible);

@@ -1,90 +1,90 @@
-# Componentes do Olayer Core
-## Detalhamento de Arquitetura (C4 Model - Nível 3)
+# Olayer Core Components
+## Architecture Details (C4 Model - Level 3)
 
-Este documento apresenta a especificação detalhada dos componentes que compõem o **Olayer Core**, o motor lógico e matemático escrito em Rust. Seguindo o modelo C4 de arquitetura (Nível 3: Diagrama de Componentes), este detalhamento define as responsabilidades, interfaces e fluxos de dados internos do núcleo do framework.
+This document presents the detailed specification of the components that compose the **Olayer Core**, the logical and mathematical engine written in Rust. Following the C4 architecture model (Level 3: Component Diagram), this detail defines the responsibilities, interfaces, and internal data flows of the framework's core.
 
 ---
 
-## 1. Diagrama de Componentes do Olayer Core
+## 1. Olayer Core Component Diagram
 
-O Olayer Core opera como um contêiner lógico passivo. Ele não gerencia I/O de rede ou disco diretamente (especialmente no ambiente WebGL/WASM), recebendo dados por meio das pontes de interoperabilidade (WASM e FFI) e fornecendo respostas processadas.
+The Olayer Core operates as a passive logical container. It does not manage network or disk I/O directly (especially in the WebGL/WASM environment), receiving data through interoperability bridges (WASM and FFI) and providing processed responses.
 
 ```mermaid
 graph TB
-    %% Estilos de nós do C4
+    %% C4 node styles
     classDef external fill:#999999,stroke:#888888,color:#ffffff,stroke-width:2px;
     classDef container fill:#1168BD,stroke:#0f5ca7,color:#ffffff,stroke-width:2px;
     classDef component fill:#438DD5,stroke:#3b7cbd,color:#ffffff,stroke-width:2px;
     classDef bridge fill:#FFF9C4,stroke:#FBC02D,color:#5D4037,stroke-width:2px;
     classDef core fill:#E1F5FE,stroke:#0288D1,color:#01579B,stroke-width:2px;
 
-    %% Elementos Externos/Outros Contêineres
-    subgraph SDK_Layers ["SDKs Cliente"]
+    %% External Elements/Other Containers
+    subgraph SDK_Layers ["Client SDKs"]
         ts_sdk["📦 Olayer TS SDK<br>[TS Container]"]:::container
         native_sdk["📦 Olayer Native SDK<br>[Rust Container]"]:::container
     end
 
-    subgraph Olayer_Core_Container ["Fronteira do Contêiner: Olayer Core"]
-        %% Interoperabilidade
+    subgraph Olayer_Core_Container ["Container Boundary: Olayer Core"]
+        %% Interoperability
         wasm_bridge["🔗 Bridge WASM (wasm-bindgen)<br>[WASM Interop]"]:::bridge
         ffi_bridge["🔗 C-FFI Bridge (cbindgen)<br>[Native Interop]"]:::bridge
 
-        %% Componentes Internos
-        geodesy["📐 Geodesy Engine<br>[Component]<br>Cálculos elipsoidais WGS84 e conversões ECEF."]:::core
-        camera["📷 Camera Engine<br>[Component]<br>Gerenciamento de CameraState e matrizes View-Proj para 2D/2.5D/3D."]:::core
-        projections["🗺️ Projections Engine<br>[Component]<br>Matrizes cartográficas e projeções LCC, Estereográfica e Mercator."]:::core
-        terrain["⛰️ Terrain Engine (DTED)<br>[Component]<br>Indexador espacial O(1) de altitude e perfil 2.5D."]:::core
-        sld_parser["📄 SLD Parser<br>[Component]<br>Parser XML de estilização Styled Layer Descriptor (OGC)."]:::core
-        symbol_registry["🎖️ Symbol Registry<br>[Component]<br>Decodificador e montador de símbolos táticos (NATO/ICAO)."]:::core
-        interpolator["⏱️ Target Interpolator<br>[Component]<br>Predição de estado e Dead Reckoning de alvos dinâmicos geodésicos."]:::core
+        %% Internal Components
+        geodesy["📐 Geodesy Engine<br>[Component]<br>WGS84 ellipsoidal calculations and ECEF conversions."]:::core
+        camera["📷 Camera Engine<br>[Component]<br>CameraState management and View-Proj matrices for 2D/2.5D/3D."]:::core
+        projections["🗺️ Projections Engine<br>[Component]<br>Cartographic matrices and LCC, Stereographic, and Mercator projections."]:::core
+        terrain["⛰️ Terrain Engine (DTED)<br>[Component]<br>O(1) altitude spatial indexer and 2.5D profile."]:::core
+        sld_parser["📄 SLD Parser<br>[Component]<br>XML parser for Styled Layer Descriptor (OGC) styling."]:::core
+        symbol_registry["🎖️ Symbol Registry<br>[Component]<br>Decoder and builder of tactical symbols (NATO/ICAO)."]:::core
+        interpolator["⏱️ Target Interpolator<br>[Component]<br>State prediction and Dead Reckoning of dynamic geodetic targets."]:::core
     end
 
-    %% Relacionamentos de Entrada
-    ts_sdk -->|Invoca rotinas via JS| wasm_bridge
-    native_sdk -->|Invoca nativamente / FFI| ffi_bridge
+    %% Input Relationships
+    ts_sdk -->|Invokes routines via JS| wasm_bridge
+    native_sdk -->|Invokes natively / FFI| ffi_bridge
 
-    %% Conexões da Bridge WASM
-    wasm_bridge -->|Invoca / Controla| camera
-    wasm_bridge -->|Injeta binário / Consulta| terrain
-    wasm_bridge -->|Injeta XML / Configura| sld_parser
-    wasm_bridge -->|Consulta SIDC| symbol_registry
-    wasm_bridge -->|Registra / Interpola| interpolator
+    %% WASM Bridge Connections
+    wasm_bridge -->|Invokes / Controls| camera
+    wasm_bridge -->|Injects binary / Queries| terrain
+    wasm_bridge -->|Injects XML / Configures| sld_parser
+    wasm_bridge -->|Queries SIDC| symbol_registry
+    wasm_bridge -->|Registers / Interpolates| interpolator
 
-    %% Conexões da Bridge FFI
-    ffi_bridge -->|Invoca / Controla| camera
-    ffi_bridge -->|Injeta binário / Consulta| terrain
-    ffi_bridge -->|Injeta XML / Configura| sld_parser
-    ffi_bridge -->|Consulta SIDC| symbol_registry
-    ffi_bridge -->|Registra / Interpola| interpolator
+    %% FFI Bridge Connections
+    ffi_bridge -->|Invokes / Controls| camera
+    ffi_bridge -->|Injects binary / Queries| terrain
+    ffi_bridge -->|Injects XML / Configures| sld_parser
+    ffi_bridge -->|Queries SIDC| symbol_registry
+    ffi_bridge -->|Registers / Interpolates| interpolator
 
-    %% Dependências Internas do Core
-    camera -->|Requer projeções| projections
-    camera -->|Requer modelos de Terra| geodesy
-    projections -->|Requer modelos de Terra| geodesy
-    terrain -->|Requer conversão LLA-ECEF| geodesy
-    interpolator -->|Requer cálculo de distância/rumo| geodesy
-    symbol_registry -->|Requer regras parsed| sld_parser
+    %% Internal Core Dependencies
+    camera -->|Requires projections| projections
+    camera -->|Requires Earth models| geodesy
+    projections -->|Requires Earth models| geodesy
+    terrain -->|Requires LLA-ECEF conversion| geodesy
+    interpolator -->|Requires distance/heading calculation| geodesy
+    symbol_registry -->|Requires parsed rules| sld_parser
 
     linkStyle 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17 stroke:#555,stroke-width:1.5px;
 ```
 
 ---
 
-## 2. Detalhamento dos Componentes Internos
+## 2. Internal Component Details
 
 ### 📐 2.1 Geodesy Engine (`core::geodesy`)
-O componente central de matemática geodésica. Toda a precisão métrica de segurança do tráfego aéreo depende deste módulo.
-* **Responsabilidades:**
-  * Realizar transformações de coordenadas tridimensionais entre o formato geodésico elipsoidal $(\phi, \lambda, h)$ e cartesiano geocêntrico ECEF $(X, Y, Z)$ utilizando o elipsoide **WGS84**.
-  * Calcular a distância ortodrômica (grande círculo) entre pontos terrestres utilizando a fórmula de Vincenty (para alta precisão elipsoidal) e Haversine (para processamento rápido).
-  * Computar rumo (*bearing* / *azimuth*) inicial e final entre coordenadas geodésicas.
-  * Projetar pontos de destino a partir de um ponto inicial, ângulo de azimute e distância geodésica.
-* **Interfaces e Estruturas de Dados:**
+The central component of geodetic mathematics. All metric safety precision of air traffic depends on this module.
+* **Responsibilities:**
+  * Perform three-dimensional coordinate transformations between ellipsoidal geodetic format $(\phi, \lambda, h)$ and geocentric Cartesian ECEF $(X, Y, Z)$ using the **WGS84** ellipsoid.
+  * Calculate the orthodromic (great circle) distance between terrestrial points using the Vincenty formula (for high ellipsoidal precision) and Haversine (for fast processing).
+  * Compute initial and final *bearing* / *azimuth* between geodetic coordinates.
+  * Project destination points from an initial point, azimuth angle, and geodetic distance.
+* **Interfaces and Data Structures:**
   ```rust
   pub struct LatLon {
-      pub lat: f64, // Latitude em radianos
-      pub lon: f64, // Longitude em radianos
-      pub alt: f64, // Altura acima do elipsoide em metros
+      pub lat: f64,    // Latitude in radians
+      pub lon: f64,    // Longitude in radians
+      pub height: f64, // Height above the ellipsoid in meters
   }
 
   pub struct Point3D {
@@ -98,15 +98,15 @@ O componente central de matemática geodésica. Toda a precisão métrica de seg
   pub fn geodetic_distance(p1: &LatLon, p2: &LatLon) -> f64;
   pub fn geodetic_bearing(p1: &LatLon, p2: &LatLon) -> f64;
   ```
-* **Dependências:** Sem dependências internas. Componente folha do Core.
+* **Dependencies:** No internal dependencies. Leaf component of the Core.
 
 ### 🗺️ 2.2 Projections Engine (`core::projections`)
-* **Responsabilidades:**
-  * Projetar pontos geodésicos em planos 2D para as projeções suportadas:
-    * **Lambert Conformal Conic (LCC):** Definida por dois paralelos padrão, latitude de origem e meridiano central. Ideal para rotas En-Route.
-    * **Estereográfica Azimutal:** Definida por um ponto de origem central (geralmente a antena do radar da TMA). Ideal para áreas terminais.
-    * **Web Mercator (EPSG:3857):** Compatibilidade com mapas base de mercado.
-* **Interfaces e Estruturas de Dados:**
+* **Responsibilities:**
+  * Project geodetic points onto 2D planes for the supported projections:
+    * **Lambert Conformal Conic (LCC):** Defined by two standard parallels, latitude of origin, and central meridian. Ideal for En-Route routes.
+    * **Azimuthal Stereographic:** Defined by a central origin point (usually the TMA radar antenna). Ideal for terminal areas.
+    * **Web Mercator (EPSG:3857):** Compatibility with market base maps.
+* **Interfaces and Data Structures:**
   ```rust
   pub enum ProjectionType {
       LambertConformalConic { std_parallel_1: f64, std_parallel_2: f64, origin_lat: f64, origin_lon: f64 },
@@ -120,24 +120,24 @@ O componente central de matemática geodésica. Toda a precisão métrica de seg
       fn get_view_proj_matrix(&self, camera: &CameraState) -> Result<[f32; 16], ProjectionError>;
   }
   ```
-* **Dependências:** `Geodesy Engine` (para conversões espaciais e escalas de deformação).
+* **Dependencies:** `Geodesy Engine` (for spatial conversions and deformation scales).
 
 ### 📷 2.3 Camera Engine (`core::camera`)
-Componente encarregado do gerenciamento do estado de navegação geográfica e atitude da câmera, além da geração das matrizes View-Projection 2D, 2.5D e 3D.
-* **Responsabilidades:**
-  * Armazenar o estado da câmera (`CameraState`) incluindo posição de centro, zoom, bearing/rotação (yaw), inclinação (pitch/tilt) e rolagem (roll).
-  * Computar as matrizes View-Projection $4 \times 4$ de forma unificada:
-    * **2D:** Projeção ortográfica rotacionada.
-    * **2.5D:** Projeção perspectiva sobre o plano do mapa com pitch dinâmico.
-    * **3D:** Projeção perspectiva orbital em relação ao elipsoide terrestre.
-* **Interfaces e Estruturas de Dados:**
+Component responsible for managing the geographic navigation state and camera attitude, as well as generating the 2D, 2.5D, and 3D View-Projection matrices.
+* **Responsibilities:**
+  * Store the camera state (`CameraState`) including center position, zoom, bearing/rotation (yaw), inclination (pitch/tilt), and roll (roll).
+  * Compute the unified $4 \times 4$ View-Projection matrices:
+    * **2D:** Rotated orthographic projection.
+    * **2.5D:** Perspective projection over the map plane with dynamic pitch.
+    * **3D:** Orbital perspective projection relative to the terrestrial ellipsoid.
+* **Interfaces and Data Structures:**
   ```rust
   pub struct CameraState {
       pub center: LatLon,
       pub zoom: f64,
-      pub rotation: f64, // bearing/yaw em radianos
-      pub pitch: f64,    // inclinação em radianos (nadir = 0)
-      pub roll: f64,     // rolagem lateral em radianos
+      pub rotation: f64, // bearing/yaw in radians
+      pub pitch: f64,    // inclination in radians (nadir = 0)
+      pub roll: f64,     // lateral roll in radians
       pub aspect_ratio: f64,
       pub viewport_base_meters: f64,
   }
@@ -151,48 +151,62 @@ Componente encarregado do gerenciamento do estado de navegação geográfica e a
       pub fn get_3d_view_proj_matrix(&self) -> Result<[f32; 16], ProjectionError>;
   }
   ```
-* **Dependências:** `Geodesy Engine` e `Projections Engine`.
+* **Dependencies:** `Geodesy Engine` and `Projections Engine`.
 
 ### ⛰️ 2.4 Terrain Engine (`core::terrain`)
-Indexador de alta performance para dados de elevação digital de terreno (DTED - Digital Terrain Elevation Data).
-* **Responsabilidades:**
-  * Ler e analisar buffers binários correspondentes a arquivos DTED (Níveis 0, 1 ou 2) injetados passivamente.
-  * Construir e atualizar um indexador espacial plano (*Grid Index*) contendo os tiles ativos na memória.
-  * Consultar a altitude exata do solo para uma coordenada geográfica $(\phi, \lambda)$ em tempo constante $O(1)$ utilizando interpolação bilinear entre as células do grid carregado.
-  * Gerar o perfil de corte vertical do relevo ao longo de uma sequência de pontos de rota (vetor de altitudes interpoladas).
-* **Interfaces e Estruturas de Dados:**
+High-performance indexer for Digital Terrain Elevation Data (DTED - Digital Terrain Elevation Data).
+* **Responsibilities:**
+  * Read and analyze binary buffers corresponding to DTED files (Levels 0, 1, or 2) passively injected.
+  * Build and update a flat spatial indexer (*Grid Index*) containing the active tiles in memory.
+  * Query the exact ground altitude for a geographic coordinate $(\phi, \lambda)$ in constant time $O(1)$ using bilinear interpolation between the loaded grid cells.
+  * Generate the vertical terrain cut profile along a sequence of route points (vector of interpolated altitudes).
+* **Interfaces and Data Structures:**
   ```rust
+  pub struct TileKey {
+      pub lat_deg: i32,
+      pub lon_deg: i32,
+  }
+
   pub struct DtedTile {
-      pub lat_index: i32,
-      pub lon_index: i32,
-      pub resolution_lat: usize,
-      pub resolution_lon: usize,
-      pub elevations: Vec<i16>, // Altitudes em metros
+      pub origin_lat: i32,
+      pub origin_lon: i32,
+      pub num_rows: usize,
+      pub num_cols: usize,
+      pub lat_spacing_arcsec: u32,
+      pub lon_spacing_arcsec: u32,
+      pub elevations: Vec<i16>, // Altitudes in meters
   }
 
-  pub struct TerrainIndex {
-      // Tabela de espalhamento ou matriz plana dos tiles ativos
-      tiles: HashMap<(i32, i32), DtedTile>,
+  pub struct ProfilePoint {
+      pub distance_meters: f64,
+      pub ground_elevation: f64,
+      pub coords: LatLon,
   }
 
-  impl TerrainIndex {
-      pub fn load_tile(&mut self, lat_idx: i32, lon_idx: i32, data: &[u8]) -> Result<(), TerrainError>;
-      pub fn get_elevation(&self, lat: f64, lon: f64) -> Option<f64>;
-      pub fn get_vertical_profile(&self, route: &[LatLon], step_meters: f64) -> Vec<(f64, f64)>; // (distancia, altitude)
+  pub struct TerrainEngine {
+      tiles: HashMap<TileKey, DtedTile>,
+  }
+
+  impl TerrainEngine {
+      pub fn new() -> Self;
+      pub fn load_tile(&mut self, data: &[u8]) -> Result<TileKey, TerrainError>;
+      pub fn unload_tile(&mut self, key: &TileKey) -> bool;
+      pub fn get_elevation(&self, lat_deg: f64, lon_deg: f64) -> Result<f64, TerrainError>;
+      pub fn get_vertical_profile(&self, route: &[LatLon], step_meters: f64) -> Result<Vec<ProfilePoint>, TerrainError>;
   }
   ```
-* **Dependências:** `Geodesy Engine` (para interpolar distâncias métricas e converter resoluções angulares).
+* **Dependencies:** `Geodesy Engine` (to interpolate metric distances and convert angular resolutions).
 
 ### 📄 2.5 SLD Parser (`core::sld`)
-Tradutor do padrão de estilização de mapas OGC Styled Layer Descriptor (SLD).
-* **Responsabilidades:**
-  * Fazer o parse XML de documentos SLD e extrair regras de renderização visual para feições de mapa.
-  * Filtrar estilos por nível de escala (*MinScaleDenominator* e *MaxScaleDenominator*).
-  * Extrair estilos específicos de:
-    * **Polígonos e Linhas:** Cores de preenchimento, opacidade, espessuras e padrões de tracejado (para limites de setores ATC e aerovias).
-    * **Pontos e Ícones:** Definições de marcadores, tamanhos e vinculação de identificadores de símbolos.
-    * **Texto (Etiquetas):** Fontes, tamanhos, cores de halo e offsets.
-* **Interfaces e Estruturas de Dados:**
+Translator of the OGC Styled Layer Descriptor (SLD) map styling standard.
+* **Responsibilities:**
+  * Parse XML of SLD documents and extract visual rendering rules for map features.
+  * Filter styles by scale level (*MinScaleDenominator* and *MaxScaleDenominator*).
+  * Extract specific styles for:
+    * **Polygons and Lines:** Fill colors, opacity, thicknesses, and dash patterns (for ATC sector boundaries and airways).
+    * **Points and Icons:** Marker definitions, sizes, and symbol identifier binding.
+    * **Text (Labels):** Fonts, sizes, halo colors, and offsets.
+* **Interfaces and Data Structures:**
   ```rust
   pub struct RuleStyle {
       pub min_scale: f64,
@@ -211,22 +225,22 @@ Tradutor do padrão de estilização de mapas OGC Styled Layer Descriptor (SLD).
 
   pub fn parse_sld(xml_content: &str) -> Result<StyleRegistry, ParserError>;
   ```
-* **Dependências:** Sem dependências do Core (utiliza bibliotecas externas em Rust para parsing XML rápido, ex: `quick-xml`).
+* **Dependencies:** No Core dependencies (uses external Rust libraries for fast XML parsing, e.g., `quick-xml`).
 
 ### 🎖️ 2.6 Symbol Registry (`core::symbol_registry`)
-O registro central e coordenador de geradores de simbologia. O componente é totalmente agnóstico a padrões visuais específicos, delegando a decodificação para provedores plugáveis (como NATO APP-6, ICAO civil ou meteorologia).
-* **Responsabilidades:**
-  * Permitir o registro dinâmico de múltiplos provedores de simbologia (`SymbologyProvider`).
-  * Consultar a cadeia de provedores ativos para resolver códigos de símbolos em um formato geométrico intermediário (`ResolvedSymbol`) composto por primitivas vetoriais (caminhos SVG, círculos, textos).
-  * Servir de ponte para a estilização dinâmica obtida via `SLD Parser`.
-  * Fornecer dados de geometria limpos e unificados para a SDK construir o Texture Atlas de forma otimizada.
-* **Interfaces e Estruturas de Dados:**
+The central registry and coordinator of symbology generators. The component is completely agnostic to specific visual standards, delegating decoding to pluggable providers (such as NATO APP-6, ICAO civil, or meteorology).
+* **Responsibilities:**
+  * Allow dynamic registration of multiple symbology providers (`SymbologyProvider`).
+  * Query the active provider chain to resolve symbol codes into an intermediate geometric format (`ResolvedSymbol`) composed of vector primitives (SVG paths, circles, texts).
+  * Serve as a bridge for dynamic styling obtained via `SLD Parser`.
+  * Provide clean and unified geometry data for the SDK to build the Texture Atlas in an optimized way.
+* **Interfaces and Data Structures:**
   ```rust
-  /// Primitivas vetoriais para desenho procedural de símbolos na CPU/GPU
+  /// Vector primitives for procedural symbol drawing on CPU/GPU
   #[derive(Debug, Clone)]
   pub enum SymbolPrimitive {
       Path {
-          commands: String, // Comandos formato SVG Path (ex: "M 0,0 L 10,10 Z")
+          commands: String, // SVG Path format commands (e.g., "M 0,0 L 10,10 Z")
           fill: Option<Color>,
           stroke: Option<Stroke>,
       },
@@ -258,23 +272,23 @@ O registro central e coordenador de geradores de simbologia. O componente é tot
       pub dash_array: Option<Vec<f32>>,
   }
 
-  /// Símbolo resolvido e pronto para renderização ou rasterização
+  /// Resolved symbol ready for rendering or rasterization
   #[derive(Debug, Clone)]
   pub struct ResolvedSymbol {
       pub symbol_id: String,
       pub primitives: Vec<SymbolPrimitive>,
       pub bbox: (f64, f64, f64, f64), // (min_x, min_y, max_x, max_y)
-      pub anchor: (f64, f64),         // Ponto de ancoragem (ex: 0.0, 0.0 para o centro)
+      pub anchor: (f64, f64),         // Anchor point (e.g., 0.0, 0.0 for center)
   }
 
-  /// Interface para provedores de simbologias específicas (ex: NATO, ICAO, Clima)
+  /// Interface for specific symbology providers (e.g., NATO, ICAO, Weather)
   pub trait SymbologyProvider {
       fn name(&self) -> &str;
       fn can_resolve(&self, code: &str) -> bool;
       fn resolve(&self, code: &str, style: &StyleRegistry) -> Result<ResolvedSymbol, SymbologyError>;
   }
 
-  /// Registro unificado de simbologia
+  /// Unified symbology registry
   pub struct SymbolRegistry {
       providers: Vec<Box<dyn SymbologyProvider + Send + Sync>>,
   }
@@ -284,16 +298,16 @@ O registro central e coordenador de geradores de simbologia. O componente é tot
       pub fn resolve_symbol(&self, code: &str, style: &StyleRegistry) -> Result<ResolvedSymbol, SymbologyError>;
   }
   ```
-* **Dependências:** `SLD Parser` (para aplicação de regras de preenchimento, contorno e texto nos símbolos).
+* **Dependencies:** `SLD Parser` (for applying fill, outline, and text rules to symbols).
 
-### 🎖️ 2.6.1 Customização e Extensibilidade (Bibliotecas de Símbolos Personalizadas)
-Para permitir que o usuário final do framework defina e crie suas próprias bibliotecas de símbolos sem alterar o núcleo do Olayer, o sistema suporta duas abordagens principais:
+### 🎖️ 2.6.1 Customization and Extensibility (Custom Symbol Libraries)
+To allow the end user of the framework to define and create their own symbol libraries without altering the Olayer core, the system supports two main approaches:
 
-#### A. Abordagem Programática (Via Rust Crate/SDK)
-O desenvolvedor host pode criar seu próprio resolvedor de símbolos implementando a trait `SymbologyProvider` e registrando-o na inicialização.
+#### A. Programmatic Approach (Via Rust Crate/SDK)
+The host developer can create their own symbol resolver by implementing the `SymbologyProvider` trait and registering it at initialization.
 
 ```rust
-/// Exemplo de provedor customizado criado pelo usuário do framework
+/// Example of a custom provider created by the framework user
 pub struct CustomAidsSymbologyProvider;
 
 impl SymbologyProvider for CustomAidsSymbologyProvider {
@@ -306,7 +320,7 @@ impl SymbologyProvider for CustomAidsSymbologyProvider {
     }
 
     fn resolve(&self, code: &str, _style: &StyleRegistry) -> Result<ResolvedSymbol, SymbologyError> {
-        // Exemplo: "custom-aid:radio-beacon" -> Desenha um triângulo duplo
+        // Example: "custom-aid:radio-beacon" -> Draws a double triangle
         let primitives = vec![
             SymbolPrimitive::Path {
                 commands: "M -10,-10 L 0,10 L 10,-10 Z M -5,-5 L 0,5 L 5,-5 Z".to_string(),
@@ -329,10 +343,10 @@ impl SymbologyProvider for CustomAidsSymbologyProvider {
 }
 ```
 
-#### B. Abordagem Declarativa (Via Arquivos de Configuração JSON/YAML)
-O Core fornece um provedor nativo genérico chamado `DeclarativeProvider` que consome uma especificação em arquivo (JSON/YAML) para criar uma biblioteca de símbolos customizados.
+#### B. Declarative Approach (Via JSON/YAML Configuration Files)
+The Core provides a native generic provider called `DeclarativeProvider` that consumes a specification in a file (JSON/YAML) to create a custom symbol library.
 
-##### Exemplo de arquivo de definição de símbolos (`custom_symbols.json`):
+##### Example of symbol definition file (`custom_symbols.json`):
 ```json
 {
   "library_name": "CustomATC",
@@ -363,7 +377,7 @@ O Core fornece um provedor nativo genérico chamado `DeclarativeProvider` que co
 }
 ```
 
-##### Estrutura do Provedor Declarativo no Rust Core:
+##### Declarative Provider Structure in the Rust Core:
 ```rust
 pub struct DeclarativeProvider {
     library_name: String,
@@ -372,7 +386,7 @@ pub struct DeclarativeProvider {
 
 impl DeclarativeProvider {
     pub fn from_json(json_content: &str) -> Result<Self, serde_json::Error> {
-        // Realiza o parse das primitivas geométricas descritas em formato JSON
+        // Parses the geometric primitives described in JSON format
     }
 }
 
@@ -392,36 +406,26 @@ impl SymbologyProvider for DeclarativeProvider {
 ```
 
 ### ⏱️ 2.7 Target Interpolator (`core::interpolator`)
-O módulo dinâmico encarregado de sincronizar e suavizar o rastreamento de alvos dinâmicos no espaço tridimensional geodésico através de *Dead Reckoning*.
-* **Responsabilidades:**
-  * Manter uma tabela dinâmica em memória com os estados físicos reais recebidos dos sensores para cada alvo (aeronaves, veículos terrestres, etc.).
-  * Computar a posição e rumo interpolados no elipsoide em 3D em tempo de execução com base no tempo de simulação atual e na taxa de frames do cliente (15 a 60 FPS).
-  * Manter a representação física 3D desacoplada da projeção para a tela, permitindo que a posição interpolada seja usada tanto em projeções 2D, perfil vertical 2.5D ou renderização direta 3D (ECEF).
-* **Interfaces e Estruturas de Dados:**
+The dynamic module responsible for synchronizing and smoothing the tracking of dynamic targets in 3D geodetic space through *Dead Reckoning*.
+* **Responsibilities:**
+  * Maintain a dynamic in-memory table with the physical real states received from sensors for each target (aircraft, ground vehicles, etc.).
+  * Compute the interpolated position and heading on the 3D ellipsoid at runtime based on the current simulation time and the client's frame rate (15 to 60 FPS).
+  * Maintain the 3D physical representation decoupled from screen projection, allowing the interpolated position to be used in both 2D projections, 2.5D vertical profile, or direct 3D rendering (ECEF).
+* **Interfaces and Data Structures:**
   ```rust
   pub struct TargetState {
       pub id: String,
-      pub last_position: LatLon,   // Lat/Lon em radianos, altitude em metros
-      pub speed_mps: f64,          // Velocidade horizontal em metros por segundo
-      pub track_heading_rad: f64,  // Rumo do alvo em radianos [0, 2π)
-      pub vertical_rate_mps: f64,  // Velocidade vertical em metros por segundo
-      pub last_ping_time: f64,     // Timestamp do sensor (segundos)
+      pub last_position: LatLon,   // Lat/Lon in radians, height in metres
+      pub speed_mps: f64,          // Horizontal speed in meters per second
+      pub track_heading_rad: f64,  // Target heading in radians [0, 2π)
+      pub vertical_rate_mps: f64,  // Vertical speed in meters per second
+      pub last_ping_time: f64,     // Sensor timestamp (seconds)
   }
 
   pub struct InterpolatedTarget {
       pub id: String,
-      pub position: LatLon,        // Posição 3D interpolada no elipsoide
-      pub heading_rad: f64,        // Rumo interpolado em radianos
-  }
-
-  pub struct InterpolationEngine {
-      targets: HashMap<String, TargetState>,
-  }
-
-  impl InterpolationEngine {
-      pub fn new() -> Self;
-```tion: LatLon,        // Posição 3D interpolada no elipsoide
-      pub heading_rad: f64,        // Rumo interpolado em radianos
+      pub position: LatLon,        // 3D interpolated position on the ellipsoid
+      pub heading_rad: f64,        // Interpolated heading in radians
   }
 
   pub struct InterpolationEngine {
@@ -434,14 +438,14 @@ O módulo dinâmico encarregado de sincronizar e suavizar o rastreamento de alvo
       pub fn interpolate_all(&self, current_time: f64) -> Result<Vec<InterpolatedTarget>, InterpolatorError>;
   }
   ```
-* **Dependências:** `Geodesy Engine` (para extrapolação geodésica direta de rumo, distância e variação vertical de altitude).
+* **Dependencies:** `Geodesy Engine` (for direct geodetic heading extrapolation, distance, and vertical altitude variation).
 
 ---
 
-## 3. Fluxos de Dados Críticos do Core
+## 3. Critical Core Data Flows
 
-### 3.1 Pipeline de Projeção e Desenho de Alvos
-Este fluxo ilustra como os estados de movimento são interpolados tridimensionalmente no globo e posteriormente projetados pela SDK cliente:
+### 3.1 Target Projection and Drawing Pipeline
+This flow illustrates how movement states are interpolated three-dimensionally on the globe and subsequently projected by the client SDK:
 
 ```mermaid
 sequenceDiagram
@@ -452,20 +456,20 @@ sequenceDiagram
     participant Proj as Projections Engine
     
     SDK->>Inter: interpolate_all(time)
-    loop Para cada alvo registrado
+    loop For each registered target
         Inter->>Geo: direct(last_pos, heading, speed * dt)
-        Geo-->>Inter: Pos_Interpolada (LatLon WGS84)
-        Inter->>Inter: Atualiza altitude (last_alt + vertical_rate * dt)
+        Geo-->>Inter: Interpolated_Pos (LatLon WGS84)
+        Inter->>Inter: Updates altitude (last_alt + vertical_rate * dt)
     end
-    Inter-->>SDK: Lista de Alvos Interpolados [id, LatLon, heading]
+    Inter-->>SDK: List of Interpolated Targets [id, LatLon, heading]
     
-    Note over SDK, Proj: A SDK projeta as posições conforme as necessidades de renderização (2D ou 3D)
+    Note over SDK, Proj: The SDK projects positions according to rendering needs (2D or 3D)
     SDK->>Proj: project(LatLon)
-    Proj-->>SDK: Coordenadas de Tela (X, Y)
+    Proj-->>SDK: Screen Coordinates (X, Y)
 ```
 
-### 3.2 Processamento de Alerta Verticais (MSAW)
-Este fluxo descreve como o `Terrain Engine` calcula a altitude do solo sob demanda em $O(1)$ para emitir avisos de colisão contra o relevo.
+### 3.2 Vertical Alert Processing (MSAW)
+This flow describes how the `Terrain Engine` calculates ground altitude on demand in $O(1)$ to emit terrain collision warnings.
 
 ```mermaid
 sequenceDiagram
@@ -475,25 +479,25 @@ sequenceDiagram
     participant Geo as Geodesy Engine
 
     SDK->>Terrain: get_elevation(latitude, longitude)
-    Terrain->>Terrain: Calcula índices do Grid Index (Lat_Index, Lon_Index)
-    alt Tile não está carregado em memória
-        Terrain-->>SDK: Retorna erro (Tile Ausente)
-        SDK->>SDK: Solicita download do buffer DTED
-    else Tile carregado em cache
-        Terrain->>Terrain: Obtém matriz de elevações correspondente ao Tile
-        Terrain->>Geo: Converte frações angulares para distância métrica
-        Geo-->>Terrain: Escalas elipsoidais locais
-        Terrain->>Terrain: Aplica Interpolação Bilinear nos 4 pontos do grid mais próximos
-        Terrain-->>SDK: Retorna altitude exata do solo (metros)
-        SDK->>SDK: Compara altitude da aeronave contra (Solo + Margem de Segurança)
-        SDK->>SDK: Emite Alerta MSAW se violado
+    Terrain->>Terrain: Calculates Grid Index indices (Lat_Index, Lon_Index)
+    alt Tile is not loaded in memory
+        Terrain-->>SDK: Returns error (Missing Tile)
+        SDK->>SDK: Requests DTED buffer download
+    else Tile is loaded in cache
+        Terrain->>Terrain: Gets elevation matrix corresponding to the Tile
+        Terrain->>Geo: Converts angular fractions to metric distance
+        Geo-->>Terrain: Local ellipsoidal scales
+        Terrain->>Terrain: Applies Bilinear Interpolation on the 4 nearest grid points
+        Terrain-->>SDK: Returns exact ground altitude (meters)
+        SDK->>SDK: Compares aircraft altitude against (Ground + Safety Margin)
+        SDK->>SDK: Emits MSAW Alert if violated
     end
 ```
 
 ---
 
 > [!NOTE]
-> **Políticas de Gestão de Memória:** O contêiner Core não possui coletor de lixo. No ambiente WebAssembly, a SDK TypeScript deve gerenciar ativamente o ciclo de vida dos objetos Rust. Para cada instância gerada pelo Core via `wasm-bindgen` que saia de escopo na SDK, o método `.free()` correspondente deve ser chamado para desalocar a memória linear.
+> **Memory Management Policies:** The Core container does not have a garbage collector. In the WebAssembly environment, the TypeScript SDK must actively manage the lifecycle of Rust objects. For each instance generated by the Core via `wasm-bindgen` that goes out of scope in the SDK, the corresponding `.free()` method must be called to deallocate the linear memory.
 
 > [!IMPORTANT]
-> **Thread-Safety:** O Core Rust foi desenhado para ser thread-safe (`Send` e `Sync` implementados nas structs de controle). No modo nativo (SDK Desktop), as instâncias de `TerrainEngine` e `ProjectionsEngine` podem ser consultadas em paralelo por threads de renderização e threads de controle tático.
+> **Thread-Safety:** The Rust Core was designed to be thread-safe (`Send` and `Sync` implemented on the control structs). In native mode (Desktop SDK), instances of `TerrainEngine` and `ProjectionsEngine` can be queried in parallel by rendering threads and tactical control threads.

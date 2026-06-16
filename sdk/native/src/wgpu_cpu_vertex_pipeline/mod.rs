@@ -20,6 +20,7 @@ impl WgpuCpuVertexPipeline {
     }
 
     /// Plots the interpolated target list on the given egui painter.
+    #[inline]
     pub fn draw_targets(
         &self,
         painter: &egui::Painter,
@@ -102,6 +103,7 @@ impl WgpuCpuVertexPipeline {
 ///   Z, then multiplies by the 2.5D perspective matrix.
 /// * **2D** — Projects using the active map projection (Stereographic, LCC, Mercator),
 ///   rotates and scales by camera bearing/zoom.
+#[inline]
 pub fn project_lla_to_screen(
     lat: f64,
     lon: f64,

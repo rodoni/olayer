@@ -1,25 +1,25 @@
-# Arquitetura do Componente: SLD Parser (`core::sld`)
+# Component Architecture: SLD Parser (`core::sld`)
 
-Este documento descreve a especificação de arquitetura, o design das estruturas de dados e a estratégia de análise de arquivos XML do componente **SLD Parser** do Olayer Core. Este módulo traduz documentos Styled Layer Descriptor (SLD) do padrão OGC em regras estruturadas de estilo consumidas pelos componentes visuais e pelo registro de símbolos.
-
----
-
-## 1. Responsabilidades
-
-O **SLD Parser** é projetado para operar como um módulo passivo e de alto desempenho no Rust Core com as seguintes responsabilidades:
-1. **Análise de XML XML-to-Struct:** Interpretar esquemas SLD em XML de forma performática e compatível com WebAssembly (WASM), sem depender de alocações excessivas no heap.
-2. **Resolução de Escalas:** Ler e estruturar denominadores de escala (`MinScaleDenominator` e `MaxScaleDenominator`) para filtragem dinâmica de visibilidade de feições baseado no nível de zoom da câmera.
-3. **Extração de Estilização Vetorial:** Extrair propriedades visuais básicas para:
-   * **Linhas (`LineSymbolizer`):** Contornos, larguras e padrões de tracejado (dash arrays).
-   * **Polígonos (`PolygonSymbolizer`):** Preenchimentos e opacidade.
-   * **Textos/Etiquetas (`TextSymbolizer`):** Fontes, tamanhos, cores e expressões de amarração de dados (`PropertyName`).
-   * **Pontos e Ícones (`PointSymbolizer`):** Marcadores geométricos básicos e tamanho.
+This document describes the architecture specification, data structure design, and XML file analysis strategy of the **SLD Parser** component of the Olayer Core. This module translates OGC Styled Layer Descriptor (SLD) documents into structured visual rendering rules consumed by the visual components and the symbol registry.
 
 ---
 
-## 2. Diagrama de Estruturas e Relacionamento
+## 1. Responsibilities
 
-O diagrama a seguir representa as estruturas de dados e o modelo resultante da análise do documento SLD.
+The **SLD Parser** is designed to operate as a passive, high-performance module in the Rust Core with the following responsibilities:
+1. **XML-to-Struct Analysis:** Interpret SLD schemas in XML in a performant manner compatible with WebAssembly (WASM), without depending on excessive heap allocations.
+2. **Scale Resolution:** Read and structure scale denominators (`MinScaleDenominator` and `MaxScaleDenominator`) for dynamic visibility filtering of features based on the camera's zoom level.
+3. **Vector Styling Extraction:** Extract basic visual properties for:
+   * **Lines (`LineSymbolizer`):** Outlines, widths, and dash patterns (dash arrays).
+   * **Polygons (`PolygonSymbolizer`):** Fills and opacity.
+   * **Texts/Labels (`TextSymbolizer`):** Fonts, sizes, colors, and data binding expressions (`PropertyName`).
+   * **Points and Icons (`PointSymbolizer`):** Basic geometric markers and size.
+
+---
+
+## 2. Structure and Relationship Diagram
+
+The following diagram represents the data structures and the resulting model from the SLD document analysis.
 
 ```mermaid
 classDiagram
@@ -73,66 +73,66 @@ classDiagram
         +parse(xml_content: &str) Result~StyleRegistry, SldError~
     }
 
-    %% Erro do Mapeamento
+    %% Mapping Error
     class SldError {
         <<enumeration>>
         XmlError
         InvalidValue
     }
 
-    SldParser ..> StyleRegistry : cria
-    SldParser ..> SldError : pode falhar com
-    StyleRegistry "1" *-- "*" RuleStyle : contém
-    RuleStyle "1" *-- "0..1" StrokeStyle : contém
-    RuleStyle "1" *-- "0..1" FillStyle : contém
-    RuleStyle "1" *-- "0..1" TextStyle : contém
-    RuleStyle "1" *-- "0..1" PointStyle : contém
+    SldParser ..> StyleRegistry : creates
+    SldParser ..> SldError : may fail with
+    StyleRegistry "1" *-- "*" RuleStyle : contains
+    RuleStyle "1" *-- "0..1" StrokeStyle : contains
+    RuleStyle "1" *-- "0..1" FillStyle : contains
+    RuleStyle "1" *-- "0..1" TextStyle : contains
+    RuleStyle "1" *-- "0..1" PointStyle : contains
 ```
 
 ---
 
-## 3. Mapeamento de Tags XML Suportadas
+## 3. Supported XML Tag Mapping
 
-O parser interpretará as seguintes tags padrão do OGC SLD:
+The parser will interpret the following standard OGC SLD tags:
 
-| Elemento XML | Mapeamento no Rust | Descrição |
+| XML Element | Rust Mapping | Description |
 | :--- | :--- | :--- |
-| `<NamedLayer>` | Chave no `StyleRegistry.layers` | Identifica a camada à qual o estilo se aplica (ex: "Aerovias", "Setores"). |
-| `<Rule>` | `RuleStyle` | Um agrupador contendo filtros e simbolizadores de desenho. |
-| `<MinScaleDenominator>` | `min_scale: Option<f64>` | Escala mínima de exibição. |
-| `<MaxScaleDenominator>` | `max_scale: Option<f64>` | Escala máxima de exibição. |
-| `<LineSymbolizer>` | `stroke: Option<StrokeStyle>` | Simbolizador de geometria linear. |
-| `<PolygonSymbolizer>` | `fill: Option<FillStyle>` | Simbolizador de feições de área. |
-| `<TextSymbolizer>` | `text: Option<TextStyle>` | Simbolizador de etiquetas de texto. |
-| `<PointSymbolizer>` | `point: Option<PointStyle>` | Simbolizador de marcações pontuais. |
-| `<CssParameter name="stroke">` | `StrokeStyle.color` | Cor de linha em formato hexadecimal (ex: `#1A2B3C`). |
-| `<CssParameter name="stroke-width">` | `StrokeStyle.width` | Espessura de linha em pixels. |
-| `<CssParameter name="stroke-dasharray">` | `StrokeStyle.dash_array` | Padrão de tracejado (ex: "5 2" vira `vec![5.0, 2.0]`). |
-| `<CssParameter name="fill">` | `FillStyle.color` | Cor de preenchimento de polígonos. |
-| `<CssParameter name="fill-opacity">` | `FillStyle.opacity` | Transparência do preenchimento (de `0.0` a `1.0`). |
-| `<PropertyName>` | `TextStyle.label_expression` | Nome da propriedade da feição de onde o texto é extraído. |
-| `<CssParameter name="font-family">` | `TextStyle.font_family` | Família tipográfica do texto. |
-| `<CssParameter name="font-size">` | `TextStyle.font_size` | Tamanho do texto em pixels. |
-| `<WellKnownName>` | `PointStyle.well_known_name` | Geometria do ponto (ex: `circle`, `square`, `triangle`). |
+| `<NamedLayer>` | Key in `StyleRegistry.layers` | Identifies the layer to which the style applies (e.g., "Airways", "Sectors"). |
+| `<Rule>` | `RuleStyle` | A grouping containing filters and drawing symbolizers. |
+| `<MinScaleDenominator>` | `min_scale: Option<f64>` | Minimum display scale. |
+| `<MaxScaleDenominator>` | `max_scale: Option<f64>` | Maximum display scale. |
+| `<LineSymbolizer>` | `stroke: Option<StrokeStyle>` | Linear geometry symbolizer. |
+| `<PolygonSymbolizer>` | `fill: Option<FillStyle>` | Area feature symbolizer. |
+| `<TextSymbolizer>` | `text: Option<TextStyle>` | Text label symbolizer. |
+| `<PointSymbolizer>` | `point: Option<PointStyle>` | Point marking symbolizer. |
+| `<CssParameter name="stroke">` | `StrokeStyle.color` | Line color in hexadecimal format (e.g., `#1A2B3C`). |
+| `<CssParameter name="stroke-width">` | `StrokeStyle.width` | Line thickness in pixels. |
+| `<CssParameter name="stroke-dasharray">` | `StrokeStyle.dash_array` | Dash pattern (e.g., "5 2" becomes `vec![5.0, 2.0]`). |
+| `<CssParameter name="fill">` | `FillStyle.color` | Polygon fill color. |
+| `<CssParameter name="fill-opacity">` | `FillStyle.opacity` | Fill transparency (from `0.0` to `1.0`). |
+| `<PropertyName>` | `TextStyle.label_expression` | Feature property name from which the text is extracted. |
+| `<CssParameter name="font-family">` | `TextStyle.font_family` | Text font family. |
+| `<CssParameter name="font-size">` | `TextStyle.font_size` | Text size in pixels. |
+| `<WellKnownName>` | `PointStyle.well_known_name` | Point geometry (e.g., `circle`, `square`, `triangle`). |
 
 ---
 
-## 4. Detalhamento de Implementação e Biblioteca XML
+## 4. Implementation and XML Library Details
 
-### 4.1 Crate XML: `quick-xml`
-Para garantir performance sob recursos limitados (especialmente no navegador via WASM), adotaremos a crate **`quick-xml`** por ter as seguintes características:
-* **Reader baseado em eventos (SAX):** Evita carregar toda a árvore DOM do XML em memória de uma vez.
-* **Zero-Allocation:** Realiza leitura através de fatias temporárias da string de entrada (`&str`) reduzindo drasticamente a carga do Garbage Collector da máquina virtual Javascript.
-* **Compatibilidade com WASM:** Compila nativamente para WebAssembly sem depender de bibliotecas nativas de sistema operacional (como `libxml2`).
+### 4.1 XML Crate: `quick-xml`
+To guarantee performance under limited resources (especially in the browser via WASM), we will adopt the **`quick-xml`** crate for having the following characteristics:
+* **Event-based Reader (SAX):** Avoids loading the entire XML DOM tree into memory at once.
+* **Zero-Allocation:** Performs reading through temporary slices of the input string (`&str`) drastically reducing the load of the JavaScript virtual machine's Garbage Collector.
+* **WASM Compatibility:** Compiles natively to WebAssembly without depending on native operating system libraries (such as `libxml2`).
 
-### 4.2 Lógica de Parseamento
-O parser utilizará um loop de leitura de eventos (SAX style) mantendo uma máquina de estados simplificada para rastrear o elemento em foco (Layer Name $\rightarrow$ Rule $\rightarrow$ Symbolizer $\rightarrow$ Parameters).
-* Ao encontrar `<NamedLayer>`, o parser lê o `<Name>` correspondente e inicializa um vetor de regras.
-* Ao ler tags de `<CssParameter>`, ele verifica o atributo `name` para mapear corretamente o parâmetro para a estrutura ativa.
-* Ao parsear valores numéricos (`f32` / `f64`), ele realiza conversões robustas tratando possíveis falhas (por exemplo, retornando valores padrão em caso de strings vazias ou mal-formadas).
+### 4.2 Parsing Logic
+The parser will use an event reading loop (SAX style) maintaining a simplified state machine to track the element in focus (Layer Name $\rightarrow$ Rule $\rightarrow$ Symbolizer $\rightarrow$ Parameters).
+* When finding `<NamedLayer>`, the parser reads the corresponding `<Name>` and initializes a rules vector.
+* When reading `<CssParameter>` tags, it checks the `name` attribute to correctly map the parameter to the active structure.
+* When parsing numeric values (`f32` / `f64`), it performs robust conversions handling possible failures (for example, returning default values in case of empty or malformed strings).
 
-### 4.3 Métodos de Consulta de Regras
-O `StyleRegistry` fornecerá uma interface rápida para filtragem ativa de regras com base no zoom de tela:
+### 4.3 Rule Query Methods
+The `StyleRegistry` will provide a fast interface for active rule filtering based on screen zoom:
 ```rust
 impl StyleRegistry {
     pub fn get_applicable_rules(&self, layer_name: &str, scale_denominator: f64) -> Vec<RuleStyle> {
@@ -153,4 +153,4 @@ impl StyleRegistry {
     }
 }
 ```
-Essa interface permitirá à SDK obter instantaneamente o estilo a ser aplicado para as feições a serem renderizadas na tela para o nível de zoom ativo.
+This interface will allow the SDK to instantly obtain the style to be applied for the features to be rendered on the screen for the active zoom level.

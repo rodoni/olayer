@@ -1,46 +1,46 @@
-# Arquitetura: Native Controller
+# Architecture: Native Controller
 
-Este documento detalha o design arquitetural e a especificação técnica do componente **Native Controller** do SDK Nativo do Olayer.
+This document details the architectural design and technical specification of the **Native Controller** component of the Olayer Native SDK.
 
 ---
 
-## 1. Visão Geral
+## 1. Overview
 
-O [NativeController](file:///c:/Users/rafae/projects/rust/olayer/sdk/native/src/native_controller/mod.rs) atua como um padrão de design **Facade** (Fachada) e orquestrador central para o SDK Nativo. Ele unifica e encapsula as funcionalidades complexas de geodésia, atitude de câmera, projeção cartográfica e interpolação cinemática fornecidas pelo Rust Core, facilitando o consumo por parte da aplicação host.
+The [NativeController](file:///c:/Users/rafae/projects/rust/olayer/sdk/native/src/native_controller/mod.rs) acts as a **Facade** design pattern and central orchestrator for the Native SDK. It unifies and encapsulates the complex functionalities of geodesy, camera attitude, cartographic projection, and kinematic interpolation provided by the Rust Core, facilitating consumption by the host application.
 
 ```mermaid
 graph TD
-    Host[Application Host] -->|Interage| NC[Native Controller]
-    NC -->|Gerencia| Camera[CameraState]
-    NC -->|Gerencia| Terrain[TerrainEngine]
-    NC -->|Gerencia| Interpolator[InterpolationEngine]
-    NC -->|Gerencia| Projection[Projection Trait]
+    Host[Application Host] -->|Interacts| NC[Native Controller]
+    NC -->|Manages| Camera[CameraState]
+    NC -->|Manages| Terrain[TerrainEngine]
+    NC -->|Manages| Interpolator[InterpolationEngine]
+    NC -->|Manages| Projection[Projection Trait]
 ```
 
 ---
 
-## 2. Decisões Arquiteturais e Padrões
+## 2. Architectural Decisions and Patterns
 
-### 2.1 FPS Throttling (Modulação Dinâmica de Frame Rate)
-Para otimizar o uso de CPU e GPU em sistemas de controle de tráfego aéreo desktop (onde o terminal pode passar longos períodos sem atividade do operador), o `Native Controller` implementa um padrão de modulação de FPS:
-* **Estado Ativo (60 FPS):** Ativado quando o usuário interage (mouse drag, zoom, seleção) ou quando novos dados de radar chegam.
-* **Estado Ocioso (15 FPS):** Ativado automaticamente se nenhuma interação ou atualização ocorrer dentro do intervalo limite definido por `active_timeout`.
+### 2.1 FPS Throttling (Dynamic Frame Rate Modulation)
+To optimize CPU and GPU usage in desktop air traffic control systems (where the terminal may spend long periods without operator activity), the `Native Controller` implements an FPS modulation pattern:
+* **Active State (60 FPS):** Activated when the user interacts (mouse drag, zoom, selection) or when new radar data arrives.
+* **Idle State (15 FPS):** Activated automatically if no interaction or update occurs within the time limit defined by `active_timeout`.
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Active : trigger_active() / Evento
-    Active --> Active : Interação contínua
-    Active --> Idle : Expirou active_timeout (1s)
-    Idle --> Active : trigger_active() / Evento
+    [*] --> Active : trigger_active() / Event
+    Active --> Active : Continuous interaction
+    Active --> Idle : Expired active_timeout (1s)
+    Idle --> Active : trigger_active() / Event
 ```
 
 ---
 
-## 3. Estruturas de Dados e Assinaturas
+## 3. Data Structures and Signatures
 
-O componente está implementado em [sdk/native/src/native_controller/mod.rs](file:///c:/Users/rafae/projects/rust/olayer/sdk/native/src/native_controller/mod.rs).
+The component is implemented in [sdk/native/src/native_controller/mod.rs](file:///c:/Users/rafae/projects/rust/olayer/sdk/native/src/native_controller/mod.rs).
 
-### Estrutura Principal
+### Main Structure
 ```rust
 pub struct NativeController {
     pub terrain: TerrainEngine,
@@ -54,19 +54,19 @@ pub struct NativeController {
 }
 ```
 
-### Métodos e Fluxos
-1. **Instanciação (`new`):**
-   Cria uma instância com projeção estereográfica centralizada e atitude de câmera padrão.
-2. **Controle de Estado:**
-   * `trigger_active(&mut self)`: Força o estado ativo renovando a marca temporal.
-   * `check_active(&mut self) -> bool`: Compara `last_active_time.elapsed()` com `active_timeout` para atualizar e retornar a flag `is_active`.
-   * `get_target_fps(&mut self) -> u32`: Retorna a taxa alvo de quadros (60 se ativo, 15 se ocioso).
+### Methods and Flows
+1. **Instantiation (`new`):**
+   Creates an instance with centered stereographic projection and default camera attitude.
+2. **State Control:**
+   * `trigger_active(&mut self)`: Forces the active state by renewing the timestamp.
+   * `check_active(&mut self) -> bool`: Compares `last_active_time.elapsed()` with `active_timeout` to update and return the `is_active` flag.
+   * `get_target_fps(&mut self) -> u32`: Returns the target frame rate (60 if active, 15 if idle).
 
 ---
 
-## 4. Integração com a Aplicação Host
+## 4. Integration with the Host Application
 
-No loop de eventos nativo (gerenciado em [main.rs](file:///c:/Users/rafae/projects/rust/olayer/sdk/native/demo/src/main.rs)), a aplicação host consulta `get_target_fps` ao final de cada iteração de renderização para determinar o tempo de suspensão (`sleep`) do thread principal antes do próximo redesenho:
+In the native event loop (managed in [main.rs](file:///c:/Users/rafae/projects/rust/olayer/sdk/native/demo/src/main.rs)), the host application queries `get_target_fps` at the end of each rendering iteration to determine the main thread sleep time (`sleep`) before the next redraw:
 
 ```rust
 let target_fps = controller.get_target_fps();
