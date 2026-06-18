@@ -137,7 +137,7 @@ Different from orthographic projection, the 2.5D mode simulates a physical persp
 In the orbital 3D mode, the terrestrial ellipsoid is centered at the Cartesian origin $(0, 0, 0)$ of ECEF (Earth-Centered, Earth-Fixed) coordinates. The camera is rotated around the globe based on geodetic latitude and longitude, and then rotated locally based on its attitude (bearing, pitch, roll).
 1. **Orbital Distance:**
    $$d_{\text{orbital}} = R_{\text{earth}} + \frac{d_{\text{base}}}{z}$$
-   Where $R_{\text{earth}} = 6.378.137\text{ m}$ (WGS84 Equatorial Radius) and $d_{\text{base}} = 15.000.000\text{ m}$.
+    Where $R_{\text{earth}} = \text{Ellipsoid::wgs84().a} \approx 6,378,137\text{ m}$ (dynamically retrieved from the Geodesy Engine's WGS84 ellipsoid model definition) and $d_{\text{base}} = 15,000,000\text{ m}$.
 2. **Geographic Positioning (Earth Rotation to Focus):**
    Translates the camera to the orbital distance and positions it by rotating space according to latitude and longitude:
    $$T_{\text{orbital}} = T(0, 0, -d_{\text{orbital}})$$

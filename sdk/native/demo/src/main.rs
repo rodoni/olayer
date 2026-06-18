@@ -166,7 +166,6 @@ fn main() {
                         if config.width == 0 || config.height == 0 {
                             return;
                         }
-                        println!("RedrawRequested! config: {}x{}", config.width, config.height);
                         // FPS meter
                         frame_count += 1;
                         let elapsed = last_fps_calculation.elapsed();

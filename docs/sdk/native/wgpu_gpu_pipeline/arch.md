@@ -73,3 +73,13 @@ render_pass.set_bind_group(0, &bind_group, &[]);
 render_pass.set_vertex_buffer(0, buffer.slice(..));
 render_pass.draw(0..(grid_vertices.len() / 3) as u32, 0..1);
 ```
+
+---
+
+## 5. Unit Testing
+
+The `WgpuGpuPipeline` module includes a suite of unit tests verifying correct generation of the geodetic grid vertices under different view modes:
+* **2D Grid Verification:** Assures that vertices are populated and follow the topology rules (multiple of 6 coordinates per segment: 2 endpoints × 3 coords), and verifies that all Z components are exactly `0.0`.
+* **3D Grid Verification:** Validates that 3D globe coordinates are generated, using ECEF (Earth-Centered, Earth-Fixed) scale magnitudes where at least some points exceed the Earth's radius ($\approx 6.0 \times 10^6\text{ m}$).
+* **Coordinate Stability:** Ensures that 3D grid vertices contain non-zero Z values when the camera/controller is oriented in 3D mode.
+

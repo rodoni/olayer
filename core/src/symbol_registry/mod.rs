@@ -7,5 +7,5 @@ mod tests;
 
 pub use errors::SymbologyError;
 pub use primitives::{Color, Stroke, SymbolPrimitive, ResolvedSymbol};
-pub use providers::SymbologyProvider;
+pub use providers::{SymbologyProvider, DeclarativeProvider, NatoProvider, IcaoProvider};
 pub use registry::SymbolRegistry;

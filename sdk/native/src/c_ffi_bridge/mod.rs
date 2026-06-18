@@ -96,7 +96,7 @@ pub unsafe extern "C" fn olayer_terrain_engine_unload_tile(
         return -1;
     }
     let engine_ref = &mut *engine;
-    let key = olayer_core::terrain::engine::TileKey { lat_deg, lon_deg };
+    let key = olayer_core::terrain::TileKey { lat_deg, lon_deg };
     
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         engine_ref.unload_tile(&key)

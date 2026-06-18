@@ -231,3 +231,58 @@ impl WgpuGpuPipeline {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::native_controller::NativeController;
+
+    #[test]
+    fn test_generate_grid_vertices_2d_not_empty() {
+        let controller = NativeController::new(0.0, 0.0);
+        let vertices = WgpuGpuPipeline::generate_grid_vertices(&controller);
+        assert!(!vertices.is_empty(), "2D grid should produce vertices");
+        // Each vertex is 3 floats (x, y, z); each line segment is 2 vertices = 6 floats
+        assert_eq!(vertices.len() % 6, 0, "Vertex count must be a multiple of 6 (2 endpoints × 3 coords)");
+    }
+
+    #[test]
+    fn test_generate_grid_vertices_3d_not_empty() {
+        let mut controller = NativeController::new(0.0, 0.0);
+        controller.view_mode = "3D".to_string();
+        let vertices = WgpuGpuPipeline::generate_grid_vertices(&controller);
+        assert!(!vertices.is_empty(), "3D grid should produce vertices");
+        assert_eq!(vertices.len() % 6, 0, "Vertex count must be a multiple of 6 (2 endpoints × 3 coords)");
+    }
+
+    #[test]
+    fn test_generate_grid_vertices_3d_uses_ecef_scale() {
+        let mut controller = NativeController::new(0.0, 0.0);
+        controller.view_mode = "3D".to_string();
+        let vertices = WgpuGpuPipeline::generate_grid_vertices(&controller);
+        // ECEF coordinates for Earth surface should be on the order of millions of meters.
+        // Check that at least one vertex has a magnitude > 6_000_000 (roughly Earth radius).
+        let max_abs = vertices.iter().fold(0.0f32, |a, &v| a.max(v.abs()));
+        assert!(max_abs > 6_000_000.0, "3D grid vertices should be in ECEF scale, max abs = {max_abs}");
+    }
+
+    #[test]
+    fn test_generate_grid_vertices_2d_z_is_zero() {
+        let controller = NativeController::new(0.0, 0.0);
+        let vertices = WgpuGpuPipeline::generate_grid_vertices(&controller);
+        // 2D grid vertices always have z = 0.0 (flat plane)
+        for chunk in vertices.chunks_exact(3) {
+            assert_eq!(chunk[2], 0.0, "2D grid vertices must have z = 0.0");
+        }
+    }
+
+    #[test]
+    fn test_generate_grid_vertices_3d_z_is_nonzero() {
+        let mut controller = NativeController::new(0.0, 0.0);
+        controller.view_mode = "3D".to_string();
+        let vertices = WgpuGpuPipeline::generate_grid_vertices(&controller);
+        // 3D grid uses ECEF so at least some z components should be non-zero
+        let has_nonzero_z = vertices.chunks_exact(3).any(|c| c[2] != 0.0);
+        assert!(has_nonzero_z, "3D grid should have non-zero z components (ECEF)");
+    }
+}

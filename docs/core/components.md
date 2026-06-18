@@ -228,9 +228,10 @@ Translator of the OGC Styled Layer Descriptor (SLD) map styling standard.
 * **Dependencies:** No Core dependencies (uses external Rust libraries for fast XML parsing, e.g., `quick-xml`).
 
 ### 🎖️ 2.6 Symbol Registry (`core::symbol_registry`)
-The central registry and coordinator of symbology generators. The component is completely agnostic to specific visual standards, delegating decoding to pluggable providers (such as NATO APP-6, ICAO civil, or meteorology).
+The central registry and coordinator of symbology generators. The component is completely agnostic to specific visual standards, delegating decoding to pluggable providers. By default, it features native, built-in support for NATO APP-6 / MIL-STD-2525 and civil ICAO standard symbologies.
 * **Responsibilities:**
   * Allow dynamic registration of multiple symbology providers (`SymbologyProvider`).
+  * Provide native, built-in providers: `NatoProvider` (for MIL-STD-2525 / APP-6 military tactical symbols) and `IcaoProvider` (for Annex 4 civil aviation navaids).
   * Query the active provider chain to resolve symbol codes into an intermediate geometric format (`ResolvedSymbol`) composed of vector primitives (SVG paths, circles, texts).
   * Serve as a bridge for dynamic styling obtained via `SLD Parser`.
   * Provide clean and unified geometry data for the SDK to build the Texture Atlas in an optimized way.
@@ -288,12 +289,21 @@ The central registry and coordinator of symbology generators. The component is c
       fn resolve(&self, code: &str, style: &StyleRegistry) -> Result<ResolvedSymbol, SymbologyError>;
   }
 
+  /// Native NATO APP-6 / MIL-STD-2525 tactical provider
+  pub struct NatoProvider;
+  impl SymbologyProvider for NatoProvider { ... }
+
+  /// Native ICAO Annex 4 civil aviation navaids provider
+  pub struct IcaoProvider;
+  impl SymbologyProvider for IcaoProvider { ... }
+
   /// Unified symbology registry
   pub struct SymbolRegistry {
       providers: Vec<Box<dyn SymbologyProvider + Send + Sync>>,
   }
 
   impl SymbolRegistry {
+      pub fn new() -> Self;
       pub fn register_provider(&mut self, provider: Box<dyn SymbologyProvider + Send + Sync>);
       pub fn resolve_symbol(&self, code: &str, style: &StyleRegistry) -> Result<ResolvedSymbol, SymbologyError>;
   }

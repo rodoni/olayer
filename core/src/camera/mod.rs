@@ -150,7 +150,7 @@ impl CameraState {
     /// Generates a perspective View-Projection matrix for 3D globe visualization.
     pub fn get_3d_view_proj_matrix(&self) -> Result<[f32; 16], CameraError> {
         self.validate()?;
-        let earth_radius = 6378137.0_f64;
+        let earth_radius = crate::geodesy::ellipsoid::Ellipsoid::wgs84().a;
         let base_distance = 15000000.0_f64;
         let distance = earth_radius + (base_distance / self.zoom);
 

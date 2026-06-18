@@ -40,6 +40,16 @@ classDiagram
         +from_json(json_content: &str) Result~DeclarativeProvider, SymbologyError~
     }
 
+    class NatoProvider {
+        -provider_name: &'static str
+        +new() NatoProvider
+    }
+
+    class IcaoProvider {
+        -provider_name: &'static str
+        +new() IcaoProvider
+    }
+
     class ResolvedSymbol {
         +symbol_id: String
         +primitives: Vec~SymbolPrimitive~
@@ -72,6 +82,8 @@ classDiagram
     %% Relationships
     SymbolRegistry "1" *-- "*" SymbologyProvider : delegates to
     SymbologyProvider <|.. DeclarativeProvider : implements
+    SymbologyProvider <|.. NatoProvider : implements
+    SymbologyProvider <|.. IcaoProvider : implements
     SymbologyProvider ..> ResolvedSymbol : generates
     DeclarativeProvider "1" *-- "*" ResolvedSymbol : stores
     ResolvedSymbol "1" *-- "*" SymbolPrimitive : composed by
@@ -93,7 +105,9 @@ core/src/symbol_registry/
 ├── registry.rs          # Provider chain management and SLD merging
 └── providers/           # Specific symbology providers
     ├── mod.rs           # SymbologyProvider trait
-    └── declarative.rs   # JSON-based resolver
+    ├── declarative.rs   # JSON-based resolver
+    ├── nato.rs          # Procedural NATO APP-6 / MIL-STD-2525 provider
+    └── icao.rs          # Procedural ICAO civil aviation provider
 ```
 
 ---
@@ -136,6 +150,25 @@ The compiler reads SVG files, extracts elements such as `<path>`, `<circle>`, `<
   }
 }
 ```
+
+### 4.4 NATO APP-6 / MIL-STD-2525 Provider
+The `NatoProvider` implements procedural military symbology conforming to the MIL-STD-2525 and NATO APP-6 specifications.
+* **SIDC Parsing:** Resolves symbol codes starting with `nato:` or `mil:`. It supports both standard 15-character alphanumeric SIDC codes (e.g., `nato:SFAPUCI------A--`) and clean semantic tokens (e.g., `nato:friend:fighter`, `mil:hostile:armor`).
+* **Affiliation Resolution:** Extracts identity (Friend, Hostile, Neutral, Unknown, Pending) based on standard SIDC position 2 or keywords. Standard identity dictates both the border outline color and the translucent fill color.
+* **Frame Generation:** Generates the appropriate geodetic-frame shape (a flat rectangle for Friend, diamond for Hostile, square for Neutral, and a circular cloud shape for Unknown/Pending).
+* **Dimension Iconography:** Extracts the battle dimension (Air, Ground, Surface, Subsurface, Space) to procedurally construct internal vector primitives (e.g. a simplified aircraft silhouette path for Air, a track ellipse path for Ground, and a circle with panel lines for Space).
+* **Hostile Movement Vector:** Automatically appends an extra downward direction-of-movement indicator stroke line on Hostile affiliation symbols to aid visual tracking.
+
+### 4.5 ICAO Civil Aviation Provider
+The `IcaoProvider` generates standardized civil aviation navigation aid and facility symbology procedurally according to ICAO Annex 4 / DOC 8697 visual regulations.
+* **Navaid Classification:** Resolves codes starting with `icao:`, mapping them to one of the supported civil nav-aid classifications: `Vor`, `VorDme`, `VorTac`, `Dme`, `Ndb`, `Tacan`, `Airport`, `Heliport`, `Waypoint`, `Intersection`, and `RunwayThreshold`.
+* **Procedural Drawing:** Translates the type into specialized vector layouts:
+  * *VOR / DME / TACAN:* Standard blue hexagons with center dots, accompanied by adjacent square boxes (`VorDme`) or triangular symbols (`VorTac`).
+  * *NDB:* Magenta circle with internal mast dots.
+  * *TACAN:* Blue circle containing an inscribed triangle.
+  * *Airport / Heliport:* Black circle with a runway strip path or a text letter "H" primitive.
+  * *Waypoint / Intersection:* Unfilled black triangle path.
+  * *Runway Threshold:* Inverted white arrow pointing down with black stroke.
 
 ---
 

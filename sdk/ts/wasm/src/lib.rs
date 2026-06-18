@@ -67,7 +67,7 @@ impl WasmTerrainEngine {
 
     /// Unloads a tile by its coordinate degrees.
     pub fn unload_tile(&mut self, lat_deg: i32, lon_deg: i32) -> bool {
-        let key = olayer_core::terrain::engine::TileKey { lat_deg, lon_deg };
+        let key = olayer_core::terrain::TileKey { lat_deg, lon_deg };
         self.inner.unload_tile(&key)
     }
 

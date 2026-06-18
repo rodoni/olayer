@@ -143,7 +143,7 @@ impl TerrainDataSource {
 
     /// Unloads a specific tile by its coordinate degrees.
     pub fn unload_tile(&mut self, lat_deg: i32, lon_deg: i32) -> bool {
-        let tile_key = olayer_core::terrain::engine::TileKey { lat_deg, lon_deg };
+        let tile_key = olayer_core::terrain::TileKey { lat_deg, lon_deg };
         let removed = self.engine.unload_tile(&tile_key);
         if removed {
             self.loaded_tiles
@@ -167,7 +167,7 @@ impl MapDataSource for TerrainDataSource {
 
     fn clear_cache(&mut self) {
         for (lat, lon) in &self.loaded_tiles {
-            let key = olayer_core::terrain::engine::TileKey {
+            let key = olayer_core::terrain::TileKey {
                 lat_deg: *lat,
                 lon_deg: *lon,
             };

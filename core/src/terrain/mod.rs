@@ -6,4 +6,4 @@ mod tests;
 
 pub use errors::TerrainError;
 pub use tile::DtedTile;
-pub use engine::{TerrainEngine, ProfilePoint};
+pub use engine::{TerrainEngine, ProfilePoint, TileKey};
