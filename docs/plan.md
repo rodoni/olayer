@@ -1,7 +1,7 @@
 # Development Plan: Olayer
 ## Implementation Schedule and Milestones of the Hybrid GIS Framework
 
-This document establishes the modular development plan for the construction of **Olayer**, dividing the project into incremental phases and delivery milestones (*milestones*). The planning follows the strict separation of responsibilities defined in the [System Architecture (arch.md)](file:///c:/Users/rafae/projects/rust/olayer/docs/arch.md) and the [Technical Specification (spec.md)](file:///c:/Users/rafae/projects/rust/olayer/docs/spec.md).
+This document establishes the modular development plan for the construction of **Olayer**, dividing the project into incremental phases and delivery milestones (*milestones*). The planning follows the strict separation of responsibilities defined in the [System Architecture (arch.md)](arch.md) and the [Technical Specification (spec.md)](spec.md).
 
 ---
 

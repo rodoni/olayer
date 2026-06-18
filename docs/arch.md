@@ -1,7 +1,7 @@
 # Software Architecture: Olayer
 ## Hybrid GIS Framework for Air Traffic Control (ATC)
 
-This document describes the initial architecture of the **Olayer** project, mapped from the requirements defined in the [Technical Specification (spec.md)](file:///c:/Users/rafae/projects/rust/olayer/docs/spec.md). The design uses the **C4 Model** (Context, Containers, Components, and Processes/Code) to illustrate the division of responsibilities, data flows, and mission-critical structural decisions.
+This document describes the initial architecture of the **Olayer** project, mapped from the requirements defined in the [Technical Specification (spec.md)](spec.md). The design uses the **C4 Model** (Context, Containers, Components, and Processes/Code) to illustrate the division of responsibilities, data flows, and mission-critical structural decisions.
 
 ---
 
@@ -219,13 +219,13 @@ graph TB
 ### Component Details
 
 #### 1. Rust Core Modules
-* **[Geodesy Module](file:///c:/Users/rafae/projects/rust/olayer/core/src/geodesy):** Provides the mathematical functions based on the WGS84 reference ellipsoid. Performs bidirectional transformations between geographic coordinates $(\phi, \lambda, h)$ and Cartesian ECEF $(X, Y, Z)$.
-* **[Camera Module](file:///c:/Users/rafae/projects/rust/olayer/core/src/camera):** Manages the three-dimensional geographic navigation state and camera attitude (center, zoom, bearing/yaw, pitch, roll) and calculates the View-Projection matrices for 2D, 2.5D, and 3D in a unified and performant manner.
-* **[Projections Module](file:///c:/Users/rafae/projects/rust/olayer/core/src/projections):** Contains the mathematical formulas to project three-dimensional or geodetic points onto 2D planes. Implements the equations for Stereographic, LCC, and Mercator projections.
-* **[Terrain Engine (DTED)](file:///c:/Users/rafae/projects/rust/olayer/core/src/terrain):** Manages DTED files in memory. Builds a simplified 2D spatial index (Grid) where each cell points to the loaded elevation bytes. Allows altitude queries at arbitrary coordinates to run in constant time $O(1)$.
-* **[SLD Parser](file:///c:/Users/rafae/projects/rust/olayer/core/src/sld):** Syntactic parser (Parser) of XML that converts the OGC SLD (Styled Layer Descriptor) standard into structured style metadata.
-* **[Symbol Registry](file:///c:/Users/rafae/projects/rust/olayer/core/src/symbol_registry):** Unified and agnostic symbology registry that resolves symbol codes (such as VOR or fighter jets) using simplified vector primitives generated from consolidated JSON library files. These JSON symbol files are pre-compiled from SVG files using the CLI tool `tools/symbol-compiler`. Rasterized symbols (PNG/JPG) are injected directly into the client SDK in the Texture Atlas, keeping the core lightweight and free of raster decoders.
-* **[Target Interpolator](file:///c:/Users/rafae/projects/rust/olayer/core/src/interpolator):** Maintains the state table of dynamic targets in 3D geodetic space. For each target, records the last known state vector. Computes interpolated positions via 3D Dead Reckoning based on system time (WGS84 LatLon and heading), completely decoupled from screen projection.
+* **[Geodesy Module](../core/src/geodesy):** Provides the mathematical functions based on the WGS84 reference ellipsoid. Performs bidirectional transformations between geographic coordinates $(\phi, \lambda, h)$ and Cartesian ECEF $(X, Y, Z)$.
+* **[Camera Module](../core/src/camera):** Manages the three-dimensional geographic navigation state and camera attitude (center, zoom, bearing/yaw, pitch, roll) and calculates the View-Projection matrices for 2D, 2.5D, and 3D in a unified and performant manner.
+* **[Projections Module](../core/src/projections):** Contains the mathematical formulas to project three-dimensional or geodetic points onto 2D planes. Implements the equations for Stereographic, LCC, and Mercator projections.
+* **[Terrain Engine (DTED)](../core/src/terrain):** Manages DTED files in memory. Builds a simplified 2D spatial index (Grid) where each cell points to the loaded elevation bytes. Allows altitude queries at arbitrary coordinates to run in constant time $O(1)$.
+* **[SLD Parser](../core/src/sld):** Syntactic parser (Parser) of XML that converts the OGC SLD (Styled Layer Descriptor) standard into structured style metadata.
+* **[Symbol Registry](../core/src/symbol_registry):** Unified and agnostic symbology registry that resolves symbol codes (such as VOR or fighter jets) using simplified vector primitives generated from consolidated JSON library files. These JSON symbol files are pre-compiled from SVG files using the CLI tool `tools/symbol-compiler`. Rasterized symbols (PNG/JPG) are injected directly into the client SDK in the Texture Atlas, keeping the core lightweight and free of raster decoders.
+* **[Target Interpolator](../core/src/interpolator):** Maintains the state table of dynamic targets in 3D geodetic space. For each target, records the last known state vector. Computes interpolated positions via 3D Dead Reckoning based on system time (WGS84 LatLon and heading), completely decoupled from screen projection.
 
 #### 2. TypeScript SDK Components (Web Client)
 * **TS Controller:** Controls the screen animation loop in the browser using `requestAnimationFrame` and manages dynamic FPS modulation (15 FPS idle / 60 FPS active).

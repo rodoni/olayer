@@ -38,7 +38,7 @@ pub trait MapDataSource {
 
 Unlike the WebAssembly version (which consumes elevation tiles via HTTP requests managed by TypeScript), the Native SDK performs local and direct disk readings:
 * **Format:** Supports reading of standard binary DTED files (Level 0, 1, or 2).
-* **Spatial grid:** The SDK reads the UHL file header, extracts the tile's latitude/longitude, and passes the raw binary buffer to the Core's `TerrainEngine` through [load_tile](file:///c:/Users/rafae/projects/rust/olayer/core/src/terrain).
+* **Spatial grid:** The SDK reads the UHL file header, extracts the tile's latitude/longitude, and passes the raw binary buffer to the Core's `TerrainEngine` through [load_tile](../../../../core/src/terrain).
 * **Direct helpers:** `NativeMapDataStack` provides backward-compatible helpers:
   * `load_dted_file(path: &str, terrain: &mut TerrainEngine) -> Result<(), String>`
   * `load_dted_buffer(buffer: &[u8], terrain: &mut TerrainEngine) -> Result<(), String>`
@@ -47,21 +47,21 @@ Unlike the WebAssembly version (which consumes elevation tiles via HTTP requests
   * `load_buffer(buffer: &[u8]) -> Result<(), String>`
   * `unload_tile(lat_deg: i32, lon_deg: i32) -> bool`
   * `get_elevation(lat_deg: f64, lon_deg: f64) -> Result<f64, String>`
-* **Initialization:** In [main.rs](file:///c:/Users/rafae/projects/rust/olayer/sdk/native/demo/src/main.rs), mock tile reading/generation is performed for the São Paulo TMA area and its subsequent injection into the controller.
+* **Initialization:** In [main.rs](../../../../sdk/native/demo/src/main.rs), mock tile reading/generation is performed for the São Paulo TMA area and its subsequent injection into the controller.
 
 ---
 
 ## 4. Dynamic Target Ingestion (Radar Feed)
 
 Aircraft telemetry packets in the airspace (usually received from radar or ADS-B feeds at a frequency of 1 Hz) are injected into the system:
-* **Dead Reckoning Setup:** The current state (latitude, longitude, height, speed, heading, and timestamp) is sent to the `InterpolationEngine` via [update_target](file:///c:/Users/rafae/projects/rust/olayer/core/src/interpolator).
-* **Update:** In [main.rs](file:///c:/Users/rafae/projects/rust/olayer/sdk/native/demo/src/main.rs), a timer simulates position updates every second, updating the corresponding geodetic physical model.
+* **Dead Reckoning Setup:** The current state (latitude, longitude, height, speed, heading, and timestamp) is sent to the `InterpolationEngine` via [update_target](../../../../core/src/interpolator).
+* **Update:** In [main.rs](../../../../sdk/native/demo/src/main.rs), a timer simulates position updates every second, updating the corresponding geodetic physical model.
 
 ---
 
 ## 5. C-FFI Integration for Host Systems
 
-For C/C++ host applications, the loading and manipulation of these data are exposed through safe FFI functions located in [c_ffi_bridge/mod.rs](file:///c:/Users/rafae/projects/rust/olayer/sdk/native/src/c_ffi_bridge/mod.rs):
+For C/C++ host applications, the loading and manipulation of these data are exposed through safe FFI functions located in [c_ffi_bridge/mod.rs](../../../../sdk/native/src/c_ffi_bridge/mod.rs):
 
 * **Load Terrain:** `olayer_terrain_engine_load_tile`
 * **Unload Terrain:** `olayer_terrain_engine_unload_tile`

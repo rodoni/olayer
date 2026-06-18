@@ -40,7 +40,7 @@ To avoid redrawing large-scale geometries that rarely change (such as the geodet
 
 ## 3. Implementation and Drawing Flow
 
-The native rendering loop (described in [main.rs](file:///c:/Users/rafae/projects/rust/olayer/sdk/native/demo/src/main.rs)) performs the following flow at each frame:
+The native rendering loop (described in [main.rs](../../../../sdk/native/demo/src/main.rs)) performs the following flow at each frame:
 
 ```mermaid
 sequenceDiagram

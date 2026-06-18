@@ -1,8 +1,8 @@
 # Architecture: WebAssembly (WASM) Bridge
 
-This document describes the detailed design, interface structure, and resource management of the **WebAssembly (WASM)** interoperability bridge of Olayer, located in [wasm](file:///c:/Users/rafae/projects/rust/olayer/sdk/ts/wasm).
+This document describes the detailed design, interface structure, and resource management of the **WebAssembly (WASM)** interoperability bridge of Olayer, located in [wasm](../../../../sdk/ts/wasm).
 
-This component is responsible for translating data and exposing the capabilities of the [Olayer Core](file:///c:/Users/rafae/projects/rust/olayer/core) to the TypeScript SDK running in the browser.
+This component is responsible for translating data and exposing the capabilities of the [Olayer Core](../../../../core) to the TypeScript SDK running in the browser.
 
 ---
 
@@ -61,7 +61,7 @@ The **WASM Bridge** component has the following main assignments:
 
 ## 3. Designed Interfaces (WASM Exports)
 
-The wrappers defined in the [wasm](file:///c:/Users/rafae/projects/rust/olayer/sdk/ts/wasm) folder act as conversion facades for the real structures of the Rust Core:
+The wrappers defined in the [wasm](../../../../sdk/ts/wasm) folder act as conversion facades for the real structures of the Rust Core:
 
 ### 3.1 Coordinates
 ```rust

@@ -1,6 +1,6 @@
 # Native SDK Components (Desktop)
 
-This document details technically the components of the **Olayer** Native SDK, as defined in the [Software Architecture (arch.md)](file:///c:/Users/rafae/projects/rust/olayer/docs/arch.md). The native Rust engine is designed for high-performance integration in desktop air traffic control (ATC) systems, supporting GPU-accelerated rendering and interoperability with languages such as C and C++.
+This document details technically the components of the **Olayer** Native SDK, as defined in the [Software Architecture (arch.md)](../../arch.md). The native Rust engine is designed for high-performance integration in desktop air traffic control (ATC) systems, supporting GPU-accelerated rendering and interoperability with languages such as C and C++.
 
 ---
 
@@ -21,11 +21,11 @@ This document details technically the components of the **Olayer** Native SDK, a
 The `Native Controller` manages the global execution state of the SDK in the native desktop environment. It serves as the main entry point and orchestrator that unites the geodetic, interpolation, cartographic projection, and camera engines. In addition, it implements the dynamic frame rate control mechanism (**FPS Throttling**), switching between 60 FPS (active mode, during user interactions or frequent updates) and 15 FPS (idle/idle mode) to save processing and CPU resources.
 
 ### Key Data Structures
-* `NativeController` (defined in [mod.rs](file:///c:/Users/rafae/projects/rust/olayer/sdk/native/src/native_controller/mod.rs)):
-  * `terrain`: [TerrainEngine](file:///c:/Users/rafae/projects/rust/olayer/core/src/terrain) - Terrain elevation search engine (DTED).
-  * `interpolator`: [InterpolationEngine](file:///c:/Users/rafae/projects/rust/olayer/core/src/interpolator) - Dead Reckoning engine for radar targets.
-  * `projection`: `Box<dyn Projection + Send + Sync>` - Active projection (e.g., [Stereographic](file:///c:/Users/rafae/projects/rust/olayer/core/src/projections), [LambertConformalConic](file:///c:/Users/rafae/projects/rust/olayer/core/src/projections)).
-  * `camera`: [CameraState](file:///c:/Users/rafae/projects/rust/olayer/core/src/camera) - Camera attitude and position state for visualization/projection calculation.
+* `NativeController` (defined in [mod.rs](../../../sdk/native/src/native_controller/mod.rs)):
+  * `terrain`: [TerrainEngine](../../../core/src/terrain) - Terrain elevation search engine (DTED).
+  * `interpolator`: [InterpolationEngine](../../../core/src/interpolator) - Dead Reckoning engine for radar targets.
+  * `projection`: `Box<dyn Projection + Send + Sync>` - Active projection (e.g., [Stereographic](../../../core/src/projections), [LambertConformalConic](../../../core/src/projections)).
+  * `camera`: [CameraState](../../../core/src/camera) - Camera attitude and position state for visualization/projection calculation.
   * `is_active`: `bool` - Flag indicating whether the application is in a high-activity state.
   * `last_active_time`: `std::time::Instant` - Timestamp of the last interaction or important event.
   * `active_timeout`: `std::time::Duration` - Time limit before returning to idle state.
@@ -44,7 +44,7 @@ The `Native Controller` manages the global execution state of the SDK in the nat
 The `Native Layer Manager` is responsible for controlling the map display layer stack (e.g., static background map, geodetic grid lines, tactical targets, and interface overlays). It manages the visibility of each layer and decides the repaint order (*compositing*). Instead of repainting all dense geographic elements every frame, it supports the segregation of graphics cycles, instructing the pipeline to draw static elements into cache textures when the camera does not change state.
 
 ### Key Data Structures
-* `Layer` trait (defined in [mod.rs](file:///c:/Users/rafae/projects/rust/olayer/sdk/native/src/native_layer_manager/mod.rs)):
+* `Layer` trait (defined in [mod.rs](../../../sdk/native/src/native_layer_manager/mod.rs)):
   * `id(&self) -> &str` — Unique identifier.
   * `is_visible(&self) -> bool` — Whether the layer is currently visible.
   * `set_visible(&mut self, visible: bool)` — Toggle visibility.
@@ -64,7 +64,7 @@ The `Native Layer Manager` is responsible for controlling the map display layer 
 * `set_all_visibility(visible: bool)` — Toggles all layers on or off.
 
 ### Operation Flow in the Native Loop
-As implemented in the event loop in [main.rs](file:///c:/Users/rafae/projects/rust/olayer/sdk/native/demo/src/main.rs):
+As implemented in the event loop in [main.rs](../../../sdk/native/demo/src/main.rs):
 1. **Background and Static Grid Painting:** WGPU clears the buffer with the ATC radar theme color and draws the grid lines based on the updated `grid_vertex_buffer`.
 2. **Target Layer Painting (Radar Overlay):** Draws the list of dynamic targets over the map and grids.
 3. **Interface Drawing (HUD/Egui Overlay):** Adds buttons, projection controls, and informative windows (e.g., 2.5D flight profile) at the top of the stack, rendered through integration with `egui_wgpu::Renderer`.
@@ -77,7 +77,7 @@ As implemented in the event loop in [main.rs](file:///c:/Users/rafae/projects/ru
 The `Native Map Data Stack` manages the ingestion and local caching of static and dynamic cartographic and operational data resources for the desktop application. Unlike the Web ecosystem (which consumes data via browser network), in the desktop environment this component can access the local file system asynchronously, performing quick loading of DTED terrain files on disk and decoding them directly into the Rust Core's linear memory.
 
 ### Key Data Structures
-* `MapDataSource` trait (defined in [mod.rs](file:///c:/Users/rafae/projects/rust/olayer/sdk/native/src/native_map_data_stack/mod.rs)):
+* `MapDataSource` trait (defined in [mod.rs](../../../sdk/native/src/native_map_data_stack/mod.rs)):
   * `id(&self) -> &str` — Unique identifier for the data source.
   * `clear_cache(&mut self)` — Clears the local provider cache.
   * `cache_size(&self) -> usize` — Returns the number of cached items.
@@ -97,8 +97,8 @@ The `Native Map Data Stack` manages the ingestion and local caching of static an
   * `get_elevation(lat_deg: f64, lon_deg: f64) -> Result<f64, String>` — Queries elevation at the given coordinate degrees.
 
 ### Data Integration
-* **Local Disk I/O:** Loads binary DTED tiles mapped on the geographic grid directly into the [TerrainEngine](file:///c:/Users/rafae/projects/rust/olayer/core/src/terrain) struct using `load_tile`.
-* **Sensor Flow:** Receives external radar feeds at ~1 Hz rates and supplies the native [InterpolationEngine](file:///c:/Users/rafae/projects/rust/olayer/core/src/interpolator) via the `update_target` method.
+* **Local Disk I/O:** Loads binary DTED tiles mapped on the geographic grid directly into the [TerrainEngine](../../../core/src/terrain) struct using `load_tile`.
+* **Sensor Flow:** Receives external radar feeds at ~1 Hz rates and supplies the native [InterpolationEngine](../../../core/src/interpolator) via the `update_target` method.
 
 ---
 
@@ -108,7 +108,7 @@ The `Native Map Data Stack` manages the ingestion and local caching of static an
 The `wgpu GPU Pipeline` is the hardware-accelerated rendering engine for native environments (Desktop). It manages and compiles graphics pipelines accelerated via low-level APIs (Vulkan, Metal, or DirectX 12) using the Rust `wgpu` crate. This pipeline processes dense geographic and relief data represented by 3D projection and visualization transformation matrices (MVP) computed in the Rust Core.
 
 ### Rendering Components
-* **Shader Compilation (WGSL):** Executes the grid shader (`vs_main` and `fs_main` defined in [mod.rs](file:///c:/Users/rafae/projects/rust/olayer/sdk/native/src/wgpu_gpu_pipeline/mod.rs)) to project and color the meridians and parallels.
+* **Shader Compilation (WGSL):** Executes the grid shader (`vs_main` and `fs_main` defined in [mod.rs](../../../sdk/native/src/wgpu_gpu_pipeline/mod.rs)) to project and color the meridians and parallels.
 * **Uniform Buffers:** Maintains buffers for sending the combined View-Projection matrix (`mat4x4<f32>`) and grid color data to the GPU.
 * **Vertex Buffers:** Fills the grid vertex buffer dynamically via `rebuild_grid_buffers` every time the camera or active projection is changed.
 
@@ -120,7 +120,7 @@ The `wgpu GPU Pipeline` is the hardware-accelerated rendering engine for native 
 The `wgpu CPU/Vertex Pipeline` handles the projection and plotting of dynamic targets (aircraft) and their respective metadata (text labels, velocity vectors, and heading) that cannot suffer 3D spatial distortions ( **Billboard** effect). The coordinate transformation calculation from geodetic (latitude, longitude, altitude) to flat screen pixel coordinates $(X, Y)$ is done on the CPU by the Core, and the SDK performs the rendering of geometric primitives (circles, rectangles, vectors) and text on the graphical interface.
 
 ### Dynamic Projection Logic
-In the file [mod.rs](file:///c:/Users/rafae/projects/rust/olayer/sdk/native/src/wgpu_cpu_vertex_pipeline/mod.rs):
+In the file [mod.rs](../../../sdk/native/src/wgpu_cpu_vertex_pipeline/mod.rs):
 * `project_lla_to_screen`: Translates geodetic coordinates based on the active projection and visualization matrix.
   * **In 3D mode:** Converts LLA coordinates to 3D ECEF rectangular coordinates using the WGS84 ellipsoid, applies horizon occlusion culling (horizon occlusion culling), and multiplies by the 3D view matrix.
   * **In 2.5D mode:** Projects the aircraft base two-dimensionally using the active planar projection and adds altitude as the Z axis, then projects with the 2.5D perspective camera matrix.
@@ -135,7 +135,7 @@ In the file [mod.rs](file:///c:/Users/rafae/projects/rust/olayer/sdk/native/src/
 The `C-FFI Bridge` provides a binary interface compatible with the C language (`libolayer_native.h`), allowing client applications written in C, C++, C#, or other natively compiled languages to directly consume the mathematical and logical engines of the Olayer Core in Rust.
 
 ### FFI Interoperability Architecture
-The FFI bridge is located in the subproject [c_ffi_bridge](file:///c:/Users/rafae/projects/rust/olayer/sdk/native/src/c_ffi_bridge) and implements:
+The FFI bridge is located in the subproject [c_ffi_bridge](../../../sdk/native/src/c_ffi_bridge) and implements:
 * **FFI-compatible Data Structures (`#[repr(C]`):**
   * `C_LatLon` - Pair of geodetic coordinates.
   * `C_InterpolatedTarget` - Interpolated target records with C-compatible strings (`*mut c_char`).

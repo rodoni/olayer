@@ -23,7 +23,7 @@ graph LR
 2. **Surface:** Bound to the native `winit` window.
 3. **Adapter & Device:** Requested with preference for high performance (`HighPerformance`).
 4. **Surface Configuration:** Defines width/height and color format based on the physical window dimensions.
-The WGPU initialization and surface creation process occurs natively and synchronously at the entry point [main.rs](file:///c:/Users/rafae/projects/rust/olayer/sdk/native/demo/src/main.rs):
+The WGPU initialization and surface creation process occurs natively and synchronously at the entry point [main.rs](../../../../sdk/native/demo/src/main.rs):
 
 ---
 

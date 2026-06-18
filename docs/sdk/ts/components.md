@@ -67,16 +67,16 @@ Each main SDK component is documented in a detailed architecture file (`arch.md`
 
 ### 🎮 2.1 TS Controller
 Unified entry point of the SDK. Acts as the maestro of the lifecycle, main loop, and dynamic FPS throttling.
-* Complete technical detail: [arch.md](file:///c:/Users/rafae/projects/rust/olayer/docs/sdk/ts/controller/arch.md)
+* Complete technical detail: [arch.md](controller/arch.md)
 
 ### 🥞 2.2 Layer Manager
 Coordinator of the layer stack (Layer Stack), responsible for ordering and rendering optimization segregation between dynamic and static elements.
-* Complete technical detail: [arch.md](file:///c:/Users/rafae/projects/rust/olayer/docs/sdk/ts/layers/arch.md)
+* Complete technical detail: [arch.md](layers/arch.md)
 
 ### 📥 2.3 Map Data Stack (Providers)
 Module responsible for on-demand loading, paging, and intelligent caching (with LRU policy) of cartographic data (MVT, WMTS) and terrain (DTED).
-* Complete technical detail: [arch.md](file:///c:/Users/rafae/projects/rust/olayer/docs/sdk/ts/providers/arch.md)
+* Complete technical detail: [arch.md](providers/arch.md)
 
 ### 🎨 2.4 Render Pipelines & Texture Atlas
 Graphic drawing engines. Contains the GPU rendering pipeline (WebGL2), the CPU radar pipeline (with anti-overlap algorithm/anti-cluttering), and the Texture Atlas Manager.
-* Complete technical detail: [arch.md](file:///c:/Users/rafae/projects/rust/olayer/docs/sdk/ts/renderer/arch.md)
+* Complete technical detail: [arch.md](renderer/arch.md)

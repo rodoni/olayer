@@ -1,6 +1,6 @@
 # Architecture: C-FFI Bridge (Native)
 
-This document details the architectural design, technical specification, binary compatibility guidelines, and memory management of the **C-FFI** interoperability bridge of Olayer, located in [c_ffi_bridge](file:///c:/Users/rafae/projects/rust/olayer/sdk/native/c_ffi_bridge).
+This document details the architectural design, technical specification, binary compatibility guidelines, and memory management of the **C-FFI** interoperability bridge of Olayer, located in [c_ffi_bridge](../../../../sdk/native/c_ffi_bridge).
 
 This component exposes the mission-critical geometric capabilities of the Rust engine to local applications written in natively compiled languages (such as C, C++, C#, or Go).
 
@@ -64,7 +64,7 @@ The **C-FFI Bridge** component has the following main assignments:
 
 ## 3. Designed Interfaces (C-API Exports)
 
-To allow integration with C/C++, the data signatures expose opaque pointers to the Rust control structs. The complete low-level implementations are in [c_ffi_bridge/src/lib.rs](file:///c:/Users/rafae/projects/rust/olayer/sdk/native/c_ffi_bridge/src/lib.rs).
+To allow integration with C/C++, the data signatures expose opaque pointers to the Rust control structs. The complete low-level implementations are in [c_ffi_bridge/src/lib.rs](../../../../sdk/native/c_ffi_bridge/src/lib.rs).
 
 ### 3.1 C-Compatible Definitions
 ```rust

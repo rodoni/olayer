@@ -6,7 +6,7 @@ This document details the architectural design and technical specification of th
 
 ## 1. Overview
 
-The [NativeController](file:///c:/Users/rafae/projects/rust/olayer/sdk/native/src/native_controller/mod.rs) acts as a **Facade** design pattern and central orchestrator for the Native SDK. It unifies and encapsulates the complex functionalities of geodesy, camera attitude, cartographic projection, and kinematic interpolation provided by the Rust Core, facilitating consumption by the host application.
+The [NativeController](../../../../sdk/native/src/native_controller/mod.rs) acts as a **Facade** design pattern and central orchestrator for the Native SDK. It unifies and encapsulates the complex functionalities of geodesy, camera attitude, cartographic projection, and kinematic interpolation provided by the Rust Core, facilitating consumption by the host application.
 
 ```mermaid
 graph TD
@@ -38,7 +38,7 @@ stateDiagram-v2
 
 ## 3. Data Structures and Signatures
 
-The component is implemented in [sdk/native/src/native_controller/mod.rs](file:///c:/Users/rafae/projects/rust/olayer/sdk/native/src/native_controller/mod.rs).
+The component is implemented in [sdk/native/src/native_controller/mod.rs](../../../../sdk/native/src/native_controller/mod.rs).
 
 ### Main Structure
 ```rust
@@ -66,7 +66,7 @@ pub struct NativeController {
 
 ## 4. Integration with the Host Application
 
-In the native event loop (managed in [main.rs](file:///c:/Users/rafae/projects/rust/olayer/sdk/native/demo/src/main.rs)), the host application queries `get_target_fps` at the end of each rendering iteration to determine the main thread sleep time (`sleep`) before the next redraw:
+In the native event loop (managed in [main.rs](../../../../sdk/native/demo/src/main.rs)), the host application queries `get_target_fps` at the end of each rendering iteration to determine the main thread sleep time (`sleep`) before the next redraw:
 
 ```rust
 let target_fps = controller.get_target_fps();

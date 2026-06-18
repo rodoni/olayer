@@ -19,7 +19,7 @@ graph LR
 
 ## 2. CPU Projection Algorithm
 
-The `project_lla_to_screen` function in [mod.rs](file:///c:/Users/rafae/projects/rust/olayer/sdk/native/src/wgpu_cpu_vertex_pipeline/mod.rs) processes the conversion according to the configured view mode:
+The `project_lla_to_screen` function in [mod.rs](../../../../sdk/native/src/wgpu_cpu_vertex_pipeline/mod.rs) processes the conversion according to the configured view mode:
 
 ### 2.1 Projection in 3D Mode (Virtual Globe)
 1. **ECEF Conversion:** Transforms the LLA point $(\phi, \lambda, h)$ into ECEF rectangular coordinates $(X, Y, Z)$ using the WGS84 ellipsoid.
