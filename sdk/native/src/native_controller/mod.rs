@@ -51,6 +51,12 @@ impl NativeController {
         }
     }
 
+    /// Helper to create and initialize a new `GeoserverWmtsSource`.
+    #[inline]
+    pub fn create_geoserver_source(&self, id: &str, base_url: &str, layer_name: &str) -> crate::native_map_data_stack::GeoserverWmtsSource {
+        crate::native_map_data_stack::GeoserverWmtsSource::new(id, base_url, layer_name)
+    }
+
     #[inline]
     pub fn trigger_active(&mut self) {
         self.is_active = true;

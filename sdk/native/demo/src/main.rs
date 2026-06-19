@@ -7,7 +7,7 @@ use winit::{
 use olayer_core::geodesy::LatLon;
 use olayer_core::projections::{Stereographic, LambertConformalConic, WebMercator};
 use olayer_native::{
-    NativeController, NativeLayerManager, NativeMapDataStack, WgpuGpuPipeline, WgpuCpuVertexPipeline, project_lla_to_screen
+    NativeController, NativeLayerManager, NativeMapDataStack, MapDataSource, GeoserverWmtsSource, WgpuGpuPipeline, WgpuCpuVertexPipeline, project_lla_to_screen
 };
 
 struct SimulatedTarget {
@@ -76,7 +76,7 @@ fn main() {
     controller.camera.viewport_base_meters = 1000000.0;
 
     let mut layer_manager = NativeLayerManager::new();
-    let map_data_stack = NativeMapDataStack::new();
+    let mut map_data_stack = NativeMapDataStack::new();
     let mut gpu_pipeline = WgpuGpuPipeline::new(&device, config.format);
     let cpu_pipeline = WgpuCpuVertexPipeline::new();
 
@@ -122,6 +122,30 @@ fn main() {
     let mut simulated_targets: Vec<SimulatedTarget> = Vec::new();
     let mut selected_target_id: Option<String> = None;
     let mut projection_name = "Stereographic".to_string();
+
+    // GeoServer Integration State
+    let mut geoserver_url = "http://localhost:8080/geoserver/gwc/service/wmts".to_string();
+    let mut geoserver_layer = "olayer:world_map".to_string();
+    let mut geoserver_source: Option<GeoserverWmtsSource> = None;
+    let mut tile_zoom: u32 = 10;
+    let mut auto_fetch_tiles = false;
+    let mut egui_tile_textures: std::collections::HashMap<String, egui::TextureHandle> = std::collections::HashMap::new();
+
+    // Helper to calculate OpenStreetMap / Web Mercator tile coordinates
+    let latlon_to_tile = |lat_rad: f64, lon_rad: f64, zoom: u32| -> (u32, u32) {
+        let lon_deg = lon_rad.to_degrees();
+        let n = 2.0f64.powi(zoom as i32);
+        
+        let x = (((lon_deg + 180.0) / 360.0) * n).clamp(0.0, n - 1.0) as u32;
+        
+        let lat_rad_val = lat_rad;
+        let sec = 1.0 / lat_rad_val.cos();
+        let tan = lat_rad_val.tan();
+        let y_val = (1.0 - ((tan + sec).abs().ln() / std::f64::consts::PI)) / 2.0;
+        let y = (y_val * n).clamp(0.0, n - 1.0) as u32;
+        
+        (x, y)
+    };
     
     // Mouse drag state
     let mut is_dragging = false;
@@ -202,6 +226,125 @@ fn main() {
                         let current_time = start_time.elapsed().as_secs_f64();
                         let interpolated_targets = controller.interpolator.interpolate_all(current_time).unwrap_or_default();
 
+                        // Calculate visible tile keys in the viewport
+                        let mut visible_keys = std::collections::HashSet::new();
+                        let center_lat = controller.camera.center.lat;
+                        let center_lon = controller.camera.center.lon;
+                        let (tx, ty) = latlon_to_tile(center_lat, center_lon, tile_zoom);
+
+                        let aspect = controller.camera.aspect_ratio;
+                        let w_meters = controller.camera.viewport_base_meters / controller.camera.zoom;
+                        let h_meters = w_meters / aspect;
+
+                        if controller.view_mode != "3D" {
+                            if let Ok(cx_cy) = controller.projection.project(&controller.camera.center) {
+                                let cx = cx_cy.0;
+                                let cy = cx_cy.1;
+
+                                // Sample a grid of points on the screen/viewport to cover rotation and projection distortion
+                                let offsets = [
+                                    (0.0, 0.0),
+                                    (-0.5, -0.5),
+                                    (-0.5, 0.5),
+                                    (0.5, -0.5),
+                                    (0.5, 0.5),
+                                    (-0.5, 0.0),
+                                    (0.5, 0.0),
+                                    (0.0, -0.5),
+                                    (0.0, 0.5),
+                                ];
+
+                                let mut min_x = u32::MAX;
+                                let mut max_x = 0;
+                                let mut min_y = u32::MAX;
+                                let mut max_y = 0;
+
+                                let cos_r = controller.camera.rotation.cos();
+                                let sin_r = controller.camera.rotation.sin();
+
+                                for &(ox, oy) in &offsets {
+                                    let dx_cam = ox * w_meters;
+                                    let dy_cam = oy * h_meters;
+
+                                    let dx = dx_cam * cos_r - dy_cam * sin_r;
+                                    let dy = dx_cam * sin_r + dy_cam * cos_r;
+
+                                    let px = cx + dx;
+                                    let py = cy + dy;
+
+                                    if let Ok(lla) = controller.projection.unproject(px, py) {
+                                        let (tx_val, ty_val) = latlon_to_tile(lla.lat, lla.lon, tile_zoom);
+                                        min_x = min_x.min(tx_val);
+                                        max_x = max_x.max(tx_val);
+                                        min_y = min_y.min(ty_val);
+                                        max_y = max_y.max(ty_val);
+                                    }
+                                }
+
+                                let max_radius = 4; // Max 9x9 grid to protect against massive downloads
+                                let final_min_x = min_x.max(tx.saturating_sub(max_radius));
+                                let final_max_x = max_x.min(tx + max_radius);
+                                let final_min_y = min_y.max(ty.saturating_sub(max_radius));
+                                let final_max_y = max_y.min(ty + max_radius);
+
+                                for x_idx in final_min_x..=final_max_x {
+                                    for y_idx in final_min_y..=final_max_y {
+                                        visible_keys.insert(format!("{}/{}/{}", tile_zoom, x_idx, y_idx));
+                                    }
+                                }
+                            }
+                        } else {
+                            let span_lat = (h_meters / 111000.0).min(90.0);
+                            let lat_rad = controller.camera.center.lat;
+                            let span_lon = (w_meters / (111000.0 * lat_rad.cos().abs().max(0.01))).min(180.0);
+
+                            let lat_min = (lat_rad.to_degrees() - span_lat).to_radians();
+                            let lat_max = (lat_rad.to_degrees() + span_lat).to_radians();
+                            let lon_min = (controller.camera.center.lon.to_degrees() - span_lon).to_radians();
+                            let lon_max = (controller.camera.center.lon.to_degrees() + span_lon).to_radians();
+
+                            let t_min = latlon_to_tile(lat_min, lon_min, tile_zoom);
+                            let t_max = latlon_to_tile(lat_max, lon_max, tile_zoom);
+
+                            let min_x = t_min.0.min(t_max.0);
+                            let max_x = t_min.0.max(t_max.0);
+                            let min_y = t_min.1.min(t_max.1);
+                            let max_y = t_min.1.max(t_max.1);
+
+                            let max_radius = 4;
+                            let final_min_x = min_x.max(tx.saturating_sub(max_radius));
+                            let final_max_x = max_x.min(tx + max_radius);
+                            let final_min_y = min_y.max(ty.saturating_sub(max_radius));
+                            let final_max_y = max_y.min(ty + max_radius);
+
+                            for x_idx in final_min_x..=final_max_x {
+                                for y_idx in final_min_y..=final_max_y {
+                                    visible_keys.insert(format!("{}/{}/{}", tile_zoom, x_idx, y_idx));
+                                }
+                            }
+                        }
+
+                        if visible_keys.is_empty() {
+                            visible_keys.insert(format!("{}/{}/{}", tile_zoom, tx, ty));
+                        }
+
+                        // Sync loaded tiles from GeoServer source to GPU textures
+                        if let Some(ref source) = geoserver_source {
+                            let keys = source.get_cached_keys();
+                            for key in keys {
+                                if visible_keys.contains(&key) {
+                                    let parts: Vec<&str> = key.split('/').collect();
+                                    if parts.len() == 3 {
+                                        if let (Ok(z), Ok(x), Ok(y)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>(), parts[2].parse::<u32>()) {
+                                            if let Some(pixels) = source.get_tile_pixels(x, y, z) {
+                                                gpu_pipeline.upload_raster_tile(&device, &queue, &key, &pixels, x, y, z, &controller);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
                         // Update View-Projection Matrix
                         let view_proj_matrix = if controller.view_mode == "3D" {
                             controller.camera.get_3d_view_proj_matrix().unwrap_or([0.0; 16])
@@ -259,6 +402,7 @@ fn main() {
                                                 controller.view_mode = "3D".to_string();
                                             }
                                             gpu_pipeline.rebuild_grid_buffers(&controller, &device, &queue);
+                                            gpu_pipeline.rebuild_raster_tile_buffers(&device, &controller);
                                             controller.trigger_active();
                                         }
                                     });
@@ -267,6 +411,109 @@ fn main() {
                                     ui.label("Layer Toggles:");
                                     ui.checkbox(&mut layer_manager.show_grid, "Show Geodetic Grid");
                                     ui.checkbox(&mut layer_manager.show_targets, "Show Radar Targets");
+                                    ui.checkbox(&mut layer_manager.show_terrain, "Show Raster Map");
+
+                                    ui.separator();
+                                    ui.collapsing("🗺️ GeoServer WMTS Connection", |ui| {
+                                        ui.horizontal(|ui| {
+                                            ui.label("Base URL:");
+                                            ui.text_edit_singleline(&mut geoserver_url);
+                                        });
+                                        ui.horizontal(|ui| {
+                                            ui.label("Layer:");
+                                            ui.text_edit_singleline(&mut geoserver_layer);
+                                        });
+
+                                        if geoserver_source.is_none() {
+                                            if ui.button("⚡ Connect / Register WMTS").clicked() {
+                                                let source = controller.create_geoserver_source("geoserver", &geoserver_url, &geoserver_layer);
+                                                let _ = map_data_stack.register_source(Box::new(source.clone()));
+                                                geoserver_source = Some(source);
+                                            }
+                                        } else {
+                                            ui.colored_label(egui::Color32::from_rgb(0, 230, 118), "✓ Registered in MapDataStack");
+                                            
+                                            ui.separator();
+                                            
+                                            // Tile settings
+                                            ui.horizontal(|ui| {
+                                                ui.label("Zoom Level:");
+                                                ui.add(egui::Slider::new(&mut tile_zoom, 0..=18));
+                                            });
+
+                                            // Calculate current tile coordinates based on camera center
+                                            let center_lat = controller.camera.center.lat;
+                                            let center_lon = controller.camera.center.lon;
+                                            let (tx, ty) = latlon_to_tile(center_lat, center_lon, tile_zoom);
+
+                                            ui.label("Centered Tile (OSM/WMTS):");
+                                            ui.label(format!("  • Matrix Set: EPSG:900913"));
+                                            ui.label(format!("  • TileMatrix: EPSG:900913:{}", tile_zoom));
+                                            ui.label(format!("  • TileCol (X): {}", tx));
+                                            ui.label(format!("  • TileRow (Y): {}", ty));
+                                            ui.checkbox(&mut auto_fetch_tiles, "Auto-Request visible tiles");
+
+                                            let source = geoserver_source.as_ref().unwrap();
+                                            
+                                            if auto_fetch_tiles {
+                                                for key in &visible_keys {
+                                                    let parts: Vec<&str> = key.split('/').collect();
+                                                    if parts.len() == 3 {
+                                                        if let (Ok(z), Ok(x), Ok(y)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>(), parts[2].parse::<u32>()) {
+                                                            source.load_tile(x, y, z);
+                                                        }
+                                                    }
+                                                }
+                                            }
+
+                                            ui.horizontal(|ui| {
+                                                if ui.button("📥 Request Visible Tiles").clicked() {
+                                                    for key in &visible_keys {
+                                                        let parts: Vec<&str> = key.split('/').collect();
+                                                        if parts.len() == 3 {
+                                                            if let (Ok(z), Ok(x), Ok(y)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>(), parts[2].parse::<u32>()) {
+                                                                source.load_tile(x, y, z);
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                                if ui.button("🗑 Clear Cache").clicked() {
+                                                    let mut source_mut = source.clone();
+                                                    source_mut.clear_cache();
+                                                    egui_tile_textures.clear();
+                                                    gpu_pipeline.clear_raster_tiles();
+                                                }
+                                            });
+
+                                            // Check tile status
+                                            let tile_key = format!("{}/{}/{}", tile_zoom, tx, ty);
+                                            let is_loaded = source.get_tile_pixels(tx, ty, tile_zoom).is_some();
+
+                                            if is_loaded {
+                                                ui.colored_label(egui::Color32::from_rgb(0, 230, 118), "Status: Loaded in Memory");
+                                                
+                                                // Load into egui texture if not already done
+                                                let texture = egui_tile_textures.entry(tile_key.clone()).or_insert_with(|| {
+                                                    let pixels = source.get_tile_pixels(tx, ty, tile_zoom).unwrap();
+                                                    egui_ctx.load_texture(
+                                                        format!("tile_{}", tile_key),
+                                                        egui::ColorImage::from_rgba_unmultiplied([256, 256], &pixels),
+                                                        Default::default()
+                                                    )
+                                                });
+                                                
+                                                // Draw the tile preview
+                                                ui.separator();
+                                                ui.label("Preview (256x256):");
+                                                ui.image(&*texture);
+                                            } else {
+                                                ui.colored_label(egui::Color32::from_rgb(255, 179, 0), "Status: Idle / Loading...");
+                                            }
+
+                                            ui.separator();
+                                            ui.label(format!("Memory Cache size: {} tiles", source.cache_size()));
+                                        }
+                                    });
 
                                     ui.separator();
                                     if ui.button("🛰️ Inject Radar Target").clicked() {
@@ -452,10 +699,15 @@ fn main() {
                                 occlusion_query_set: None,
                             });
 
-                            // Draw Grid Lines in WGPU
-                            if layer_manager.show_grid {
-                                gpu_pipeline.render(&mut render_pass);
-                            }
+                             // Draw Raster Map Tiles in WGPU
+                             if layer_manager.show_terrain {
+                                 gpu_pipeline.render_raster_tiles(&mut render_pass, &visible_keys);
+                             }
+
+                             // Draw Grid Lines in WGPU
+                             if layer_manager.show_grid {
+                                 gpu_pipeline.render(&mut render_pass);
+                             }
 
                             // Draw egui UI overlay
                             egui_renderer.render(&mut render_pass, &paint_jobs, &screen_descriptor);
