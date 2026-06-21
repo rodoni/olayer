@@ -1,11 +1,15 @@
 use std::collections::HashMap;
 use crate::geodesy::{Ellipsoid, GeodeticSolver, HaversineSolver, VincentySolver};
 use crate::interpolator::errors::InterpolatorError;
-use crate::interpolator::state::{TargetState, InterpolatedTarget};
+use crate::interpolator::state::{InterpolatedTarget, TargetState};
 
 pub struct InterpolationEngine {
     targets: HashMap<String, TargetState>,
     stale_threshold: f64,
+    // Cached solver/ellipsoid instances to avoid reconstructing them every frame.
+    vincenty: VincentySolver,
+    haversine: HaversineSolver,
+    ellipsoid: Ellipsoid,
 }
 
 impl InterpolationEngine {
@@ -16,6 +20,9 @@ impl InterpolationEngine {
         Self {
             targets: HashMap::new(),
             stale_threshold: 30.0,
+            vincenty: VincentySolver,
+            haversine: HaversineSolver,
+            ellipsoid: Ellipsoid::wgs84(),
         }
     }
 
@@ -26,6 +33,9 @@ impl InterpolationEngine {
         Self {
             targets: HashMap::new(),
             stale_threshold,
+            vincenty: VincentySolver,
+            haversine: HaversineSolver,
+            ellipsoid: Ellipsoid::wgs84(),
         }
     }
 
@@ -61,9 +71,6 @@ impl InterpolationEngine {
     #[inline]
     pub fn interpolate_all(&self, current_time: f64) -> Result<Vec<InterpolatedTarget>, InterpolatorError> {
         let mut results = Vec::with_capacity(self.targets.len());
-        let vincenty = VincentySolver;
-        let haversine = HaversineSolver;
-        let wgs84 = Ellipsoid::wgs84();
 
         for (id, state) in &self.targets {
             let dt = current_time - state.last_ping_time;
@@ -82,10 +89,10 @@ impl InterpolationEngine {
             let dist = state.speed_mps * dt;
             let next_pos = if dist > 0.0 {
                 // Try VincentySolver first, fallback to HaversineSolver if it fails
-                match vincenty.direct(&state.last_position, state.track_heading_rad, dist, &wgs84) {
+                match self.vincenty.direct(&state.last_position, state.track_heading_rad, dist, &self.ellipsoid) {
                     Ok(pos) => pos,
                     Err(_) => {
-                        haversine.direct(&state.last_position, state.track_heading_rad, dist, &wgs84)?
+                        self.haversine.direct(&state.last_position, state.track_heading_rad, dist, &self.ellipsoid)?
                     }
                 }
             } else {

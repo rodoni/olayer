@@ -262,3 +262,77 @@ fn test_view_projection_matrix() {
     assert!(ndc_top[0].abs() < 1e-4);
     assert!((ndc_top[1] - 1.0).abs() < 1e-4);
 }
+
+#[test]
+fn test_stereographic_update_center() {
+    let ellipsoid = Ellipsoid::wgs84();
+    let mut stereo = Stereographic::new(0.0, 0.0, ellipsoid);
+
+    // Initial center projects to (0, 0)
+    let origin = LatLon::new(0.0, 0.0, 0.0);
+    let (x, y) = stereo.project(&origin).unwrap();
+    assert!(x.abs() < 1e-6);
+    assert!(y.abs() < 1e-6);
+
+    // Update center to a new location (e.g. São Paulo)
+    let sp_lat = -23.5505_f64.to_radians();
+    let sp_lon = -46.6333_f64.to_radians();
+    stereo.update_center(sp_lat, sp_lon);
+
+    // Old center (0, 0) should now NOT project to (0, 0)
+    let (x_old, y_old) = stereo.project(&origin).unwrap();
+    assert!(x_old.abs() > 1000.0 || y_old.abs() > 1000.0);
+
+    // New center should now project to (0, 0)
+    let sp_origin = LatLon::new(sp_lat, sp_lon, 0.0);
+    let (x_new, y_new) = stereo.project(&sp_origin).unwrap();
+    assert!(x_new.abs() < 1e-6);
+    assert!(y_new.abs() < 1e-6);
+
+    // Verify roundtrip for some points in the new projection
+    let test_points = vec![
+        LatLon::from_degrees(-23.5505, -46.6333, 0.0), // Center
+        LatLon::from_degrees(-23.4505, -46.5333, 0.0), // Near
+    ];
+    check_roundtrip(&stereo, &test_points);
+}
+
+#[test]
+fn test_lcc_update_center() {
+    let ellipsoid = Ellipsoid::wgs84();
+    let mut lcc = LambertConformalConic::new(
+        33.0_f64.to_radians(),
+        45.0_f64.to_radians(),
+        0.0_f64.to_radians(),
+        -96.0_f64.to_radians(),
+        ellipsoid,
+    );
+
+    // Initial center projects to (0, rho_0 - rho_0) = (0, 0)
+    let origin = LatLon::new(0.0_f64.to_radians(), -96.0_f64.to_radians(), 0.0);
+    let (x, y) = lcc.project(&origin).unwrap();
+    assert!(x.abs() < 1e-6);
+    assert!(y.abs() < 1e-6);
+
+    // Update center to São Paulo
+    let sp_lat = -23.5505_f64.to_radians();
+    let sp_lon = -46.6333_f64.to_radians();
+    lcc.update_center(sp_lat, sp_lon);
+
+    // Old center should no longer project to (0, 0)
+    let (x_old, y_old) = lcc.project(&origin).unwrap();
+    assert!(x_old.abs() > 1000.0 || y_old.abs() > 1000.0);
+
+    // New center should project to (0, 0)
+    let sp_origin = LatLon::new(sp_lat, sp_lon, 0.0);
+    let (x_new, y_new) = lcc.project(&sp_origin).unwrap();
+    assert!(x_new.abs() < 1e-6);
+    assert!(y_new.abs() < 1e-6);
+
+    // Roundtrip should still work after moving the center
+    let test_points = vec![
+        LatLon::from_degrees(-23.5505, -46.6333, 0.0),
+        LatLon::from_degrees(-23.4505, -46.5333, 0.0),
+    ];
+    check_roundtrip(&lcc, &test_points);
+}

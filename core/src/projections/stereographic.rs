@@ -49,6 +49,29 @@ impl Stereographic {
 
 impl Projection for Stereographic {
     #[inline]
+    fn update_center(&mut self, center_lat_rad: f64, center_lon_rad: f64) {
+        let a = self.ellipsoid.a;
+        let e_sq = self.ellipsoid.e_sq;
+        let e = self.e;
+
+        let phi_c = center_lat_rad;
+        let sin_phi_c = phi_c.sin();
+
+        // Conformal latitude of the origin (chi_c)
+        let t_c = (std::f64::consts::FRAC_PI_4 + phi_c / 2.0).tan()
+            * ((1.0 - e * sin_phi_c) / (1.0 + e * sin_phi_c)).powf(e / 2.0);
+        let chi_c = 2.0 * t_c.atan() - std::f64::consts::FRAC_PI_2;
+
+        // Radius of conformal sphere (R_c)
+        let r_c = (a * (1.0 - e_sq).sqrt()) / (1.0 - e_sq * sin_phi_c * sin_phi_c);
+
+        self.center_lat = phi_c;
+        self.center_lon = center_lon_rad;
+        self.chi_c = chi_c;
+        self.r_c = r_c;
+    }
+
+    #[inline]
     fn project(&self, lla: &LatLon) -> Result<(f64, f64), ProjectionError> {
         debug_assert!(lla.validate().is_ok(), "Invalid LLA in Stereographic::project: {lla:?}");
 

@@ -230,22 +230,30 @@ class GridLayer extends Layer {
   private renderer: WebGLRenderer;
   private projection: WasmProjection;
   private viewMode = "2D";
+  private lastVersion = 0;
 
   constructor(gl: WebGL2RenderingContext, projection: WasmProjection, viewMode = "2D") {
     super("static_grid");
     this.renderer = new WebGLRenderer(gl);
     this.projection = projection;
     this.viewMode = viewMode;
+    this.lastVersion = (projection as any).version ? (projection as any).version() : 0;
     this.renderer.rebuildGrid(this.projection, this.viewMode);
   }
 
   public updateProjection(newProjection: WasmProjection, viewMode: string): void {
     this.projection = newProjection;
     this.viewMode = viewMode;
+    this.lastVersion = (newProjection as any).version ? (newProjection as any).version() : 0;
     this.renderer.rebuildGrid(this.projection, this.viewMode);
   }
 
   public renderStatic(gl: WebGL2RenderingContext, viewProjMatrix: Float32Array): void {
+    const version = (this.projection as any).version ? (this.projection as any).version() : 0;
+    if (this.lastVersion !== version) {
+      this.renderer.rebuildGrid(this.projection, this.viewMode);
+      this.lastVersion = version;
+    }
     this.renderer.renderGrid(viewProjMatrix);
   }
 
@@ -1070,28 +1078,25 @@ async function start() {
   });
 
   // Pitch range input listener
+  // Pitch range input listener
   document.getElementById("pitchRange")?.addEventListener("input", (e) => {
     const val = parseFloat((e.target as HTMLInputElement).value);
-    (controller as any).setPitch(val * Math.PI / 180);
+    controller.setPitch(val * Math.PI / 180);
   });
 
   // Roll range input listener
   document.getElementById("rollRange")?.addEventListener("input", (e) => {
     const val = parseFloat((e.target as HTMLInputElement).value);
-    (controller as any).setRoll(val * Math.PI / 180);
+    controller.setRoll(val * Math.PI / 180);
   });
 
   // Reset Camera button listener
   document.getElementById("resetCameraBtn")?.addEventListener("click", () => {
     controller.setZoom(1.0);
     controller.setRotation(0.0);
-    if ((controller as any).setPitch) {
-      const defaultPitch = controller.getViewMode() === "2.5D" ? 35 * Math.PI / 180 : 0.0;
-      (controller as any).setPitch(defaultPitch);
-    }
-    if ((controller as any).setRoll) {
-      (controller as any).setRoll(0.0);
-    }
+    const defaultPitch = controller.getViewMode() === "2.5D" ? 35 * Math.PI / 180 : 0.0;
+    controller.setPitch(defaultPitch);
+    controller.setRoll(0.0);
     controller.setCenter(SP_LAT_RAD, SP_LON_RAD);
     controller.triggerActive();
   });
@@ -1134,8 +1139,8 @@ function syncCameraSliders() {
 
   const zoom = controller.getZoom();
   const rotation = controller.getRotation(); // in radians
-  const pitch = (controller as any).getPitch ? (controller as any).getPitch() : 0;
-  const roll = (controller as any).getRoll ? (controller as any).getRoll() : 0;
+  const pitch = controller.getPitch();
+  const roll = controller.getRoll();
 
   // Zoom
   const zoomRange = document.getElementById("zoomRange") as HTMLInputElement;

@@ -22,42 +22,62 @@ pub enum NavaidType {
 impl NavaidType {
     /// Parses the navaid type from a symbol code.
     fn from_code(code: &str) -> Option<Self> {
-        let lower = code.to_ascii_lowercase();
-        if lower.contains("vortac") || lower.contains("vor_tac") {
+        if ascii_contains_insensitive(code, "vortac") || ascii_contains_insensitive(code, "vor_tac") {
             return Some(NavaidType::VorTac);
         }
-        if lower.contains("vordme") || lower.contains("vor_dme") {
+        if ascii_contains_insensitive(code, "vordme") || ascii_contains_insensitive(code, "vor_dme") {
             return Some(NavaidType::VorDme);
         }
-        if lower.contains("vor") {
+        if ascii_contains_insensitive(code, "vor") {
             return Some(NavaidType::Vor);
         }
-        if lower.contains("tacan") {
+        if ascii_contains_insensitive(code, "tacan") {
             return Some(NavaidType::Tacan);
         }
-        if lower.contains("dme") {
+        if ascii_contains_insensitive(code, "dme") {
             return Some(NavaidType::Dme);
         }
-        if lower.contains("ndb") {
+        if ascii_contains_insensitive(code, "ndb") {
             return Some(NavaidType::Ndb);
         }
-        if lower.contains("heliport") || lower.contains("heli") {
+        if ascii_contains_insensitive(code, "heliport") || ascii_contains_insensitive(code, "heli") {
             return Some(NavaidType::Heliport);
         }
-        if lower.contains("airport") || lower.contains("aerodrome") || lower.contains("ad:") {
+        if ascii_contains_insensitive(code, "airport")
+            || ascii_contains_insensitive(code, "aerodrome")
+            || ascii_contains_insensitive(code, "ad:")
+        {
             return Some(NavaidType::Airport);
         }
-        if lower.contains("waypoint") || lower.contains("wpt") {
+        if ascii_contains_insensitive(code, "waypoint") || ascii_contains_insensitive(code, "wpt") {
             return Some(NavaidType::Waypoint);
         }
-        if lower.contains("intersection") || lower.contains("int:") {
+        if ascii_contains_insensitive(code, "intersection") || ascii_contains_insensitive(code, "int:") {
             return Some(NavaidType::Intersection);
         }
-        if lower.contains("runway") || lower.contains("threshold") {
+        if ascii_contains_insensitive(code, "runway") || ascii_contains_insensitive(code, "threshold") {
             return Some(NavaidType::RunwayThreshold);
         }
         None
     }
+}
+
+/// Case-insensitive substring search without allocating a lowercase copy.
+fn ascii_contains_insensitive(haystack: &str, needle: &str) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    if haystack.len() < needle.len() {
+        return false;
+    }
+    let needle_bytes = needle.as_bytes();
+    let haystack_bytes = haystack.as_bytes();
+    haystack_bytes.windows(needle_bytes.len()).any(|window| {
+        window
+            .iter()
+            .zip(needle_bytes.iter())
+            .all(|(h, n)| h.eq_ignore_ascii_case(n))
+    })
 }
 
 /// Procedural ICAO civil aviation symbology provider.

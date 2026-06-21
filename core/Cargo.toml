@@ -14,3 +14,19 @@ criterion = "0.5"
 [[bench]]
 name = "geodesy_benchmark"
 harness = false
+
+[[bench]]
+name = "projections_benchmark"
+harness = false
+
+[[bench]]
+name = "interpolator_benchmark"
+harness = false
+
+[[bench]]
+name = "terrain_benchmark"
+harness = false
+
+[[bench]]
+name = "symbol_benchmark"
+harness = false

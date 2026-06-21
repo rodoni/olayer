@@ -140,6 +140,7 @@ export class OlayerController {
   public setCenter(latRad: number, lonRad: number): void {
     this.centerLat = latRad;
     this.centerLon = lonRad;
+    this.projection.update_center(latRad, lonRad);
     this.triggerActive();
   }
 
@@ -231,19 +232,31 @@ export class OlayerController {
     return this.rotation;
   }
 
+  /**
+   * Gets the camera pitch angle in radians.
+   */
   public getPitch(): number {
     return this.pitch;
   }
 
+  /**
+   * Sets the camera pitch angle in radians.
+   */
   public setPitch(pitchRad: number): void {
     this.pitch = Math.max(-180 * Math.PI / 180, Math.min(180 * Math.PI / 180, pitchRad));
     this.triggerActive();
   }
 
+  /**
+   * Gets the camera roll angle in radians.
+   */
   public getRoll(): number {
     return this.roll;
   }
 
+  /**
+   * Sets the camera roll angle in radians.
+   */
   public setRoll(rollRad: number): void {
     this.roll = ((rollRad + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
     this.triggerActive();
@@ -387,6 +400,7 @@ export class OlayerController {
           this.centerLon = (this.centerLon - lonOffset) % (2 * Math.PI);
           // Clamp latitude to avoid pole singularity flip
           this.centerLat = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, this.centerLat + latOffset));
+          this.projection.update_center(this.centerLat, this.centerLon);
         }
         return;
       }
@@ -434,6 +448,7 @@ export class OlayerController {
         const lla = this.projection.unproject(newCx, newCy);
         this.centerLat = lla.lat;
         this.centerLon = lla.lon;
+        this.projection.update_center(lla.lat, lla.lon);
         lla.free();
       } catch (err) {
         console.error("Pan unproject failed:", err);

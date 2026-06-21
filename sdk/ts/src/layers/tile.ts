@@ -15,6 +15,7 @@ export class TileLayer extends Layer {
   // Cache de geometria WebGL para cada bloco (VAO e Vertex Buffer)
   private tileGeometries: Map<string, { vao: WebGLVertexArrayObject; vertexBuffer: WebGLBuffer }> = new Map();
   private lastProjection: WasmProjection | null = null;
+  private lastProjectionVersion = 0;
   private lastViewMode = "";
 
   // Resolvedores de Uniforms
@@ -289,10 +290,16 @@ export class TileLayer extends Layer {
 
     camera.free();
 
-    // Detecta mudança na projeção ativa ou modo de visualização para invalidar o cache
-    if (this.lastProjection !== projection || this.lastViewMode !== viewMode) {
+    // Detecta mudança na projeção ativa, sua versão (centro alterado) ou modo de visualização para invalidar o cache
+    const projVersion = projection ? (projection as any).version() : 0;
+    if (
+      this.lastProjection !== projection ||
+      this.lastProjectionVersion !== projVersion ||
+      this.lastViewMode !== viewMode
+    ) {
       this.clearGeometryCache(gl);
       this.lastProjection = projection;
+      this.lastProjectionVersion = projVersion;
       this.lastViewMode = viewMode;
     }
 

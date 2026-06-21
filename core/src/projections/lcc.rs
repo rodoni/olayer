@@ -82,6 +82,21 @@ impl LambertConformalConic {
 
 impl Projection for LambertConformalConic {
     #[inline]
+    fn update_center(&mut self, center_lat_rad: f64, center_lon_rad: f64) {
+        self.origin_lat = center_lat_rad;
+        self.origin_lon = center_lon_rad;
+
+        let phi0 = center_lat_rad;
+        let sin_phi0 = phi0.sin();
+        let e = self.e;
+
+        let t0 = (std::f64::consts::FRAC_PI_4 - phi0 / 2.0).tan()
+            * ((1.0 + e * sin_phi0) / (1.0 - e * sin_phi0)).powf(self.e / 2.0);
+
+        self.rho_0 = self.ellipsoid.a * self.f_c * t0.powf(self.n);
+    }
+
+    #[inline]
     fn project(&self, lla: &LatLon) -> Result<(f64, f64), ProjectionError> {
         debug_assert!(lla.validate().is_ok(), "Invalid LLA in LCC::project: {lla:?}");
 

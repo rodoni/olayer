@@ -31,43 +31,34 @@ impl DtedTile {
             ));
         }
 
-        // Parse southwest origin coordinates
-        let lon_str = String::from_utf8_lossy(&data[4..12]);
-        let lat_str = String::from_utf8_lossy(&data[12..20]);
-
-        let parsed_lon = parse_uhl_lon(&lon_str).map_err(|e| {
-            TerrainError::InvalidHeader(format!("Failed to parse origin longitude '{lon_str}': {e}"))
+        // Parse southwest origin coordinates (avoid allocations by parsing byte slices)
+        let parsed_lon = parse_uhl_lon(&data[4..12]).map_err(|e| {
+            TerrainError::InvalidHeader(format!("Failed to parse origin longitude: {e}"))
         })?;
 
-        let parsed_lat = parse_uhl_lat(&lat_str).map_err(|e| {
-            TerrainError::InvalidHeader(format!("Failed to parse origin latitude '{lat_str}': {e}"))
+        let parsed_lat = parse_uhl_lat(&data[12..20]).map_err(|e| {
+            TerrainError::InvalidHeader(format!("Failed to parse origin latitude: {e}"))
         })?;
 
         let origin_lon = parsed_lon.floor() as i32;
         let origin_lat = parsed_lat.floor() as i32;
 
         // Parse grid dimensions
-        let num_cols_str = String::from_utf8_lossy(&data[47..51]);
-        let num_rows_str = String::from_utf8_lossy(&data[51..55]);
-
-        let num_cols = num_cols_str.trim().parse::<usize>().map_err(|e| {
-            TerrainError::InvalidHeader(format!("Invalid column count '{num_cols_str}': {e}"))
+        let num_cols = parse_ascii_usize(&data[47..51]).map_err(|e| {
+            TerrainError::InvalidHeader(format!("Invalid column count: {e}"))
         })?;
 
-        let num_rows = num_rows_str.trim().parse::<usize>().map_err(|e| {
-            TerrainError::InvalidHeader(format!("Invalid row count '{num_rows_str}': {e}"))
+        let num_rows = parse_ascii_usize(&data[51..55]).map_err(|e| {
+            TerrainError::InvalidHeader(format!("Invalid row count: {e}"))
         })?;
 
         // Parse grid spacing (arc-seconds)
-        let lat_spacing_str = String::from_utf8_lossy(&data[20..24]);
-        let lon_spacing_str = String::from_utf8_lossy(&data[24..28]);
-
-        let lat_spacing_arcsec = lat_spacing_str.trim().parse::<u32>().map_err(|e| {
-            TerrainError::InvalidHeader(format!("Invalid latitude spacing '{lat_spacing_str}': {e}"))
+        let lat_spacing_arcsec = parse_ascii_u32(&data[20..24]).map_err(|e| {
+            TerrainError::InvalidHeader(format!("Invalid latitude spacing: {e}"))
         })?;
 
-        let lon_spacing_arcsec = lon_spacing_str.trim().parse::<u32>().map_err(|e| {
-            TerrainError::InvalidHeader(format!("Invalid longitude spacing '{lon_spacing_str}': {e}"))
+        let lon_spacing_arcsec = parse_ascii_u32(&data[24..28]).map_err(|e| {
+            TerrainError::InvalidHeader(format!("Invalid longitude spacing: {e}"))
         })?;
 
         // Each data column: 1 sentinel + 3 lon idx + 3 lat idx + num_rows * 2 bytes + 4 checksum
@@ -126,54 +117,108 @@ impl DtedTile {
     }
 }
 
-fn parse_uhl_lon(s: &str) -> Result<f64, String> {
-    let s = s.trim();
-    if s.is_empty() {
+/// Parses an ASCII unsigned integer from a byte slice, ignoring leading/trailing spaces.
+fn parse_ascii_u32(bytes: &[u8]) -> Result<u32, String> {
+    let mut val: u32 = 0;
+    let mut started = false;
+    for &b in bytes {
+        if b == b' ' {
+            if started {
+                break;
+            }
+            continue;
+        }
+        if b.is_ascii_digit() {
+            started = true;
+            val = val.checked_mul(10).ok_or("u32 overflow")?;
+            val = val.checked_add((b - b'0') as u32).ok_or("u32 overflow")?;
+        } else {
+            return Err(format!("Invalid digit: {}", b as char));
+        }
+    }
+    if started {
+        Ok(val)
+    } else {
+        Err("Empty number".to_string())
+    }
+}
+
+/// Parses an ASCII usize from a byte slice, ignoring leading/trailing spaces.
+fn parse_ascii_usize(bytes: &[u8]) -> Result<usize, String> {
+    parse_ascii_u32(bytes).map(|v| v as usize)
+}
+
+/// Parses a floating-point value from an ASCII byte slice, ignoring spaces.
+fn parse_ascii_f64(bytes: &[u8]) -> Result<f64, String> {
+    let s = std::str::from_utf8(bytes).map_err(|e| e.to_string())?;
+    s.trim().parse::<f64>().map_err(|e| e.to_string())
+}
+
+/// Parses a DTED UHL longitude field from raw bytes.
+///
+/// Expected formats: `DDDMMSSH` or decimal degrees followed by `E`/`W`.
+fn parse_uhl_lon(bytes: &[u8]) -> Result<f64, String> {
+    let bytes = trim_ascii(bytes);
+    if bytes.is_empty() {
         return Err("Empty string".to_string());
     }
-    let (num_part, dir_char) = s.split_at(s.len() - 1);
-    let dir = dir_char.to_uppercase();
-    let val = if num_part.contains('.') {
-        num_part.parse::<f64>().map_err(|e| e.to_string())?
+    let dir = bytes[bytes.len() - 1];
+    let num_part = &bytes[..bytes.len() - 1];
+
+    let val = if num_part.contains(&b'.') {
+        parse_ascii_f64(num_part)?
     } else if num_part.len() >= 7 {
-        let deg = num_part[0..3].parse::<f64>().map_err(|e| e.to_string())?;
-        let min = num_part[3..5].parse::<f64>().map_err(|e| e.to_string())?;
-        let sec = num_part[5..7].parse::<f64>().map_err(|e| e.to_string())?;
+        let deg = parse_ascii_f64(&num_part[0..3])?;
+        let min = parse_ascii_f64(&num_part[3..5])?;
+        let sec = parse_ascii_f64(&num_part[5..7])?;
         deg + min / 60.0 + sec / 3600.0
     } else if num_part.len() >= 3 {
-        num_part.parse::<f64>().map_err(|e| e.to_string())?
+        parse_ascii_f64(num_part)?
     } else {
-        return Err(format!("Invalid number format: {num_part}"));
+        return Err("Invalid number format".to_string());
     };
-    if dir == "W" || dir == "S" {
+
+    if dir == b'W' || dir == b'w' || dir == b'S' || dir == b's' {
         Ok(-val)
     } else {
         Ok(val)
     }
 }
 
-fn parse_uhl_lat(s: &str) -> Result<f64, String> {
-    let s = s.trim();
-    if s.is_empty() {
+/// Parses a DTED UHL latitude field from raw bytes.
+///
+/// Expected formats: `DDMMSSH` or decimal degrees followed by `N`/`S`.
+fn parse_uhl_lat(bytes: &[u8]) -> Result<f64, String> {
+    let bytes = trim_ascii(bytes);
+    if bytes.is_empty() {
         return Err("Empty string".to_string());
     }
-    let (num_part, dir_char) = s.split_at(s.len() - 1);
-    let dir = dir_char.to_uppercase();
-    let val = if num_part.contains('.') {
-        num_part.parse::<f64>().map_err(|e| e.to_string())?
+    let dir = bytes[bytes.len() - 1];
+    let num_part = &bytes[..bytes.len() - 1];
+
+    let val = if num_part.contains(&b'.') {
+        parse_ascii_f64(num_part)?
     } else if num_part.len() >= 6 {
-        let deg = num_part[0..2].parse::<f64>().map_err(|e| e.to_string())?;
-        let min = num_part[2..4].parse::<f64>().map_err(|e| e.to_string())?;
-        let sec = num_part[4..6].parse::<f64>().map_err(|e| e.to_string())?;
+        let deg = parse_ascii_f64(&num_part[0..2])?;
+        let min = parse_ascii_f64(&num_part[2..4])?;
+        let sec = parse_ascii_f64(&num_part[4..6])?;
         deg + min / 60.0 + sec / 3600.0
     } else if num_part.len() >= 2 {
-        num_part.parse::<f64>().map_err(|e| e.to_string())?
+        parse_ascii_f64(num_part)?
     } else {
-        return Err(format!("Invalid number format: {num_part}"));
+        return Err("Invalid number format".to_string());
     };
-    if dir == "W" || dir == "S" {
+
+    if dir == b'W' || dir == b'w' || dir == b'S' || dir == b's' {
         Ok(-val)
     } else {
         Ok(val)
     }
+}
+
+/// Trims leading and trailing ASCII whitespace from a byte slice.
+fn trim_ascii(bytes: &[u8]) -> &[u8] {
+    let start = bytes.iter().position(|&b| b != b' ').unwrap_or(bytes.len());
+    let end = bytes.iter().rposition(|&b| b != b' ').map(|i| i + 1).unwrap_or(bytes.len());
+    &bytes[start..end]
 }

@@ -25,6 +25,10 @@ pub trait Projection {
     /// Unprojects 2D plane coordinates (x, y) in meters back to geodetic coordinates (LLA).
     fn unproject(&self, x: f64, y: f64) -> Result<LatLon, ProjectionError>;
 
+    /// Dynamically updates the center of projection (point of tangency) if supported.
+    #[inline]
+    fn update_center(&mut self, _center_lat_rad: f64, _center_lon_rad: f64) {}
+
     /// Generates a View-Projection matrix 4x4 (column-major `[f32; 16]`) for the given [`CameraState`].
     ///
     /// This default implementation is valid for all planar projections. Individual

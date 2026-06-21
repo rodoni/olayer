@@ -234,6 +234,7 @@ pub struct WasmProjection {
     lcc_origin_lon: f64,
     stereo_center_lat: f64,
     stereo_center_lon: f64,
+    version: u32,
 }
 
 #[wasm_bindgen]
@@ -248,6 +249,7 @@ impl WasmProjection {
             lcc_origin_lon: origin_lon,
             stereo_center_lat: 0.0,
             stereo_center_lon: 0.0,
+            version: 0,
         }
     }
 
@@ -261,6 +263,7 @@ impl WasmProjection {
             lcc_origin_lon: 0.0,
             stereo_center_lat: center_lat,
             stereo_center_lon: center_lon,
+            version: 0,
         }
     }
 
@@ -274,7 +277,22 @@ impl WasmProjection {
             lcc_origin_lon: 0.0,
             stereo_center_lat: 0.0,
             stereo_center_lon: 0.0,
+            version: 0,
         }
+    }
+
+    #[wasm_bindgen]
+    pub fn version(&self) -> u32 {
+        self.version
+    }
+
+    #[wasm_bindgen]
+    pub fn update_center(&mut self, center_lat: f64, center_lon: f64) {
+        self.stereo_center_lat = center_lat;
+        self.stereo_center_lon = center_lon;
+        self.lcc_origin_lat = center_lat;
+        self.lcc_origin_lon = center_lon;
+        self.version += 1;
     }
 
     fn get_projection(&self) -> Box<dyn Projection> {

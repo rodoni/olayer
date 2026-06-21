@@ -2,11 +2,12 @@
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Ellipsoid {
-    pub a: f64,          // Semi-major axis in meters
-    pub b: f64,          // Semi-minor axis in meters
-    pub f: f64,          // Flattening
-    pub e_sq: f64,       // First eccentricity squared
-    pub e_prime_sq: f64, // Second eccentricity squared
+    pub a: f64,                   // Semi-major axis in meters
+    pub b: f64,                   // Semi-minor axis in meters
+    pub f: f64,                   // Flattening
+    pub e_sq: f64,                // First eccentricity squared
+    pub e_prime_sq: f64,          // Second eccentricity squared
+    pub authalic_radius: f64,     // Authalic (mean) spherical radius for Haversine approximations
 }
 
 impl Ellipsoid {
@@ -16,12 +17,16 @@ impl Ellipsoid {
         let b = a * (1.0 - f);
         let e_sq = f * (2.0 - f);
         let e_prime_sq = e_sq / (1.0 - e_sq);
+        // Authalic radius: radius of a sphere with the same surface area as the ellipsoid.
+        // Approximation used for spherical distance formulas (Haversine).
+        let authalic_radius = (2.0 * a + b) / 3.0;
         Self {
             a,
             b,
             f,
             e_sq,
             e_prime_sq,
+            authalic_radius,
         }
     }
 

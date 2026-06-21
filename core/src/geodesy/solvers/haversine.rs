@@ -15,14 +15,6 @@ impl Default for HaversineSolver {
     }
 }
 
-impl HaversineSolver {
-    /// Helper to calculate the spherical radius from the ellipsoid.
-    #[inline]
-    fn spherical_radius(&self, ellipsoid: &Ellipsoid) -> f64 {
-        (2.0 * ellipsoid.a + ellipsoid.b) / 3.0
-    }
-}
-
 impl GeodeticSolver for HaversineSolver {
     const IS_ELLIPSOIDAL: bool = false;
     const EXPECTED_ACCURACY_METERS: f64 = 1.0;
@@ -44,8 +36,7 @@ impl GeodeticSolver for HaversineSolver {
         let a = (dlat / 2.0).sin().powi(2) + lat1.cos() * lat2.cos() * (dlon / 2.0).sin().powi(2);
         let c = 2.0 * a.sqrt().asin();
 
-        let r = self.spherical_radius(ellipsoid);
-        let distance = r * c;
+        let distance = ellipsoid.authalic_radius * c;
 
         // Initial bearing
         let y = dlon.sin() * lat2.cos();
@@ -65,8 +56,7 @@ impl GeodeticSolver for HaversineSolver {
         debug_assert!(p1.validate().is_ok(), "Invalid start coordinate in Haversine::direct: {p1:?}");
         let lat1 = p1.lat;
         let lon1 = p1.lon;
-        let r = self.spherical_radius(ellipsoid);
-        let ad = distance_meters / r; // angular distance
+        let ad = distance_meters / ellipsoid.authalic_radius; // angular distance
 
         let lat2 = (lat1.sin() * ad.cos() + lat1.cos() * ad.sin() * bearing_rad.cos()).asin();
         let y = bearing_rad.sin() * ad.sin() * lat1.cos();

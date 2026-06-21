@@ -6,33 +6,44 @@ The architecture is multi-language, combining a high-performance, geodetically p
 
 ---
 
-## 🛠️ Repository Architecture
+## Repository Architecture
 
 The project is structured as a monorepo containing the following components:
 
 ```text
-├── core/                  # Pure Rust Core (Agnostic & Mathematical Engine)
+├── core/                      # Pure Rust Core (Agnostic & Mathematical Engine)
 │   ├── src/
-│   │   ├── geodesy/       # Geodetic formulas, WGS84 ellipsoid, and ECEF coordinates
-│   │   ├── camera/        # CameraState and View-Projection matrix generators for 2D/2.5D/3D
-│   │   ├── terrain/       # DTED file parsing and O(1) elevation query indexing
-│   │   ├── sld/           # Styled Layer Descriptor (SLD) XML rules parser
-│   │   └── projections/   # Cartographic projections (Stereographic, LCC, Mercator)
-│   └── benches/           # Performance benchmarks (geodesy, projections)
+│   │   ├── geodesy/           # Geodetic formulas, WGS84 ellipsoid, and ECEF coordinates
+│   │   ├── camera/            # CameraState and View-Projection matrix generators for 2D/2.5D/3D
+│   │   ├── terrain/           # DTED file parsing and O(1) elevation query indexing
+│   │   ├── sld/               # Styled Layer Descriptor (SLD) XML rules parser
+│   │   ├── symbol_registry/   # Pluggable symbology resolver (NATO / ICAO / declarative JSON)
+│   │   └── projections/       # Cartographic projections (Stereographic, LCC, Mercator)
+│   └── benches/               # Performance benchmarks (geodesy, projections)
 │
-├── bindings/
-│   ├── wasm/              # WebAssembly bridge (wasm-bindgen) exposing Core to TypeScript
-│   └── c_ffi/             # Native C/FFI bindings for native desktop integrations
+├── sdk/
+│   ├── ts/                    # TypeScript Client SDK for Browsers (WebGL2 + Canvas 2D)
+│   │   ├── src/               # SDK source files (LayerManager, Controller, etc.)
+│   │   ├── demo/              # Interactive web demo application
+│   │   └── wasm/              # wasm-bindgen bridge exposing the Rust core to TypeScript
+│   │
+│   └── native/                # Native Desktop SDK and C-FFI
+│       ├── src/
+│       │   ├── c_ffi_bridge/  # C-FFI export layer (cbindgen)
+│       │   ├── native_controller/   # Native camera / interaction controller
+│       │   ├── native_layer_manager/# Native layer stack
+│       │   ├── native_map_data_stack/# Native tile/data source management
+│       │   ├── wgpu_cpu_vertex_pipeline/# CPU-side target projection (WGPU)
+│       │   └── wgpu_gpu_pipeline/    # GPU-side background/grid rendering (WGPU)
+│       └── demo/              # Native desktop demo application
 │
-└── sdk/
-    └── ts/                # TypeScript Client SDK for Browsers (WebGL2 + Canvas 2D)
-        ├── src/           # SDK source files (LayerManager, Controller, etc.)
-        └── demo/          # Interactive web demo application
+└── tools/
+    └── symbol-compiler/       # CLI tool that compiles SVG symbols to declarative JSON
 ```
 
 ---
 
-## ✨ Features
+## Features
 
 - **High-Precision Geodesy Engine:** All kinematic math, camera locations, and physical positions are calculated in double-precision 64-bit float (`f64`) on the WGS84 ellipsoid.
 - **Cartographic Projections:**
@@ -54,7 +65,7 @@ The project is structured as a monorepo containing the following components:
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
 
@@ -64,17 +75,17 @@ The project is structured as a monorepo containing the following components:
 
 ### 1. Build the WebAssembly Bindings
 
-Compile the Rust core into WebAssembly npm-ready package:
+Compile the Rust core into a WebAssembly npm-ready package. This step must be done **before** installing the TypeScript SDK dependencies.
 
 ```bash
 # Navigate to the WASM bindings directory
-cd bindings/wasm
+cd sdk/ts/wasm
 
 # Build the WebAssembly package
 wasm-pack build --target web
 ```
 
-This outputs a compiled package under `bindings/wasm/pkg` which the TypeScript SDK references.
+This outputs a compiled package under `sdk/ts/wasm/pkg` which the TypeScript SDK references.
 
 ### 2. Set Up the TypeScript SDK & Demo
 
@@ -82,7 +93,7 @@ Install dependencies and run the local development server:
 
 ```bash
 # Navigate to the TypeScript SDK directory
-cd ../../sdk/ts
+cd ..
 
 # Install project dependencies
 npm install
@@ -92,10 +103,32 @@ npm run dev
 ```
 
 By default, the Vite server will run at:
-👉 **`http://localhost:3000/demo/index.html`**
+`http://localhost:3000/demo/index.html`
+
+### 3. Build and run the Native Desktop Demo
+
+```bash
+# From the workspace root
+cargo run -p olayer-desktop-demo --release
+```
+
+Note: the desktop demo requires a GPU and a windowing system. It is excluded from the default test target because it cannot run headlessly.
 
 ---
 
-## 📜 License
+## Testing
+
+```bash
+# Rust unit tests (excludes the desktop demo which needs a display)
+cargo test --workspace --exclude olayer-desktop-demo
+
+# TypeScript SDK tests
+cd sdk/ts
+npm run test:run
+```
+
+---
+
+## License
 
 This project is licensed under the **BSD 2-Clause License**.

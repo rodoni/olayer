@@ -142,12 +142,14 @@ impl GeodeticSolver for VincentySolver {
 
         let distance = b * a_coeff * (sigma - delta_sigma);
 
-        let initial_bearing = normalize_bearing((cos_u2 * lambda.sin()).atan2(
-            cos_u1 * sin_u2 - sin_u1 * cos_u2 * lambda.cos(),
+        let final_sin_lambda = lambda.sin();
+        let final_cos_lambda = lambda.cos();
+        let initial_bearing = normalize_bearing((cos_u2 * final_sin_lambda).atan2(
+            cos_u1 * sin_u2 - sin_u1 * cos_u2 * final_cos_lambda,
         ));
 
-        let final_bearing = normalize_bearing((cos_u1 * lambda.sin()).atan2(
-            -sin_u1 * cos_u2 + cos_u1 * sin_u2 * lambda.cos(),
+        let final_bearing = normalize_bearing((cos_u1 * final_sin_lambda).atan2(
+            -sin_u1 * cos_u2 + cos_u1 * sin_u2 * final_cos_lambda,
         ));
 
         Ok(GeodeticResult::new(distance, initial_bearing, final_bearing))
@@ -180,6 +182,9 @@ impl GeodeticSolver for VincentySolver {
         let cos_u1 = u1.cos();
 
         let sigma1 = sin_u1.atan2(cos_u1 * cos_alpha1);
+        let two_sigma1 = 2.0 * sigma1;
+        let cos_two_sigma1 = two_sigma1.cos();
+        let sin_two_sigma1 = two_sigma1.sin();
         let sin_alpha = cos_u1 * sin_alpha1;
         let cos2_alpha = 1.0 - sin_alpha * sin_alpha;
 
@@ -198,9 +203,10 @@ impl GeodeticSolver for VincentySolver {
         for _ in 0..max_iterations {
             sigma_prev = sigma;
 
-            cos2_sigma_m = (2.0 * sigma1 + sigma).cos();
             let sin_sigma = sigma.sin();
             let cos_sigma = sigma.cos();
+            // cos(2*sigma1 + sigma) = cos(2*sigma1)cos(sigma) - sin(2*sigma1)sin(sigma)
+            cos2_sigma_m = cos_two_sigma1 * cos_sigma - sin_two_sigma1 * sin_sigma;
 
             let delta_sigma = b_coeff
                 * sin_sigma

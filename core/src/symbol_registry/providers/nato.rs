@@ -60,6 +60,41 @@ pub enum BattleDimension {
     Other,
 }
 
+/// Case-insensitive substring search without allocating a lowercase copy.
+fn ascii_contains_insensitive(haystack: &str, needle: &str) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    if haystack.len() < needle.len() {
+        return false;
+    }
+    let needle_bytes = needle.as_bytes();
+    let haystack_bytes = haystack.as_bytes();
+    haystack_bytes.windows(needle_bytes.len()).any(|window| {
+        window.iter().zip(needle_bytes.iter()).all(|(h, n)| {
+            h.to_ascii_lowercase() == *n || h == n
+        })
+    })
+}
+
+/// Strips a case-insensitive ASCII prefix from a string without allocating.
+fn strip_prefix_case_insensitive<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
+    let s_bytes = s.as_bytes();
+    let p_bytes = prefix.as_bytes();
+    if s_bytes.len() < p_bytes.len() {
+        return None;
+    }
+    if s_bytes[..p_bytes.len()]
+        .iter()
+        .zip(p_bytes.iter())
+        .all(|(a, b)| a.eq_ignore_ascii_case(b))
+    {
+        Some(&s[p_bytes.len()..])
+    } else {
+        None
+    }
+}
+
 /// A simplified NATO APP-6 / MIL-STD-2525 SIDC code parser.
 ///
 /// The provider accepts SIDC codes with the prefix `nato:` or `mil:` followed by
@@ -88,26 +123,27 @@ impl NatoProvider {
     /// digit at position 2 of a standard 15-char SIDC.
     fn parse_affiliation(code: &str) -> Affiliation {
         // Compact form: nato:friend:fighter  /  mil:hostile:armor
-        let lower = code.to_ascii_lowercase();
-        if lower.contains("friend") {
+        if ascii_contains_insensitive(code, "friend") {
             return Affiliation::Friend;
         }
-        if lower.contains("hostile") || lower.contains("enemy") {
+        if ascii_contains_insensitive(code, "hostile") || ascii_contains_insensitive(code, "enemy") {
             return Affiliation::Hostile;
         }
-        if lower.contains("neutral") {
+        if ascii_contains_insensitive(code, "neutral") {
             return Affiliation::Neutral;
         }
-        if lower.contains("unknown") {
+        if ascii_contains_insensitive(code, "unknown") {
             return Affiliation::Unknown;
         }
-        if lower.contains("pending") {
+        if ascii_contains_insensitive(code, "pending") {
             return Affiliation::Pending;
         }
 
         // Full 15-char SIDC: position 2 (index 1) encodes standard identity
         // Both digit (APP-6 style) and letter (MIL-STD-2525 style) codes are supported.
-        let sidc = code.strip_prefix("nato:").or_else(|| code.strip_prefix("mil:")).unwrap_or(code);
+        let sidc = strip_prefix_case_insensitive(code, "nato:")
+            .or_else(|| strip_prefix_case_insensitive(code, "mil:"))
+            .unwrap_or(code);
         if sidc.len() >= 15 {
             let c = sidc.as_bytes()[1];
             return match c {
@@ -127,26 +163,36 @@ impl NatoProvider {
 
     /// Parses the battle dimension from the SIDC code.
     fn parse_dimension(code: &str) -> BattleDimension {
-        let lower = code.to_ascii_lowercase();
-        if lower.contains("air") || lower.contains("fighter") || lower.contains("bomber") {
+        if ascii_contains_insensitive(code, "air")
+            || ascii_contains_insensitive(code, "fighter")
+            || ascii_contains_insensitive(code, "bomber")
+        {
             return BattleDimension::Air;
         }
-        if lower.contains("ground") || lower.contains("armor") || lower.contains("infantry") {
+        if ascii_contains_insensitive(code, "ground")
+            || ascii_contains_insensitive(code, "armor")
+            || ascii_contains_insensitive(code, "infantry")
+        {
             return BattleDimension::Ground;
         }
-        if lower.contains("surface") || lower.contains("ship") || lower.contains("naval") {
+        if ascii_contains_insensitive(code, "surface")
+            || ascii_contains_insensitive(code, "ship")
+            || ascii_contains_insensitive(code, "naval")
+        {
             return BattleDimension::Surface;
         }
-        if lower.contains("subsurface") || lower.contains("submarine") {
+        if ascii_contains_insensitive(code, "subsurface") || ascii_contains_insensitive(code, "submarine") {
             return BattleDimension::Subsurface;
         }
-        if lower.contains("space") || lower.contains("satellite") {
+        if ascii_contains_insensitive(code, "space") || ascii_contains_insensitive(code, "satellite") {
             return BattleDimension::Space;
         }
 
         // Full 15-char SIDC: position 3 (index 2) encodes battle dimension
         // Both digit and letter codes are supported.
-        let sidc = code.strip_prefix("nato:").or_else(|| code.strip_prefix("mil:")).unwrap_or(code);
+        let sidc = strip_prefix_case_insensitive(code, "nato:")
+            .or_else(|| strip_prefix_case_insensitive(code, "mil:"))
+            .unwrap_or(code);
         if sidc.len() >= 15 {
             let c = sidc.as_bytes()[2];
             return match c {

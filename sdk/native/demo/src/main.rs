@@ -128,6 +128,7 @@ fn main() {
     let mut geoserver_layer = "olayer:world_map".to_string();
     let mut geoserver_source: Option<GeoserverWmtsSource> = None;
     let mut tile_zoom: u32 = 10;
+    let mut auto_zoom = true;
     let mut auto_fetch_tiles = false;
     let mut egui_tile_textures: std::collections::HashMap<String, egui::TextureHandle> = std::collections::HashMap::new();
 
@@ -226,15 +227,24 @@ fn main() {
                         let current_time = start_time.elapsed().as_secs_f64();
                         let interpolated_targets = controller.interpolator.interpolate_all(current_time).unwrap_or_default();
 
+                        let aspect = controller.camera.aspect_ratio;
+                        let w_meters = controller.camera.viewport_base_meters / controller.camera.zoom;
+                        let h_meters = w_meters / aspect;
+
+                        // Dynamically adjust tile zoom based on camera viewport width to keep the resolution appropriate
+                        if auto_zoom {
+                            let c_earth = 40_075_016.0;
+                            // Target around 6 tiles across the screen width
+                            let target_tiles = 6.0;
+                            let z_ideal = ((target_tiles * c_earth) / w_meters).log2();
+                            tile_zoom = (z_ideal.round() as i32).clamp(0, 18) as u32;
+                        }
+
                         // Calculate visible tile keys in the viewport
                         let mut visible_keys = std::collections::HashSet::new();
                         let center_lat = controller.camera.center.lat;
                         let center_lon = controller.camera.center.lon;
                         let (tx, ty) = latlon_to_tile(center_lat, center_lon, tile_zoom);
-
-                        let aspect = controller.camera.aspect_ratio;
-                        let w_meters = controller.camera.viewport_base_meters / controller.camera.zoom;
-                        let h_meters = w_meters / aspect;
 
                         if controller.view_mode != "3D" {
                             if let Ok(cx_cy) = controller.projection.project(&controller.camera.center) {
@@ -281,7 +291,8 @@ fn main() {
                                     }
                                 }
 
-                                let max_radius = 4; // Max 9x9 grid to protect against massive downloads
+                                // Increase safety margin radius to 8 to cover wide screens / rotation without gaps
+                                let max_radius = 8;
                                 let final_min_x = min_x.max(tx.saturating_sub(max_radius));
                                 let final_max_x = max_x.min(tx + max_radius);
                                 let final_min_y = min_y.max(ty.saturating_sub(max_radius));
@@ -311,7 +322,8 @@ fn main() {
                             let min_y = t_min.1.min(t_max.1);
                             let max_y = t_min.1.max(t_max.1);
 
-                            let max_radius = 4;
+                            // Increase safety margin radius to 8 to cover wide screens / rotation without gaps
+                            let max_radius = 8;
                             let final_min_x = min_x.max(tx.saturating_sub(max_radius));
                             let final_max_x = max_x.min(tx + max_radius);
                             let final_min_y = min_y.max(ty.saturating_sub(max_radius));
@@ -388,10 +400,10 @@ fn main() {
                                         if projection_name != old_proj {
                                             if projection_name == "Stereographic" {
                                                 controller.view_mode = "2D".to_string();
-                                                controller.projection = Box::new(Stereographic::new(sp_lat, sp_lon, olayer_core::geodesy::ellipsoid::Ellipsoid::wgs84()));
+                                                controller.projection = Box::new(Stereographic::new(controller.camera.center.lat, controller.camera.center.lon, olayer_core::geodesy::ellipsoid::Ellipsoid::wgs84()));
                                             } else if projection_name == "LCC" {
                                                 controller.view_mode = "2D".to_string();
-                                                controller.projection = Box::new(LambertConformalConic::new(-20.0f64.to_radians(), -25.0f64.to_radians(), sp_lat, sp_lon, olayer_core::geodesy::ellipsoid::Ellipsoid::wgs84()));
+                                                controller.projection = Box::new(LambertConformalConic::new(-20.0f64.to_radians(), -25.0f64.to_radians(), controller.camera.center.lat, controller.camera.center.lon, olayer_core::geodesy::ellipsoid::Ellipsoid::wgs84()));
                                             } else if projection_name == "Mercator" {
                                                 controller.view_mode = "2D".to_string();
                                                 controller.projection = Box::new(WebMercator::new(olayer_core::geodesy::ellipsoid::Ellipsoid::wgs84()));
@@ -437,8 +449,13 @@ fn main() {
                                             
                                             // Tile settings
                                             ui.horizontal(|ui| {
-                                                ui.label("Zoom Level:");
-                                                ui.add(egui::Slider::new(&mut tile_zoom, 0..=18));
+                                                ui.checkbox(&mut auto_zoom, "Auto Zoom");
+                                                if !auto_zoom {
+                                                    ui.label("Zoom Level:");
+                                                    ui.add(egui::Slider::new(&mut tile_zoom, 0..=18));
+                                                } else {
+                                                    ui.label(format!("(Auto Level: {})", tile_zoom));
+                                                }
                                             });
 
                                             // Calculate current tile coordinates based on camera center
@@ -741,6 +758,7 @@ fn main() {
                                 } else {
                                     controller.camera.center.lon = (controller.camera.center.lon - dx as f64 * 0.005) % (2.0 * std::f64::consts::PI);
                                     controller.camera.center.lat = (controller.camera.center.lat + dy as f64 * 0.005).clamp(-std::f64::consts::FRAC_PI_2 + 0.01, std::f64::consts::FRAC_PI_2 - 0.01);
+                                    controller.projection.update_center(controller.camera.center.lat, controller.camera.center.lon);
                                 }
                             } else if controller.view_mode == "2.5D" && is_right_click_or_shift {
                                 controller.camera.rotation = (controller.camera.rotation - dx as f64 * 0.005) % (2.0 * std::f64::consts::PI);
@@ -766,6 +784,9 @@ fn main() {
 
                                     if let Ok(lla) = controller.projection.unproject(new_cx, new_cy) {
                                         controller.camera.center = lla;
+                                        controller.projection.update_center(lla.lat, lla.lon);
+                                        gpu_pipeline.rebuild_grid_buffers(&controller, &device, &queue);
+                                        gpu_pipeline.rebuild_raster_tile_buffers(&device, &controller);
                                     }
                                 }
                             }
