@@ -1,10 +1,11 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 use crate::geodesy::{Ellipsoid, GeodeticSolver, HaversineSolver, VincentySolver};
 use crate::interpolator::errors::InterpolatorError;
 use crate::interpolator::state::{InterpolatedTarget, TargetState};
 
 pub struct InterpolationEngine {
-    targets: HashMap<String, TargetState>,
+    targets: HashMap<Arc<str>, TargetState>,
     stale_threshold: f64,
     // Cached solver/ellipsoid instances to avoid reconstructing them every frame.
     vincenty: VincentySolver,
@@ -48,7 +49,7 @@ impl InterpolationEngine {
     #[inline]
     pub fn update_target(&mut self, state: TargetState) -> Result<(), InterpolatorError> {
         state.validate()?;
-        self.targets.insert(state.id.clone(), state);
+        self.targets.insert(Arc::clone(&state.id), state);
         Ok(())
     }
 

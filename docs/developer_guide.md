@@ -100,11 +100,16 @@ Gerencia o observador tridimensional do mapa e sua orientação.
     *   `get_3d_view_proj_matrix(&self) -> Result<[f32; 16], CameraError>` (Globo orbital 3D)
 
 ### 2.4. Motor de Terreno (`core::terrain`)
-Indexador espacial de dados de altimetria em formato **DTED** (Níveis 0, 1 ou 2).
+Indexador espacial de dados de altimetria em formato **DTED** (Níveis 0, 1 ou 2) com cache LRU.
 *   **[TerrainEngine](../core/src/terrain/mod.rs)**:
-    *   `pub fn new() -> Self`: Cria instância com cache vazio.
+    *   `pub fn new() -> Self`: Cria instância com cache LRU padrão de 64 tiles.
+    *   `pub fn with_capacity(capacity: usize) -> Self`: Cria instância com capacidade customizada.
+    *   `pub fn set_cache_capacity(&self, capacity: usize)`: Redimensiona o cache LRU.
+    *   `pub fn cache_size(&self) -> usize`: Retorna o número atual de tiles em cache.
+    *   `pub fn clear_cache(&self)`: Esvazia o cache.
     *   `pub fn load_tile(&mut self, data: &[u8]) -> Result<TileKey, TerrainError>`: Indexa em memória e em tempo constante $O(1)$ os dados de um arquivo DTED binário bruto.
-    *   `pub fn get_elevation(&self, lat_deg: f64, lon_deg: f64) -> Result<f64, TerrainError>`: Retorna a altitude exata usando interpolação bilinear a partir das quatro células de grade mais próximas.
+    *   `pub fn get_elevation(&self, lat_deg: f64, lon_deg: f64) -> Result<f64, TerrainError>`: Retorna a altitude exata usando interpolação bilinear a partir das quatro células de grade mais próximas (coordenadas em graus).
+    *   `pub fn get_elevation_rad(&self, lat_rad: f64, lon_rad: f64) -> Result<f64, TerrainError>`: Variação em radianos da consulta de altitude.
     *   `pub fn get_vertical_profile(&self, route: &[LatLon], step_meters: f64) -> Result<Vec<ProfilePoint>, TerrainError>`: Gera o perfil de corte vertical do terreno ao longo de uma rota proposta.
 
 ### 2.5. Registro de Simbologia Tática (`core::symbol_registry`)
@@ -205,7 +210,11 @@ struct C_InterpolatedTarget {
 TerrainEngine *olayer_terrain_engine_create(void);
 int olayer_terrain_engine_load_tile(TerrainEngine *engine, const uint8_t *data, uintptr_t length, int32_t *out_lat_deg, int32_t *out_lon_deg);
 int olayer_terrain_engine_get_elevation(TerrainEngine *engine, double lat_deg, double lon_deg, double *out_elevation);
+int olayer_terrain_engine_get_elevation_rad(TerrainEngine *engine, double lat_rad, double lon_rad, double *out_elevation);
 int olayer_terrain_engine_get_vertical_profile(TerrainEngine *engine, const double *route_lat, const double *route_lon, const double *route_height, uintptr_t route_len, double step_meters, struct C_ProfilePoint **out_profile, uintptr_t *out_count);
+void olayer_terrain_engine_set_cache_capacity(TerrainEngine *engine, uintptr_t capacity);
+uintptr_t olayer_terrain_engine_cache_size(TerrainEngine *engine);
+void olayer_terrain_engine_clear_cache(TerrainEngine *engine);
 void olayer_profile_points_free(struct C_ProfilePoint *points, uintptr_t count);
 void olayer_terrain_engine_free(TerrainEngine *engine);
 

@@ -1,5 +1,6 @@
 #![allow(clippy::too_many_arguments)]
 
+use std::sync::Arc;
 use olayer_core::geodesy::LatLon;
 use olayer_core::projections::{Projection, CameraState};
 use usvg::TreeParsing;
@@ -25,15 +26,15 @@ impl WgpuCpuVertexPipeline {
         &self,
         painter: &egui::Painter,
         targets: &[olayer_core::interpolator::InterpolatedTarget],
-        selected_target_id: &Option<String>,
+        selected_target_id: &Option<Arc<str>>,
         controller: &NativeController,
         view_proj_matrix: &[f32; 16],
         width: u32,
         height: u32,
-        simulated_speeds: &std::collections::HashMap<String, f64>,
+        simulated_speeds: &std::collections::HashMap<Arc<str>, f64>,
     ) {
         for t in targets {
-            let speed_mps = simulated_speeds.get(&t.id).copied().unwrap_or(0.0);
+            let speed_mps = simulated_speeds.get(t.id.as_ref()).copied().unwrap_or(0.0);
             if let Some(pos) = project_lla_to_screen(
                 t.position.lat,
                 t.position.lon,

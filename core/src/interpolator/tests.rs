@@ -1,11 +1,12 @@
 use super::*;
 use crate::geodesy::LatLon;
 use std::f64::consts::PI;
+use std::sync::Arc;
 
 #[test]
 fn test_state_validation() {
     let valid_state = TargetState {
-        id: "TGT1".to_string(),
+        id: Arc::from("TGT1"),
         last_position: LatLon::new(0.0, 0.0, 100.0),
         speed_mps: 100.0,
         track_heading_rad: PI / 2.0,
@@ -45,7 +46,7 @@ fn test_state_validation() {
 #[test]
 fn test_heading_boundary_2pi_accepted() {
     let state = TargetState {
-        id: "TGT2".to_string(),
+        id: Arc::from("TGT2"),
         last_position: LatLon::new(0.0, 0.0, 100.0),
         speed_mps: 0.0,
         track_heading_rad: 2.0 * PI,
@@ -59,7 +60,7 @@ fn test_heading_boundary_2pi_accepted() {
 fn test_engine_crud() {
     let mut engine = InterpolationEngine::new();
     let state = TargetState {
-        id: "TGT1".to_string(),
+        id: Arc::from("TGT1"),
         last_position: LatLon::new(0.0, 0.0, 100.0),
         speed_mps: 100.0,
         track_heading_rad: PI / 2.0,
@@ -80,7 +81,7 @@ fn test_horizontal_translation() {
     let speed = 250.0; // m/s
     
     let state = TargetState {
-        id: "ALVO1".to_string(),
+        id: Arc::from("ALVO1"),
         last_position: start_pos,
         speed_mps: speed,
         track_heading_rad: heading,
@@ -94,7 +95,7 @@ fn test_horizontal_translation() {
     let results = engine.interpolate_all(110.0).unwrap();
     assert_eq!(results.len(), 1);
     let target = &results[0];
-    assert_eq!(target.id, "ALVO1");
+    assert_eq!(target.id.as_ref(), "ALVO1");
 
     // Latitude should remain extremely close to the start since we headed due east
     assert!((target.position.lat - start_pos.lat).abs() < 1e-5);
@@ -109,7 +110,7 @@ fn test_vertical_rate_translation() {
     let start_pos = LatLon::from_degrees(0.0, 0.0, 1000.0);
     
     let state = TargetState {
-        id: "CLIMBER".to_string(),
+        id: Arc::from("CLIMBER"),
         last_position: start_pos,
         speed_mps: 0.0,
         track_heading_rad: 0.0,
@@ -129,7 +130,7 @@ fn test_vertical_rate_translation() {
 fn test_stale_targets_exclusion() {
     let mut engine = InterpolationEngine::with_stale_threshold(15.0);
     let state = TargetState {
-        id: "TGT1".to_string(),
+        id: Arc::from("TGT1"),
         last_position: LatLon::new(0.0, 0.0, 100.0),
         speed_mps: 10.0,
         track_heading_rad: 0.0,
@@ -152,7 +153,7 @@ fn test_stale_targets_exclusion() {
 fn test_negative_time_delta_skipped_not_aborted() {
     let mut engine = InterpolationEngine::with_stale_threshold(60.0);
     let bad_state = TargetState {
-        id: "BAD".to_string(),
+        id: Arc::from("BAD"),
         last_position: LatLon::new(0.0, 0.0, 100.0),
         speed_mps: 10.0,
         track_heading_rad: 0.0,
@@ -160,7 +161,7 @@ fn test_negative_time_delta_skipped_not_aborted() {
         last_ping_time: 100.0,
     };
     let good_state = TargetState {
-        id: "GOOD".to_string(),
+        id: Arc::from("GOOD"),
         last_position: LatLon::new(0.0, 0.0, 200.0),
         speed_mps: 10.0,
         track_heading_rad: 0.0,
@@ -176,7 +177,7 @@ fn test_negative_time_delta_skipped_not_aborted() {
     // GOOD has dt = 49.0s (active, within 60s threshold)
     let results = engine.interpolate_all(99.0).unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].id, "GOOD");
+    assert_eq!(results[0].id.as_ref(), "GOOD");
 }
 
 #[test]
@@ -184,7 +185,7 @@ fn test_multiple_targets_interpolation() {
     let mut engine = InterpolationEngine::new();
 
     let state_a = TargetState {
-        id: "A".to_string(),
+        id: Arc::from("A"),
         last_position: LatLon::from_degrees(0.0, 0.0, 100.0),
         speed_mps: 100.0,
         track_heading_rad: PI / 2.0,
@@ -192,7 +193,7 @@ fn test_multiple_targets_interpolation() {
         last_ping_time: 0.0,
     };
     let state_b = TargetState {
-        id: "B".to_string(),
+        id: Arc::from("B"),
         last_position: LatLon::from_degrees(0.0, 0.0, 200.0),
         speed_mps: 0.0,
         track_heading_rad: 0.0,
@@ -207,12 +208,12 @@ fn test_multiple_targets_interpolation() {
     assert_eq!(results.len(), 2);
 
     // Verify both targets are present
-    let ids: Vec<_> = results.iter().map(|r| r.id.as_str()).collect();
+    let ids: Vec<_> = results.iter().map(|r| r.id.as_ref()).collect();
     assert!(ids.contains(&"A"));
     assert!(ids.contains(&"B"));
 
-    let a = results.iter().find(|r| r.id == "A").unwrap();
-    let b = results.iter().find(|r| r.id == "B").unwrap();
+    let a = results.iter().find(|r| r.id.as_ref() == "A").unwrap();
+    let b = results.iter().find(|r| r.id.as_ref() == "B").unwrap();
 
     assert!(a.position.lon > 0.0); // A moved east
     assert_eq!(b.position.height, 300.0); // B climbed 10 m/s * 10 s

@@ -184,14 +184,19 @@ High-performance indexer for Digital Terrain Elevation Data (DTED - Digital Terr
   }
 
   pub struct TerrainEngine {
-      tiles: HashMap<TileKey, DtedTile>,
+      tiles: RefCell<LruCache<TileKey, DtedTile>>,
   }
 
   impl TerrainEngine {
       pub fn new() -> Self;
+      pub fn with_capacity(capacity: usize) -> Self;
+      pub fn set_cache_capacity(&self, capacity: usize);
+      pub fn cache_size(&self) -> usize;
+      pub fn clear_cache(&self);
       pub fn load_tile(&mut self, data: &[u8]) -> Result<TileKey, TerrainError>;
       pub fn unload_tile(&mut self, key: &TileKey) -> bool;
       pub fn get_elevation(&self, lat_deg: f64, lon_deg: f64) -> Result<f64, TerrainError>;
+      pub fn get_elevation_rad(&self, lat_rad: f64, lon_rad: f64) -> Result<f64, TerrainError>;
       pub fn get_vertical_profile(&self, route: &[LatLon], step_meters: f64) -> Result<Vec<ProfilePoint>, TerrainError>;
   }
   ```

@@ -1,10 +1,11 @@
+use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use crate::geodesy::LatLon;
 use crate::interpolator::errors::InterpolatorError;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TargetState {
-    pub id: String,
+    pub id: Arc<str>,            // Shared target identifier
     pub last_position: LatLon,   // Latitude/longitude in radians, altitude in metres
     pub speed_mps: f64,          // Horizontal speed in metres per second
     pub track_heading_rad: f64,  // True track heading in radians [0, 2π)
@@ -39,7 +40,7 @@ impl TargetState {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct InterpolatedTarget {
-    pub id: String,
+    pub id: Arc<str>,      // Shared target identifier
     pub position: LatLon,  // Posição tridimensional interpolada no globo WGS84
     pub heading_rad: f64,  // Rumo interpolado em radianos
 }

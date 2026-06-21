@@ -7,17 +7,14 @@ use winit::{
 use olayer_core::geodesy::LatLon;
 use olayer_core::projections::{Stereographic, LambertConformalConic, WebMercator};
 use olayer_native::{
-    NativeController, NativeLayerManager, NativeMapDataStack, MapDataSource, GeoserverWmtsSource, WgpuGpuPipeline, WgpuCpuVertexPipeline, project_lla_to_screen
+    NativeController, NativeLayerManager, NativeMapDataStack, MapDataSource, GeoserverWmtsSource, WgpuGpuPipeline, WgpuCpuVertexPipeline, RasterTileUpload, project_lla_to_screen
 };
 
-struct SimulatedTarget {
-    id: String,
-    lat: f64,
-    lon: f64,
-    alt: f64,
-    speed: f64,
-    heading: f64,
-}
+mod sim;
+mod tiles;
+mod ui;
+
+use sim::SimulatedTarget;
 
 fn main() {
     env_logger::init();
@@ -120,7 +117,7 @@ fn main() {
 
     // App state
     let mut simulated_targets: Vec<SimulatedTarget> = Vec::new();
-    let mut selected_target_id: Option<String> = None;
+    let mut selected_target_id: Option<Arc<str>> = None;
     let mut projection_name = "Stereographic".to_string();
 
     // GeoServer Integration State
@@ -132,22 +129,6 @@ fn main() {
     let mut auto_fetch_tiles = false;
     let mut egui_tile_textures: std::collections::HashMap<String, egui::TextureHandle> = std::collections::HashMap::new();
 
-    // Helper to calculate OpenStreetMap / Web Mercator tile coordinates
-    let latlon_to_tile = |lat_rad: f64, lon_rad: f64, zoom: u32| -> (u32, u32) {
-        let lon_deg = lon_rad.to_degrees();
-        let n = 2.0f64.powi(zoom as i32);
-        
-        let x = (((lon_deg + 180.0) / 360.0) * n).clamp(0.0, n - 1.0) as u32;
-        
-        let lat_rad_val = lat_rad;
-        let sec = 1.0 / lat_rad_val.cos();
-        let tan = lat_rad_val.tan();
-        let y_val = (1.0 - ((tan + sec).abs().ln() / std::f64::consts::PI)) / 2.0;
-        let y = (y_val * n).clamp(0.0, n - 1.0) as u32;
-        
-        (x, y)
-    };
-    
     // Mouse drag state
     let mut is_dragging = false;
     let mut last_mouse_pos = egui::Pos2::ZERO;
@@ -202,143 +183,22 @@ fn main() {
 
                         // Simulated radar updates at 1 Hz
                         if last_radar_update.elapsed().as_secs_f32() >= 1.0 {
-                            let r_earth = 6378137.0;
-                            let dt = 1.0;
-                            for t in &mut simulated_targets {
-                                let lat_offset = (t.speed * dt * t.heading.cos()) / r_earth;
-                                let lon_offset = (t.speed * dt * t.heading.sin()) / (r_earth * t.lat.cos());
-                                t.lat += lat_offset;
-                                t.lon += lon_offset;
-                                
-                                let _ = controller.interpolator.update_target(olayer_core::interpolator::TargetState {
-                                    id: t.id.clone(),
-                                    last_position: LatLon::new(t.lat, t.lon, t.alt),
-                                    speed_mps: t.speed,
-                                    track_heading_rad: t.heading,
-                                    vertical_rate_mps: 0.0,
-                                    last_ping_time: start_time.elapsed().as_secs_f64(),
-                                });
-                            }
+                            let current_time = start_time.elapsed().as_secs_f64();
+                            sim::update_simulated_targets(&mut simulated_targets, &mut controller, current_time, 1.0);
                             last_radar_update = std::time::Instant::now();
-                            controller.trigger_active();
                         }
 
                         // Render Frame
                         let current_time = start_time.elapsed().as_secs_f64();
                         let interpolated_targets = controller.interpolator.interpolate_all(current_time).unwrap_or_default();
 
-                        let aspect = controller.camera.aspect_ratio;
-                        let w_meters = controller.camera.viewport_base_meters / controller.camera.zoom;
-                        let h_meters = w_meters / aspect;
-
                         // Dynamically adjust tile zoom based on camera viewport width to keep the resolution appropriate
                         if auto_zoom {
-                            let c_earth = 40_075_016.0;
-                            // Target around 6 tiles across the screen width
-                            let target_tiles = 6.0;
-                            let z_ideal = ((target_tiles * c_earth) / w_meters).log2();
-                            tile_zoom = (z_ideal.round() as i32).clamp(0, 18) as u32;
+                            tile_zoom = tiles::ideal_tile_zoom(&controller);
                         }
 
                         // Calculate visible tile keys in the viewport
-                        let mut visible_keys = std::collections::HashSet::new();
-                        let center_lat = controller.camera.center.lat;
-                        let center_lon = controller.camera.center.lon;
-                        let (tx, ty) = latlon_to_tile(center_lat, center_lon, tile_zoom);
-
-                        if controller.view_mode != "3D" {
-                            if let Ok(cx_cy) = controller.projection.project(&controller.camera.center) {
-                                let cx = cx_cy.0;
-                                let cy = cx_cy.1;
-
-                                // Sample a grid of points on the screen/viewport to cover rotation and projection distortion
-                                let offsets = [
-                                    (0.0, 0.0),
-                                    (-0.5, -0.5),
-                                    (-0.5, 0.5),
-                                    (0.5, -0.5),
-                                    (0.5, 0.5),
-                                    (-0.5, 0.0),
-                                    (0.5, 0.0),
-                                    (0.0, -0.5),
-                                    (0.0, 0.5),
-                                ];
-
-                                let mut min_x = u32::MAX;
-                                let mut max_x = 0;
-                                let mut min_y = u32::MAX;
-                                let mut max_y = 0;
-
-                                let cos_r = controller.camera.rotation.cos();
-                                let sin_r = controller.camera.rotation.sin();
-
-                                for &(ox, oy) in &offsets {
-                                    let dx_cam = ox * w_meters;
-                                    let dy_cam = oy * h_meters;
-
-                                    let dx = dx_cam * cos_r - dy_cam * sin_r;
-                                    let dy = dx_cam * sin_r + dy_cam * cos_r;
-
-                                    let px = cx + dx;
-                                    let py = cy + dy;
-
-                                    if let Ok(lla) = controller.projection.unproject(px, py) {
-                                        let (tx_val, ty_val) = latlon_to_tile(lla.lat, lla.lon, tile_zoom);
-                                        min_x = min_x.min(tx_val);
-                                        max_x = max_x.max(tx_val);
-                                        min_y = min_y.min(ty_val);
-                                        max_y = max_y.max(ty_val);
-                                    }
-                                }
-
-                                // Increase safety margin radius to 8 to cover wide screens / rotation without gaps
-                                let max_radius = 8;
-                                let final_min_x = min_x.max(tx.saturating_sub(max_radius));
-                                let final_max_x = max_x.min(tx + max_radius);
-                                let final_min_y = min_y.max(ty.saturating_sub(max_radius));
-                                let final_max_y = max_y.min(ty + max_radius);
-
-                                for x_idx in final_min_x..=final_max_x {
-                                    for y_idx in final_min_y..=final_max_y {
-                                        visible_keys.insert(format!("{}/{}/{}", tile_zoom, x_idx, y_idx));
-                                    }
-                                }
-                            }
-                        } else {
-                            let span_lat = (h_meters / 111000.0).min(90.0);
-                            let lat_rad = controller.camera.center.lat;
-                            let span_lon = (w_meters / (111000.0 * lat_rad.cos().abs().max(0.01))).min(180.0);
-
-                            let lat_min = (lat_rad.to_degrees() - span_lat).to_radians();
-                            let lat_max = (lat_rad.to_degrees() + span_lat).to_radians();
-                            let lon_min = (controller.camera.center.lon.to_degrees() - span_lon).to_radians();
-                            let lon_max = (controller.camera.center.lon.to_degrees() + span_lon).to_radians();
-
-                            let t_min = latlon_to_tile(lat_min, lon_min, tile_zoom);
-                            let t_max = latlon_to_tile(lat_max, lon_max, tile_zoom);
-
-                            let min_x = t_min.0.min(t_max.0);
-                            let max_x = t_min.0.max(t_max.0);
-                            let min_y = t_min.1.min(t_max.1);
-                            let max_y = t_min.1.max(t_max.1);
-
-                            // Increase safety margin radius to 8 to cover wide screens / rotation without gaps
-                            let max_radius = 8;
-                            let final_min_x = min_x.max(tx.saturating_sub(max_radius));
-                            let final_max_x = max_x.min(tx + max_radius);
-                            let final_min_y = min_y.max(ty.saturating_sub(max_radius));
-                            let final_max_y = max_y.min(ty + max_radius);
-
-                            for x_idx in final_min_x..=final_max_x {
-                                for y_idx in final_min_y..=final_max_y {
-                                    visible_keys.insert(format!("{}/{}/{}", tile_zoom, x_idx, y_idx));
-                                }
-                            }
-                        }
-
-                        if visible_keys.is_empty() {
-                            visible_keys.insert(format!("{}/{}/{}", tile_zoom, tx, ty));
-                        }
+                        let visible_keys = tiles::compute_visible_tile_keys(&controller, tile_zoom);
 
                         // Sync loaded tiles from GeoServer source to GPU textures
                         if let Some(ref source) = geoserver_source {
@@ -349,7 +209,16 @@ fn main() {
                                     if parts.len() == 3 {
                                         if let (Ok(z), Ok(x), Ok(y)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>(), parts[2].parse::<u32>()) {
                                             if let Some(pixels) = source.get_tile_pixels(x, y, z) {
-                                                gpu_pipeline.upload_raster_tile(&device, &queue, &key, &pixels, x, y, z, &controller);
+                                                gpu_pipeline.upload_raster_tile(RasterTileUpload {
+                                                    device: &device,
+                                                    queue: &queue,
+                                                    key: &key,
+                                                    pixels: &pixels,
+                                                    x,
+                                                    y,
+                                                    z,
+                                                    controller: &controller,
+                                                });
                                             }
                                         }
                                     }
@@ -461,7 +330,7 @@ fn main() {
                                             // Calculate current tile coordinates based on camera center
                                             let center_lat = controller.camera.center.lat;
                                             let center_lon = controller.camera.center.lon;
-                                            let (tx, ty) = latlon_to_tile(center_lat, center_lon, tile_zoom);
+                                            let (tx, ty) = tiles::latlon_to_tile(center_lat, center_lon, tile_zoom);
 
                                             ui.label("Centered Tile (OSM/WMTS):");
                                             ui.label(format!("  • Matrix Set: EPSG:900913"));
@@ -544,9 +413,9 @@ fn main() {
                                         let speed = 180.0 + rand::random::<f64>() * 70.0;
                                         let heading = rand::random::<f64>() * 2.0 * std::f64::consts::PI;
 
-                                        let target = SimulatedTarget { id: id.clone(), lat, lon, alt, speed, heading };
+                                        let target = SimulatedTarget { id: Arc::from(id), lat, lon, alt, speed, heading };
                                         let _ = controller.interpolator.update_target(olayer_core::interpolator::TargetState {
-                                            id: target.id.clone(),
+                                            id: Arc::clone(&target.id),
                                             last_position: LatLon::new(target.lat, target.lon, target.alt),
                                             speed_mps: target.speed,
                                             track_heading_rad: target.heading,
@@ -576,9 +445,9 @@ fn main() {
                         let painter = egui_ctx.layer_painter(egui::LayerId::background());
 
                         if layer_manager.show_targets {
-                            let simulated_speeds: std::collections::HashMap<String, f64> = simulated_targets
+                            let simulated_speeds: std::collections::HashMap<Arc<str>, f64> = simulated_targets
                                 .iter()
-                                .map(|st| (st.id.clone(), st.speed))
+                                .map(|st| (Arc::clone(&st.id), st.speed))
                                 .collect();
 
                             cpu_pipeline.draw_targets(
@@ -595,78 +464,12 @@ fn main() {
 
                         // Flight Profile Panel
                         if let Some(ref selected_id) = selected_target_id {
-                            if let Some(target) = interpolated_targets.iter().find(|t| &t.id == selected_id) {
+                            if let Some(target) = interpolated_targets.iter().find(|t| t.id.as_ref() == selected_id.as_ref()) {
                                 egui::TopBottomPanel::bottom("flight_profile")
                                     .resizable(false)
                                     .default_height(140.0)
                                     .show(&egui_ctx, |ui| {
-                                        ui.heading(format!("✈️ 2.5D Flight Profile: {}", selected_id));
-                                        
-                                        // Fetch vertical profile from WASM/Rust Core engine
-                                        let mut route_coords = Vec::new();
-                                        let r_earth = 6378137.0;
-                                        let step = 2000.0;
-                                        for dist in (-30000..=50000).step_by(2000) {
-                                            let lat_offset = (dist as f64 * target.heading_rad.cos()) / r_earth;
-                                            let lon_offset = (dist as f64 * target.heading_rad.sin()) / (r_earth * target.position.lat.cos());
-                                            route_coords.push(LatLon::new(target.position.lat + lat_offset, target.position.lon + lon_offset, target.position.height));
-                                        }
-
-                                        if let Ok(profile) = controller.terrain.get_vertical_profile(&route_coords, step) {
-                                            // Draw custom elevation chart
-                                            let response = ui.allocate_response(egui::vec2(ui.available_width(), 100.0), egui::Sense::hover());
-                                            let rect = response.rect;
-                                            let p = ui.painter();
-
-                                            // Draw background
-                                            p.rect_filled(rect, 4.0, egui::Color32::from_black_alpha(80));
-
-                                            let max_elev = profile.iter().map(|pt| pt.ground_elevation).fold(1000.0f64, |m, val| m.max(val)).max(target.position.height) * 1.2;
-                                            let max_dist = 80000.0f64;
-
-                                            let get_x = |d: f64| rect.min.x + 20.0 + (d / max_dist) as f32 * (rect.width() - 40.0);
-                                            let get_y = |h: f64| rect.max.y - 15.0 - (h / max_elev) as f32 * (rect.height() - 25.0);
-
-                                            // Draw ground profile
-                                            let mut points = Vec::new();
-                                            points.push(egui::pos2(get_x(0.0), get_y(0.0)));
-                                            for pt in &profile {
-                                                points.push(egui::pos2(get_x(pt.distance_meters), get_y(pt.ground_elevation)));
-                                            }
-                                            points.push(egui::pos2(get_x(max_dist), get_y(0.0)));
-                                            p.add(egui::Shape::convex_polygon(points, egui::Color32::from_rgba_unmultiplied(141, 110, 99, 100), egui::Stroke::new(1.5, egui::Color32::from_rgb(141, 110, 99))));
-
-                                            // Draw aircraft line
-                                            let ac_y = get_y(target.position.height);
-                                            p.line_segment(
-                                                [egui::pos2(get_x(0.0), ac_y), egui::pos2(get_x(max_dist), ac_y)],
-                                                egui::Stroke::new(2.0, egui::Color32::from_rgba_unmultiplied(0, 176, 255, 128)),
-                                            );
-
-                                            // Draw aircraft dot (represented at 30km distance)
-                                            let ac_x = get_x(30000.0);
-                                            p.circle_filled(egui::pos2(ac_x, ac_y), 5.0, egui::Color32::from_rgb(0, 176, 255));
-                                            
-                                            // Altimetry clearance check
-                                            let ground_under_ac = controller.terrain.get_elevation(target.position.lat.to_degrees(), target.position.lon.to_degrees()).unwrap_or(0.0);
-                                            let clearance = target.position.height - ground_under_ac;
-                                            let hazard = clearance < 300.0;
-                                            let clearance_color = if hazard { egui::Color32::from_rgb(255, 23, 68) } else { egui::Color32::from_rgb(0, 230, 118) };
-
-                                            // Draw clearance line
-                                            p.line_segment(
-                                                [egui::pos2(ac_x, ac_y), egui::pos2(ac_x, get_y(ground_under_ac))],
-                                                egui::Stroke::new(1.5, clearance_color),
-                                            );
-
-                                            p.text(
-                                                egui::pos2(ac_x + 10.0, (ac_y + get_y(ground_under_ac)) / 2.0),
-                                                egui::Align2::LEFT_CENTER,
-                                                format!("CLEARANCE: {} FT{}", (clearance * 3.28084) as i32, if hazard { " ⚠️ CFIT HAZARD!" } else { " OK" }),
-                                                egui::FontId::proportional(10.0),
-                                                clearance_color,
-                                             );
-                                        }
+                                        ui::draw_flight_profile(ui, &mut controller, target, selected_id);
                                     });
                             }
                         }
@@ -813,7 +616,7 @@ fn main() {
                                 };
                                 let size = window.inner_size();
 
-                                let mut nearest_target: Option<String> = None;
+                                let mut nearest_target: Option<Arc<str>> = None;
                                 let mut min_dist = 15.0f32;
                                 for t in &simulated_targets {
                                     if let Some(pos) = project_lla_to_screen(

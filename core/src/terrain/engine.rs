@@ -1,9 +1,14 @@
-use std::collections::HashMap;
+use std::cell::RefCell;
+use std::num::NonZeroUsize;
+use lru::LruCache;
 use crate::geodesy::coords::LatLon;
 use crate::geodesy::ellipsoid::Ellipsoid;
 use crate::geodesy::solvers::{GeodeticSolver, VincentySolver};
 use crate::terrain::errors::TerrainError;
 use crate::terrain::tile::DtedTile;
+
+/// Default maximum number of DTED tiles kept in memory.
+const DEFAULT_TILE_CAPACITY: usize = 64;
 
 /// Tile lookup key based on integer degrees.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -23,16 +28,52 @@ pub struct ProfilePoint {
 /// DTED terrain engine supporting O(1) elevation lookups and
 /// vertical profile generation.
 pub struct TerrainEngine {
-    tiles: HashMap<TileKey, DtedTile>,
+    tiles: RefCell<LruCache<TileKey, DtedTile>>,
 }
 
 impl TerrainEngine {
-    /// Creates a new empty terrain engine.
+    /// Creates a new terrain engine with the default tile cache capacity.
     #[inline]
     pub fn new() -> Self {
+        Self::with_capacity(DEFAULT_TILE_CAPACITY)
+    }
+
+    /// Creates a new terrain engine with a custom tile cache capacity.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `capacity` is zero.
+    #[inline]
+    pub fn with_capacity(capacity: usize) -> Self {
+        let cap = NonZeroUsize::new(capacity)
+            .expect("terrain tile cache capacity must be non-zero");
         Self {
-            tiles: HashMap::new(),
+            tiles: RefCell::new(LruCache::new(cap)),
         }
+    }
+
+    /// Changes the tile cache capacity.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `capacity` is zero.
+    #[inline]
+    pub fn set_cache_capacity(&self, capacity: usize) {
+        let cap = NonZeroUsize::new(capacity)
+            .expect("terrain tile cache capacity must be non-zero");
+        self.tiles.borrow_mut().resize(cap);
+    }
+
+    /// Returns the current number of cached tiles.
+    #[inline]
+    pub fn cache_size(&self) -> usize {
+        self.tiles.borrow().len()
+    }
+
+    /// Clears all cached tiles.
+    #[inline]
+    pub fn clear_cache(&self) {
+        self.tiles.borrow_mut().clear();
     }
 
     /// Parses a raw DTED buffer and registers the resulting tile.
@@ -43,20 +84,29 @@ impl TerrainEngine {
             lat_deg: tile.origin_lat,
             lon_deg: tile.origin_lon,
         };
-        self.tiles.insert(key, tile);
+        self.tiles.borrow_mut().put(key, tile);
         Ok(key)
     }
 
     /// Removes a tile from the engine.  Returns `true` if the tile existed.
     #[inline]
     pub fn unload_tile(&mut self, key: &TileKey) -> bool {
-        self.tiles.remove(key).is_some()
+        self.tiles.borrow_mut().pop(key).is_some()
     }
 
     /// Returns the interpolated ground elevation (metres) for the given
-    /// latitude and longitude using bilinear interpolation.
+    /// latitude and longitude in **degrees** using bilinear interpolation.
     #[inline]
     pub fn get_elevation(&self, lat_deg: f64, lon_deg: f64) -> Result<f64, TerrainError> {
+        self.get_elevation_rad(lat_deg.to_radians(), lon_deg.to_radians())
+    }
+
+    /// Returns the interpolated ground elevation (metres) for the given
+    /// latitude and longitude in **radians** using bilinear interpolation.
+    #[inline]
+    pub fn get_elevation_rad(&self, lat_rad: f64, lon_rad: f64) -> Result<f64, TerrainError> {
+        let lat_deg = lat_rad.to_degrees();
+        let lon_deg = lon_rad.to_degrees();
         let lat_floor = tile_key_floor(lat_deg);
         let lon_floor = tile_key_floor(lon_deg);
 
@@ -65,7 +115,8 @@ impl TerrainEngine {
             lon_deg: lon_floor,
         };
 
-        let tile = self.tiles.get(&key).ok_or(TerrainError::TileNotLoaded(
+        let mut tiles = self.tiles.borrow_mut();
+        let tile = tiles.get(&key).ok_or(TerrainError::TileNotLoaded(
             lat_floor,
             lon_floor,
         ))?;
@@ -139,7 +190,7 @@ impl TerrainEngine {
                     TerrainError::MalformedData(format!("Failed to interpolate route point: {e}"))
                 })?;
 
-                let elev = self.get_elevation(pt.lat.to_degrees(), pt.lon.to_degrees())?;
+                let elev = self.get_elevation_rad(pt.lat, pt.lon)?;
                 profile.push(ProfilePoint {
                     distance_meters: accumulated_distance + d,
                     ground_elevation: elev,
@@ -152,7 +203,7 @@ impl TerrainEngine {
 
         // Add the exact final route point
         let last_pt = route.last().unwrap();
-        let elev = self.get_elevation(last_pt.lat.to_degrees(), last_pt.lon.to_degrees())?;
+        let elev = self.get_elevation_rad(last_pt.lat, last_pt.lon)?;
         profile.push(ProfilePoint {
             distance_meters: accumulated_distance,
             ground_elevation: elev,

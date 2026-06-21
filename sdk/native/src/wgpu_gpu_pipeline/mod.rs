@@ -20,6 +20,18 @@ pub struct WgpuRasterTile {
     pub index_buffer: wgpu::Buffer,
 }
 
+/// Arguments required to upload a decoded raster tile to the GPU.
+pub struct RasterTileUpload<'a> {
+    pub device: &'a wgpu::Device,
+    pub queue: &'a wgpu::Queue,
+    pub key: &'a str,
+    pub pixels: &'a [u8],
+    pub x: u32,
+    pub y: u32,
+    pub z: u32,
+    pub controller: &'a NativeController,
+}
+
 /// Encapsulates compiled WGPU pipelines, bind groups, shaders, and uniforms
 /// for grids and base maps.
 ///
@@ -385,18 +397,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     }
 
     /// Uploads a decoded raster tile to GPU memory and creates its projected quads.
-    pub fn upload_raster_tile(
-        &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        key: &str,
-        pixels: &[u8],
-        x: u32,
-        y: u32,
-        z: u32,
-        controller: &NativeController,
-    ) {
-        if self.loaded_gpu_tiles.contains_key(key) {
+    pub fn upload_raster_tile(&mut self, upload: RasterTileUpload<'_>) {
+        if self.loaded_gpu_tiles.contains_key(upload.key) {
             return;
         }
 
@@ -406,8 +408,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             height: 256,
             depth_or_array_layers: 1,
         };
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some(&format!("Tile Texture {}", key)),
+        let texture = upload.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some(&format!("Tile Texture {}", upload.key)),
             size: texture_size,
             mip_level_count: 1,
             sample_count: 1,
@@ -418,14 +420,14 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         });
 
         // 2. Upload Pixels
-        queue.write_texture(
+        upload.queue.write_texture(
             wgpu::ImageCopyTexture {
                 texture: &texture,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
-            pixels,
+            upload.pixels,
             wgpu::ImageDataLayout {
                 offset: 0,
                 bytes_per_row: Some(4 * 256),
@@ -437,8 +439,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         // 3. Create Bind Group
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some(&format!("Tile Bind Group {}", key)),
+        let bind_group = upload.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some(&format!("Tile Bind Group {}", upload.key)),
             layout: &self.raster_bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry {
@@ -453,27 +455,27 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         });
 
         // 4. Create Buffers
-        let vertices = get_tile_vertices(x, y, z, controller);
-        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some(&format!("Tile Vertex Buffer {}", key)),
+        let vertices = get_tile_vertices(upload.x, upload.y, upload.z, upload.controller);
+        let vertex_buffer = upload.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some(&format!("Tile Vertex Buffer {}", upload.key)),
             contents: bytemuck::cast_slice(&vertices),
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         });
 
         let indices: [u16; 6] = [0, 1, 2, 0, 2, 3];
-        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some(&format!("Tile Index Buffer {}", key)),
+        let index_buffer = upload.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some(&format!("Tile Index Buffer {}", upload.key)),
             contents: bytemuck::cast_slice(&indices),
             usage: wgpu::BufferUsages::INDEX,
         });
 
         self.loaded_gpu_tiles.insert(
-            key.to_string(),
+            upload.key.to_string(),
             WgpuRasterTile {
-                key: key.to_string(),
-                x,
-                y,
-                z,
+                key: upload.key.to_string(),
+                x: upload.x,
+                y: upload.y,
+                z: upload.z,
                 texture,
                 bind_group,
                 vertex_buffer,

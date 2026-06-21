@@ -3,6 +3,7 @@
 #![allow(clippy::too_many_arguments)]
 
 use std::os::raw::{c_char, c_int};
+use std::sync::Arc;
 use olayer_core::geodesy::LatLon;
 use olayer_core::terrain::TerrainEngine;
 use olayer_core::interpolator::{InterpolationEngine, TargetState};
@@ -136,6 +137,33 @@ pub unsafe extern "C" fn olayer_terrain_engine_get_elevation(
     }
 }
 
+/// Resolves elevation at coordinate radians. Returns 0 on success, negative error.
+#[no_mangle]
+pub unsafe extern "C" fn olayer_terrain_engine_get_elevation_rad(
+    engine: *mut TerrainEngine,
+    lat_rad: f64,
+    lon_rad: f64,
+    out_elevation: *mut f64,
+) -> c_int {
+    if engine.is_null() || out_elevation.is_null() {
+        return -1;
+    }
+    let engine_ref = &mut *engine;
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        engine_ref.get_elevation_rad(lat_rad, lon_rad)
+    }));
+
+    match result {
+        Ok(Ok(elev)) => {
+            *out_elevation = elev;
+            0
+        }
+        Ok(Err(_)) => -2, // Tile not loaded
+        Err(_) => -99,
+    }
+}
+
 /// Generates a vertical profile. Fills out_profile and out_count.
 /// Returns 0 on success, negative error.
 #[no_mangle]
@@ -201,6 +229,47 @@ pub unsafe extern "C" fn olayer_profile_points_free(points: *mut C_ProfilePoint,
     }
 }
 
+/// Sets the terrain tile cache capacity. Returns 0 on success, negative error.
+#[no_mangle]
+pub unsafe extern "C" fn olayer_terrain_engine_set_cache_capacity(
+    engine: *mut TerrainEngine,
+    capacity: usize,
+) -> c_int {
+    if engine.is_null() || capacity == 0 {
+        return -1;
+    }
+    let engine_ref = &mut *engine;
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        engine_ref.set_cache_capacity(capacity);
+    }));
+    match result {
+        Ok(()) => 0,
+        Err(_) => -99,
+    }
+}
+
+/// Returns the current number of cached terrain tiles.
+#[no_mangle]
+pub unsafe extern "C" fn olayer_terrain_engine_cache_size(engine: *mut TerrainEngine) -> usize {
+    if engine.is_null() {
+        return 0;
+    }
+    let engine_ref = &mut *engine;
+    engine_ref.cache_size()
+}
+
+/// Clears all cached terrain tiles.
+#[no_mangle]
+pub unsafe extern "C" fn olayer_terrain_engine_clear_cache(engine: *mut TerrainEngine) {
+    if engine.is_null() {
+        return;
+    }
+    let engine_ref = &mut *engine;
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        engine_ref.clear_cache();
+    }));
+}
+
 /// Destroys a TerrainEngine instance.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_terrain_engine_free(engine: *mut TerrainEngine) {
@@ -247,7 +316,7 @@ pub unsafe extern "C" fn olayer_interpolator_update(
 
     let engine_ref = &mut *engine;
     let state = TargetState {
-        id: id_str.to_string(),
+        id: Arc::from(id_str),
         last_position: LatLon::new(lat, lon, height),
         speed_mps,
         track_heading_rad,
@@ -316,7 +385,7 @@ pub unsafe extern "C" fn olayer_interpolator_interpolate_all(
             let mut c_targets: Vec<C_InterpolatedTarget> = Vec::with_capacity(targets.len());
             for t in targets {
                 // Skip targets whose ID contains an embedded null byte
-                let id = match std::ffi::CString::new(t.id) {
+                let id = match std::ffi::CString::new(t.id.as_bytes()) {
                     Ok(cstr) => cstr.into_raw(),
                     Err(_) => continue,
                 };
@@ -657,7 +726,7 @@ mod tests {
 
             // Directly insert a target with an embedded null byte via Rust API
             let bad_state = TargetState {
-                id: "BAD\x00TARGET".to_string(),
+                id: Arc::from("BAD\x00TARGET"),
                 last_position: LatLon::new(0.0, 0.0, 0.0),
                 speed_mps: 0.0,
                 track_heading_rad: 0.0,

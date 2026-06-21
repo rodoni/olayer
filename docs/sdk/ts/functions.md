@@ -329,7 +329,11 @@ Imported directly from `"olayer-wasm"`. Below are the primary classes and functi
 ### Class: `WasmTerrainEngine`
 - `load_tile(bytes: Uint8Array): void` - Injects DTED file bytes.
 - `unload_tile(lat: number, lon: number): void` - Removes DTED file of a grid lat/lon sector.
-- `get_elevation(latRad: number, lonRad: number): number` - Fast $O(1)$ ground height query.
+- `get_elevation(latDeg: number, lonDeg: number): number` - Fast $O(1)$ ground height query in decimal degrees.
+- `get_elevation_rad(latRad: number, lonRad: number): number` - Fast $O(1)$ ground height query in radians.
+- `set_cache_capacity(capacity: number): void` - Sets the maximum number of cached DTED tiles.
+- `cache_size(): number` - Returns the current number of cached tiles.
+- `clear_cache(): void` - Clears all cached tiles.
 
 ### Class: `WasmInterpolationEngine`
 - Interpolates the 3D position and orientation of dynamic targets over time using dead reckoning models.

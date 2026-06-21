@@ -46,11 +46,16 @@ classDiagram
     direction TB
 
     class TerrainEngine {
-        -tiles: HashMap~TileKey, DtedTile~
+        -tiles: LruCache~TileKey, DtedTile~
         +new() TerrainEngine
+        +with_capacity(capacity: usize) TerrainEngine
+        +set_cache_capacity(capacity: usize)
+        +cache_size() usize
+        +clear_cache()
         +load_tile(data: &[u8]) Result~TileKey, TerrainError~
         +unload_tile(key: &TileKey) bool
-        +get_elevation(lat: f64, lon: f64) Result~f64, TerrainError~
+        +get_elevation(lat_deg: f64, lon_deg: f64) Result~f64, TerrainError~
+        +get_elevation_rad(lat_rad: f64, lon_rad: f64) Result~f64, TerrainError~
         +get_vertical_profile(route: &[LatLon], step_meters: f64) Result~Vec~ProfilePoint~~, TerrainError~
     }
 

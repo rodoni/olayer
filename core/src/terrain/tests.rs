@@ -227,6 +227,35 @@ fn test_elevation_exact_boundary() {
 }
 
 #[test]
+fn test_elevation_rad_matches_degrees() {
+    let mock_bytes = create_mock_dted0("230000S", "0480000W", 121, 121);
+    let mut engine = TerrainEngine::new();
+    let _ = engine.load_tile(&mock_bytes).unwrap();
+
+    let lat_deg = -23.0;
+    let lon_deg = -48.0;
+    let elev_deg = engine.get_elevation(lat_deg, lon_deg).unwrap();
+    let elev_rad = engine.get_elevation_rad(lat_deg.to_radians(), lon_deg.to_radians()).unwrap();
+    assert!((elev_deg - elev_rad).abs() < 1e-12);
+}
+
+#[test]
+fn test_lru_cache_capacity_and_clear() {
+    let mock_bytes = create_mock_dted0("230000S", "0480000W", 121, 121);
+    let mut engine = TerrainEngine::with_capacity(2);
+
+    engine.load_tile(&mock_bytes).unwrap();
+    assert_eq!(engine.cache_size(), 1);
+
+    engine.set_cache_capacity(1);
+    assert_eq!(engine.cache_size(), 1);
+
+    engine.clear_cache();
+    assert_eq!(engine.cache_size(), 0);
+    assert!(engine.get_elevation(-23.0, -48.0).is_err());
+}
+
+#[test]
 fn test_vertical_profile_single_point() {
     let engine = TerrainEngine::new();
     let route = vec![LatLon::from_degrees(0.0, 0.0, 0.0)];

@@ -61,6 +61,14 @@ int olayer_terrain_engine_get_elevation(TerrainEngine *engine,
                                         double *out_elevation);
 
 /**
+ * Resolves elevation at coordinate radians. Returns 0 on success, negative error.
+ */
+int olayer_terrain_engine_get_elevation_rad(TerrainEngine *engine,
+                                            double lat_rad,
+                                            double lon_rad,
+                                            double *out_elevation);
+
+/**
  * Generates a vertical profile. Fills out_profile and out_count.
  * Returns 0 on success, negative error.
  */
@@ -77,6 +85,21 @@ int olayer_terrain_engine_get_vertical_profile(TerrainEngine *engine,
  * Frees profile point array allocated by Rust.
  */
 void olayer_profile_points_free(struct C_ProfilePoint *points, uintptr_t count);
+
+/**
+ * Sets the terrain tile cache capacity. Returns 0 on success, negative error.
+ */
+int olayer_terrain_engine_set_cache_capacity(TerrainEngine *engine, uintptr_t capacity);
+
+/**
+ * Returns the current number of cached terrain tiles.
+ */
+uintptr_t olayer_terrain_engine_cache_size(TerrainEngine *engine);
+
+/**
+ * Clears all cached terrain tiles.
+ */
+void olayer_terrain_engine_clear_cache(TerrainEngine *engine);
 
 /**
  * Destroys a TerrainEngine instance.

@@ -5,6 +5,7 @@ use wasm_bindgen::prelude::*;
 use olayer_core::geodesy::LatLon;
 use olayer_core::geodesy::ellipsoid::Ellipsoid;
 use olayer_core::terrain::TerrainEngine;
+use std::sync::Arc;
 use olayer_core::interpolator::{InterpolationEngine, TargetState};
 use olayer_core::projections::{LambertConformalConic, WebMercator, Stereographic, Projection, CameraState};
 use olayer_core::sld::StyleRegistry;
@@ -77,6 +78,12 @@ impl WasmTerrainEngine {
             .map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
+    /// Returns the interpolated elevation at coordinate radians.
+    pub fn get_elevation_rad(&self, lat_rad: f64, lon_rad: f64) -> Result<f64, JsValue> {
+        self.inner.get_elevation_rad(lat_rad, lon_rad)
+            .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
     /// Generates a vertical terrain profile along a sequence of route points.
     /// Route coordinates must be passed as a flat array of [lat0, lon0, height0, lat1, lon1, height1, ...] in **degrees**.
     /// Returns a flat array of profile points [distance0, elevation0, lat0, lon0, height0, ...] in **degrees**.
@@ -98,6 +105,29 @@ impl WasmTerrainEngine {
             flat.push(p.coords.height);
         }
         Ok(flat)
+    }
+
+    /// Sets the maximum number of DTED tiles to keep in memory.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `capacity` is zero.
+    pub fn set_cache_capacity(&self, capacity: usize) -> Result<(), JsValue> {
+        if capacity == 0 {
+            return Err(JsValue::from_str("terrain tile cache capacity must be non-zero"));
+        }
+        self.inner.set_cache_capacity(capacity);
+        Ok(())
+    }
+
+    /// Returns the current number of cached tiles.
+    pub fn cache_size(&self) -> usize {
+        self.inner.cache_size()
+    }
+
+    /// Clears all cached tiles.
+    pub fn clear_cache(&self) {
+        self.inner.clear_cache();
     }
 }
 
@@ -143,7 +173,7 @@ impl WasmInterpolationEngine {
         last_ping_time: f64,
     ) -> Result<(), JsValue> {
         let state = TargetState {
-            id: id.to_string(),
+            id: Arc::from(id),
             last_position: LatLon::new(lat_rad, lon_rad, height),
             speed_mps,
             track_heading_rad,

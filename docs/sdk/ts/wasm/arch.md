@@ -113,6 +113,18 @@ impl WasmTerrainEngine {
     /// Returns the interpolated elevation for geographic coordinates in **decimal degrees**.
     pub fn get_elevation(&self, lat_deg: f64, lon_deg: f64) -> Result<f64, JsValue> { ... }
 
+    /// Returns the interpolated elevation for geographic coordinates in **radians**.
+    pub fn get_elevation_rad(&self, lat_rad: f64, lon_rad: f64) -> Result<f64, JsValue> { ... }
+
+    /// Sets the maximum number of DTED tiles kept in memory.
+    pub fn set_cache_capacity(&self, capacity: usize) -> Result<(), JsValue> { ... }
+
+    /// Returns the current number of cached tiles.
+    pub fn cache_size(&self) -> usize { ... }
+
+    /// Clears all cached tiles.
+    pub fn clear_cache(&self) { ... }
+
     /// Generates a terrain vertical profile along a route.
     /// Input coordinates must be passed as a flat array in **decimal degrees**:
     /// [lat0, lon0, height0, lat1, lon1, height1, ...]
