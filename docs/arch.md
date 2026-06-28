@@ -388,21 +388,19 @@ olayer/
 │   ├── Cargo.toml
 │   └── src/
 │       ├── geodesy/              # Geodetic Formulas and ECEF Module (WGS84)
-│       │   └── mod.rs
-│       ├── projections/          # Stereographic, LCC, and Mercator Implementations
-│       │   └── mod.rs
+│       ├── camera/               # CameraState management and View-Proj matrices
+│       ├── projections/          # Stereographic, LCC, and Web Mercator Implementations
 │       ├── terrain/              # DTED File Parsing and O(1) Altitude Index
-│       │   └── mod.rs
 │       ├── sld/                  # XML Parser for SLD Styling
-│       │   └── mod.rs
+│       ├── symbol_registry/      # Pluggable Symbology Resolver (NATO / ICAO)
 │       └── interpolator/         # Dead Reckoning Logic for Target Tracking
-│           └── mod.rs
 │
 sdk/
 ├── ts/                       # [C4 Component: Olayer TS SDK]
 │   ├── package.json
 │   ├── src/
 │   │   ├── controller/       # Loop Management, FPS Throttler, and Events
+│   │   ├── layers/           # Web Layer Stack Composition (Tile, Vector)
 │   │   ├── providers/        # WMTS, MVT, SLD network calls, and DTED injection
 │   │   ├── renderer/         # WebGL Renderer (GPU) and Canvas (CPU)
 │   │   └── index.ts          # Public TypeScript SDK API
@@ -413,16 +411,26 @@ sdk/
 │           └── lib.rs        # Exports with #[wasm_bindgen] for TS SDK
 │
 └── native/                   # [C4 Component: Olayer Native Environment]
-    ├── c_ffi_bridge/         # [C4 Component: C-FFI Bridge]
-    │   ├── Cargo.toml
-    │   └── src/
-    │       └── lib.rs        # C-compatible Exports / cbindgen header
+    ├── Cargo.toml            # Unified olayer-native crate config
+    ├── cbindgen.toml
+    ├── build.rs              # FFI header generation script
+    ├── libolayer_native.h    # C-compatible FFI headers
+    ├── src/
+    │   ├── lib.rs            # Native static interface / module exports
+    │   ├── c_ffi_bridge/     # [C4 Component: C-FFI Bridge] FFI function exports
+    │   ├── native_controller/# Native facade / loop & FPS throttler
+    │   ├── native_layer_manager/ # Native layer composition and control
+    │   ├── native_map_data_stack/ # Native data sources & cache manager
+    │   ├── wgpu_gpu_pipeline/# WGPU grid & raster tile rendering pipeline
+    │   └── wgpu_cpu_vertex_pipeline/ # CPU-side projection & targets drawing pipeline
     │
-    └── desktop/              # [C4 Component: Olayer Native SDK & Demo]
+    └── demo/                 # [C4 Component: Olayer Native SDK & Demo]
         ├── Cargo.toml
         └── src/
-            ├── lib.rs        # Native static interface / FPS throttler
-            └── main.rs       # Native demo wgpu + winit + egui
+            ├── main.rs       # Native demo entrypoint (wgpu + winit + egui)
+            ├── sim.rs        # Radar target simulator
+            ├── tiles.rs      # Viewport tile helpers
+            └── ui.rs         # egui HUD and Flight Profile layout
 
 ```
 
