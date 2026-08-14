@@ -2,6 +2,22 @@ import { Layer } from "./layer";
 import { VectorTileSource, VectorFeature } from "../providers/vector";
 import { WasmProjection, lla_to_ecef } from "olayer-wasm";
 
+type Position = [number, number];
+
+function geometryPaths(feature: VectorFeature): Position[][] {
+  switch (feature.type) {
+    case "Point":
+    case "MultiPoint":
+    case "LineString":
+      return [feature.coordinates as Position[]];
+    case "Polygon":
+    case "MultiLineString":
+      return feature.coordinates as Position[][];
+    case "MultiPolygon":
+      return (feature.coordinates as Position[][][]).flat();
+  }
+}
+
 /**
  * Capa de renderizado para dados vetoriais (fronteiras, aerovias, setores).
  * Desenha linhas e polígonos na GPU usando WebGL2.
@@ -241,10 +257,11 @@ export class VectorTileLayer extends Layer {
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 
     for (const feature of featuresToDraw) {
-      // Se for um ponto, desenha um pequeno quadrado/marcador ao redor de suas coordenadas
-      if (feature.type === "Point" && feature.coordinates.length > 0) {
-        const lat = feature.coordinates[0][0];
-        const lon = feature.coordinates[0][1];
+      const paths = geometryPaths(feature);
+
+      // Points are drawn as small squares/markers around their coordinates.
+      if ((feature.type === "Point" || feature.type === "MultiPoint") && paths[0]?.length > 0) {
+        for (const [lat, lon] of paths[0]) {
         
         // Define a largura do quadrado em metros (ex: 1500 metros)
         const boxSizeMeters = 1500;
@@ -280,15 +297,15 @@ export class VectorTileLayer extends Layer {
           gl.uniform4f(this.uColorLoc, 0.0, 0.9, 0.46, 0.8 * this.opacity);
           gl.drawArrays(gl.LINE_STRIP, 0, boxCoords.length / 3);
         }
+        }
         continue;
       }
 
-      const coords: number[] = [];
+      for (const path of paths) {
+        const coords: number[] = [];
 
-      // Converte coordenadas geodésicas (radianos) para espaço de tela projetado
-      for (const pt of feature.coordinates) {
-        const lat = pt[0];
-        const lon = pt[1];
+        // Convert geodetic coordinates (radians) to projected space.
+        for (const [lat, lon] of path) {
         try {
           if (viewMode === "3D") {
             const ecef = lla_to_ecef(lat, lon, 0.0);
@@ -302,24 +319,25 @@ export class VectorTileLayer extends Layer {
         }
       }
 
-      if (coords.length < 6) continue;
+        if (coords.length < 6) continue;
 
-      gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer!);
-      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(coords), gl.DYNAMIC_DRAW);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer!);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(coords), gl.DYNAMIC_DRAW);
 
-      // Define estilo visual diferenciado com base no tipo da feição (Airway vs Boundary vs Fallback)
-      if (feature.properties.type === "airway") {
+        // Define estilo visual diferenciado com base no tipo da feição (Airway vs Boundary vs Fallback)
+        if (feature.properties.type === "airway") {
         // Azul claro para rotas/aerovias operacionais
         gl.uniform4f(this.uColorLoc, 0.0, 0.69, 1.0, 0.4 * this.opacity);
-        gl.drawArrays(gl.LINE_STRIP, 0, coords.length / 3);
-      } else if (feature.properties.type === "boundary") {
+          gl.drawArrays(gl.LINE_STRIP, 0, coords.length / 3);
+        } else if (feature.properties.type === "boundary") {
         // Laranja/âmbar para limites de espaço aéreo (CTA/TMA)
         gl.uniform4f(this.uColorLoc, 1.0, 0.5, 0.0, 0.25 * this.opacity);
-        gl.drawArrays(gl.LINE_STRIP, 0, coords.length / 3);
-      } else {
+          gl.drawArrays(gl.LINE_STRIP, 0, coords.length / 3);
+        } else {
         // Fallback para outras feições (verde esverdeado)
         gl.uniform4f(this.uColorLoc, 0.0, 0.9, 0.46, 0.5 * this.opacity);
-        gl.drawArrays(gl.LINE_STRIP, 0, coords.length / 3);
+          gl.drawArrays(gl.LINE_STRIP, 0, coords.length / 3);
+        }
       }
     }
 

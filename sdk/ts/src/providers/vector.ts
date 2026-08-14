@@ -1,66 +1,174 @@
+import { VectorTile } from "@mapbox/vector-tile";
+import { PbfReader } from "pbf";
 import { MapDataSource } from "./datasource";
 
+type Position = [number, number];
+
+export type VectorGeometryType =
+  | "Point"
+  | "LineString"
+  | "Polygon"
+  | "MultiPoint"
+  | "MultiLineString"
+  | "MultiPolygon";
+
+export type VectorCoordinates =
+  | Position[]
+  | Position[][]
+  | Position[][][];
+
 export interface VectorFeature {
-  type: "Point" | "LineString" | "Polygon";
-  coordinates: number[][]; // Coordinates as [lat_rad, lon_rad] arrays
-  properties: Record<string, any>;
+  type: VectorGeometryType;
+  /** Coordinates are [latitude_rad, longitude_rad]. */
+  coordinates: VectorCoordinates;
+  properties: Record<string, unknown>;
 }
 
-/**
- * Provedor para arquivos vetoriais de mapa (Mapbox Vector Tiles - MVT) do GeoServer.
- * Responsável por gerenciar a paginação, cacheamento de feições e busca espacial de tiles.
- */
+export interface VectorTileSourceOptions {
+  /** Coordinate system used by GeoJSON responses. */
+  geoJsonCrs?: "EPSG:900913" | "EPSG:4326";
+}
+
+interface GeoJsonFeature {
+  geometry?: {
+    type?: string;
+    coordinates?: unknown;
+  } | null;
+  properties?: Record<string, unknown> | null;
+}
+
+const WEB_MERCATOR_RADIUS = 6378137.0;
+
+/** Converts a Web Mercator coordinate in metres to [lat, lon] radians. */
+function webMercatorToLatLon([x, y]: Position): Position {
+  const lon = x / WEB_MERCATOR_RADIUS;
+  const lat = 2 * Math.atan(Math.exp(y / WEB_MERCATOR_RADIUS)) - Math.PI / 2;
+  return [lat, lon];
+}
+
+/** Converts a GeoJSON coordinate in degrees to [lat, lon] radians. */
+function degreesToLatLon([lon, lat]: Position): Position {
+  return [lat * Math.PI / 180, lon * Math.PI / 180];
+}
+
+function transformCoordinateTree(
+  coordinates: unknown,
+  transform: (position: Position) => Position
+): unknown {
+  if (!Array.isArray(coordinates)) {
+    throw new Error("Vector geometry coordinates must be an array");
+  }
+
+  if (coordinates.length === 0) return [];
+
+  if (typeof coordinates[0] === "number") {
+    if (coordinates.length < 2 || typeof coordinates[1] !== "number") {
+      throw new Error("Vector position must contain numeric x and y values");
+    }
+    return transform([coordinates[0], coordinates[1]]);
+  }
+
+  return coordinates.map((child) => transformCoordinateTree(child, transform));
+}
+
+function normalizeGeoJsonFeature(
+  feature: GeoJsonFeature,
+  transform: (position: Position) => Position
+): VectorFeature | null {
+  const geometry = feature.geometry;
+  if (!geometry || !geometry.type || geometry.coordinates === undefined) return null;
+
+  const supportedTypes: VectorGeometryType[] = [
+    "Point",
+    "LineString",
+    "Polygon",
+    "MultiPoint",
+    "MultiLineString",
+    "MultiPolygon",
+  ];
+  if (!supportedTypes.includes(geometry.type as VectorGeometryType)) {
+    throw new Error(`Unsupported vector geometry type: ${geometry.type}`);
+  }
+
+  const transformed = transformCoordinateTree(geometry.coordinates, transform);
+  const coordinates = geometry.type === "Point"
+    ? [transformed]
+    : transformed;
+
+  return {
+    type: geometry.type as VectorGeometryType,
+    coordinates: coordinates as VectorCoordinates,
+    properties: feature.properties ?? {},
+  };
+}
+
+function parseGeoJson(
+  buffer: ArrayBuffer,
+  transform: (position: Position) => Position
+): VectorFeature[] {
+  const text = new TextDecoder().decode(buffer);
+  const parsed = JSON.parse(text) as { features?: GeoJsonFeature[] };
+  if (!Array.isArray(parsed.features)) {
+    throw new Error("GeoJSON response must be a FeatureCollection");
+  }
+
+  return parsed.features
+    .map((feature) => normalizeGeoJsonFeature(feature, transform))
+    .filter((feature): feature is VectorFeature => feature !== null);
+}
+
+function parseMvt(buffer: ArrayBuffer, x: number, y: number, z: number): VectorFeature[] {
+  const tile = new VectorTile(new PbfReader(new Uint8Array(buffer)));
+  const features: VectorFeature[] = [];
+
+  for (const layer of Object.values(tile.layers)) {
+    for (let index = 0; index < layer.length; index++) {
+      const geoJson = layer.feature(index).toGeoJSON(x, y, z) as GeoJsonFeature;
+      const feature = normalizeGeoJsonFeature(geoJson, degreesToLatLon);
+      if (feature) features.push(feature);
+    }
+  }
+
+  return features;
+}
+
+/** Loads GeoJSON or Mapbox Vector Tiles into a bounded in-memory cache. */
 export class VectorTileSource implements MapDataSource {
   public readonly id: string = "geoserver_mvt";
-  private tileCache: Map<string, VectorFeature[]> = new Map(); // Key format: "z/x/y"
+  private tileCache: Map<string, VectorFeature[]> = new Map();
   private loadingTiles: Set<string> = new Set();
   private urlResolver: string | ((x: number, y: number, z: number) => string);
   private maxTiles: number;
+  private geoJsonCrs: "EPSG:900913" | "EPSG:4326";
 
   constructor(
     urlResolver: string | ((x: number, y: number, z: number) => string) = "",
-    maxTiles: number = 100
+    maxTiles: number = 100,
+    options: VectorTileSourceOptions = {}
   ) {
+    if (!Number.isInteger(maxTiles) || maxTiles <= 0) {
+      throw new Error("Vector tile cache capacity must be a positive integer");
+    }
     this.urlResolver = urlResolver;
     this.maxTiles = maxTiles;
+    this.geoJsonCrs = options.geoJsonCrs ?? "EPSG:900913";
   }
 
-  /**
-   * Carrega e decodifica as feições vetoriais de um tile específico.
-   */
   public async loadTile(x: number, y: number, z: number): Promise<void> {
     const key = `${z}/${x}/${y}`;
-
-    if (this.tileCache.has(key) || this.loadingTiles.has(key)) {
-      return;
-    }
-
-    if (this.tileCache.has(key)) {
-      const features = this.tileCache.get(key)!;
-      this.tileCache.delete(key);
-      this.tileCache.set(key, features);
-      return;
-    }
-
+    if (this.tileCache.has(key) || this.loadingTiles.has(key)) return;
     if (!this.urlResolver) {
-      // Se não há resolvedor de URL, gera feições simuladas/mockadas
-      const mockFeatures = this.generateMockFeatures(x, y, z);
-      this.tileCache.set(key, mockFeatures);
-      return;
+      throw new Error("A vector tile URL resolver is required");
     }
 
-    let url = "";
-    if (typeof this.urlResolver === "function") {
-      url = this.urlResolver(x, y, z);
-    } else {
-      url = this.urlResolver
+    const url = typeof this.urlResolver === "function"
+      ? this.urlResolver(x, y, z)
+      : this.urlResolver
         .replace("{x}", x.toString())
         .replace("{y}", y.toString())
         .replace("{z}", z.toString());
-    }
 
     this.loadingTiles.add(key);
-
     try {
       const response = await fetch(url);
       if (!response.ok) {
@@ -68,139 +176,48 @@ export class VectorTileSource implements MapDataSource {
       }
 
       const buffer = await response.arrayBuffer();
-
-      // Parser básico e tolerante a falhas.
-      // Se o formato retornado for JSON/GeoJSON, faz o parse;
-      // se for binário (MVT .pbf), utiliza um stub/mock temporário caso as dependências nativas
-      // não estejam instaladas no package.json.
-      let features: VectorFeature[] = [];
+      let features: VectorFeature[];
       try {
-        const text = new TextDecoder().decode(buffer);
-        const parsed = JSON.parse(text);
-        if (parsed && Array.isArray(parsed.features)) {
-          // GeoServer GWC TMS EPSG:900913 está em metros. Convertemos de metros para Lat/Lon em radianos:
-          const R_EARTH = 6378137.0;
-          const toLatLonRad = (x: number, y: number): [number, number] => {
-            const lon = x / R_EARTH;
-            const lat = 2 * Math.atan(Math.exp(y / R_EARTH)) - Math.PI / 2;
-            return [lat, lon];
-          };
-
-          features = parsed.features.map((f: any) => {
-            const geom = f.geometry || {};
-            const type = geom.type || "LineString";
-            const rawCoords = geom.coordinates || [];
-            let coords: number[][] = [];
-
-            if (type === "Point" && Array.isArray(rawCoords) && rawCoords.length >= 2) {
-              coords = [toLatLonRad(rawCoords[0], rawCoords[1])];
-            } else if (type === "LineString" && Array.isArray(rawCoords)) {
-              coords = rawCoords.map((pt: any) => toLatLonRad(pt[0], pt[1]));
-            } else if (type === "Polygon" && Array.isArray(rawCoords) && Array.isArray(rawCoords[0])) {
-              coords = rawCoords[0].map((pt: any) => toLatLonRad(pt[0], pt[1]));
-            }
-
-            return {
-              type: type as "Point" | "LineString" | "Polygon",
-              coordinates: coords,
-              properties: f.properties || {}
-            };
-          });
+        const geoJsonTransform = this.geoJsonCrs === "EPSG:4326"
+          ? degreesToLatLon
+          : webMercatorToLatLon;
+        features = parseGeoJson(buffer, geoJsonTransform);
+      } catch (geoJsonError) {
+        try {
+          features = parseMvt(buffer, x, y, z);
+        } catch (mvtError) {
+          throw new Error(
+            `Unable to decode vector tile as GeoJSON or MVT: ${String(mvtError)}`,
+            { cause: geoJsonError }
+          );
         }
-      } catch {
-        // Fallback para feições mockadas se for binário (MVT) e não tivermos o parser compilado
-        features = this.generateMockFeatures(x, y, z);
       }
 
-      // Controle de cache LRU
       if (this.tileCache.size >= this.maxTiles) {
         const oldestKey = this.tileCache.keys().next().value;
-        if (oldestKey) {
-          this.tileCache.delete(oldestKey);
-        }
+        if (oldestKey !== undefined) this.tileCache.delete(oldestKey);
       }
-
       this.tileCache.set(key, features);
-    } catch (err) {
-      console.error(`Failed to load vector tile [z:${z}, x:${x}, y:${y}] from ${url}:`, err);
-      // Tolerância a falhas: insere feições vazias/mockadas para evitar crash
-      this.tileCache.set(key, this.generateMockFeatures(x, y, z));
     } finally {
       this.loadingTiles.delete(key);
     }
   }
 
-  /**
-   * Obtém a lista de feições vetoriais carregadas para um determinado tile.
-   */
   public getTileFeatures(x: number, y: number, z: number): VectorFeature[] {
-    const key = `${z}/${x}/${y}`;
-    return this.tileCache.get(key) || [];
+    return this.tileCache.get(`${z}/${x}/${y}`) ?? [];
   }
 
-  /**
-   * Descarrega e remove do cache um tile vetorial.
-   */
   public unloadTile(x: number, y: number, z: number): void {
-    const key = `${z}/${x}/${y}`;
-    this.tileCache.delete(key);
+    this.tileCache.delete(`${z}/${x}/${y}`);
   }
 
-  /**
-   * Limpa o cache vetorial.
-   */
   public clearCache(): void {
     this.tileCache.clear();
   }
 
-  /**
-   * Gera feições mockadas de teste (aerovias e limites de setor) para validação visual.
-   */
-  private generateMockFeatures(x: number, y: number, z: number): VectorFeature[] {
-    const features: VectorFeature[] = [];
-
-    // São Paulo TMA Center aproximado em radianos
-    const SP_LAT_RAD = -23.62 * (Math.PI / 180);
-    const SP_LON_RAD = -46.65 * (Math.PI / 180);
-
-    // Gerar algumas aerovias de rota cruzando o setor
-    features.push({
-      type: "LineString",
-      coordinates: [
-        [SP_LAT_RAD + 0.5, SP_LON_RAD - 0.8],
-        [SP_LAT_RAD - 0.5, SP_LON_RAD + 0.8]
-      ],
-      properties: { name: "UM415", type: "airway" }
-    });
-
-    features.push({
-      type: "LineString",
-      coordinates: [
-        [SP_LAT_RAD - 0.6, SP_LON_RAD - 0.6],
-        [SP_LAT_RAD + 0.6, SP_LON_RAD + 0.6]
-      ],
-      properties: { name: "UZ22", type: "airway" }
-    });
-
-    // Limites de controle da terminal TMA SP (polígono octogonal)
-    const steps = 8;
-    const radiusRad = 80000 / 6378137.0; // 80km de raio convertidos para radianos
-    const polyCoords: number[][] = [];
-    
-    for (let i = 0; i <= steps; i++) {
-      const angle = (i * 2 * Math.PI) / steps;
-      polyCoords.push([
-        SP_LAT_RAD + radiusRad * Math.cos(angle),
-        SP_LON_RAD + radiusRad * Math.sin(angle)
-      ]);
-    }
-
-    features.push({
-      type: "Polygon",
-      coordinates: polyCoords,
-      properties: { name: "TMA SP CTA1", type: "boundary" }
-    });
-
-    return features;
+  public getCacheSize(): number {
+    return this.tileCache.size;
   }
 }
+
+export default VectorTileSource;

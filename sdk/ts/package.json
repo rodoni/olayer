@@ -13,7 +13,9 @@
     "test:run": "vitest run"
   },
   "dependencies": {
-    "olayer-wasm": "file:./wasm/pkg"
+    "@mapbox/vector-tile": "^3.0.0",
+    "olayer-wasm": "file:./wasm/pkg",
+    "pbf": "^5.1.2"
   },
   "devDependencies": {
     "canvas": "^3.2.3",

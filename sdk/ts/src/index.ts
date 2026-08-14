@@ -25,6 +25,7 @@ export { Layer, LayerManager, TileLayer, VectorTileLayer } from "./layers";
 export { DataManager, TerrainTileSource } from "./providers";
 export { RasterTileSource } from "./providers/raster";
 export { VectorTileSource } from "./providers/vector";
+export type { VectorFeature, VectorGeometryType, VectorCoordinates, VectorTileSourceOptions } from "./providers/vector";
 export { MapDataStack } from "./providers/stack";
 export type { MapDataSource } from "./providers/datasource";
 

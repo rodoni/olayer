@@ -3,6 +3,8 @@
 
 This document establishes the modular development plan for the construction of **Olayer**, dividing the project into incremental phases and delivery milestones (*milestones*). The planning follows the strict separation of responsibilities defined in the [System Architecture (arch.md)](arch.md) and the [Technical Specification (spec.md)](spec.md).
 
+The current enhancement backlog is maintained in [Enhancement Proposals](proposals.md). It records implementation gaps found in the current repository and should be used to refine future milestones.
+
 ---
 
 ## Overview of the Roadmap (Roadmap)

@@ -167,4 +167,5 @@ export { TerrainTileSource as DataManager };
 export type { MapDataSource } from "./datasource";
 export { RasterTileSource } from "./raster";
 export { VectorTileSource } from "./vector";
+export type { VectorFeature, VectorGeometryType, VectorCoordinates, VectorTileSourceOptions } from "./vector";
 export { MapDataStack } from "./stack";
