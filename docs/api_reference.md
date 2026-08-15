@@ -12,6 +12,8 @@ above the WGS84 ellipsoid.
 
 ### 1.1 `geodesy` — Geodetic Mathematics
 
+Sub-modules: `conversions`, `coords`, `ellipsoid`, `errors`, `math`, `solvers`. Public items are re-exported from `olayer_core::geodesy`.
+
 #### Structs
 
 | Struct | Fields | Notes |
@@ -113,6 +115,8 @@ pub enum GeodesyError {
 
 ### 1.2 `camera` — Camera State & VP Matrices
 
+The `camera` module contains the public `CameraState` struct. It is also re-exported from `olayer_core::projections` for convenience.
+
 #### Struct
 
 ```rust
@@ -156,6 +160,9 @@ pub enum CameraError {
 ---
 
 ### 1.3 `projections` — Cartographic Projections
+
+Modules: `lambert_conformal_conic`, `stereographic`, `web_mercator`, `matrix`, `errors`.
+Public re-exports from `olayer_core::projections`: `Projection`, `CameraState`, `LambertConformalConic`, `Stereographic`, `WebMercator`, `ProjectionError`, `Matrix4`.
 
 #### `trait Projection`
 
@@ -216,6 +223,8 @@ Implements `Mul<&Matrix4>` and `Mul<Matrix4>` for all ref/owned combinations.
 
 ### 1.4 `terrain` — DTED Elevation Engine
 
+Sub-modules: `errors`, `tile`, `engine`. Public items are re-exported from `olayer_core::terrain`.
+
 #### Structs
 
 ```rust
@@ -246,11 +255,11 @@ pub fn get_cell_elevation(&self, row: usize, col: usize) -> i16
 
 ```rust
 // Constructors
-pub fn new() -> Self                                 // default capacity
-pub fn with_capacity(capacity: usize) -> Self        // custom cache capacity
+pub fn new() -> Self
+pub fn with_capacity(capacity: usize) -> Self
 
 // Cache management
-pub fn set_cache_capacity(&self, capacity: usize)    // panics if capacity == 0
+pub fn set_cache_capacity(&self, capacity: usize)  // returns () directly; capacity == 0 panics
 pub fn cache_size(&self) -> usize
 pub fn clear_cache(&self)
 
@@ -261,6 +270,10 @@ pub fn unload_tile(&mut self, key: &TileKey) -> bool
 // Elevation queries (O(1) bilinear interpolation)
 pub fn get_elevation(&self, lat_deg: f64, lon_deg: f64) -> Result<f64, TerrainError>
 pub fn get_elevation_rad(&self, lat_rad: f64, lon_rad: f64) -> Result<f64, TerrainError>
+pub fn get_elevation_status(&self, lat_rad: f64, lon_rad: f64) -> Result<ElevationSample, TerrainError>
+pub fn get_elevation_with_policy(&self, lat_rad: f64, lon_rad: f64, policy: UnknownTerrainPolicy) -> Result<Option<f64>, TerrainError>
+pub fn get_vertical_profile_status(&self, route: &[LatLon], step_meters: f64, policy: UnknownTerrainPolicy) -> Result<Vec<ProfilePointStatus>, TerrainError>
+pub fn calculate_clearance(&self, lat_rad: f64, lon_rad: f64, aircraft_height_meters: f64, minimum_clearance_meters: f64, policy: UnknownTerrainPolicy) -> Result<ClearanceResult, TerrainError>
 
 // Vertical profile
 pub fn get_vertical_profile(&self, route: &[LatLon], step_meters: f64) -> Result<Vec<ProfilePoint>, TerrainError>
@@ -282,11 +295,16 @@ pub enum TerrainError {
 
 ### 1.5 `sld` — OGC SLD XML Parser
 
+Sub-modules: `errors`, `styles`, `parser`. Public items are re-exported from `olayer_core::sld`.
+
 #### Structs
 
 ```rust
 pub struct StyleRegistry { pub layers: HashMap<String, Vec<RuleStyle>> }
-// impl new(), get_applicable_rules(name, scale) -> Vec<RuleStyle>
+impl StyleRegistry {
+    pub fn new() -> Self
+    pub fn get_applicable_rules(&self, name: &str, scale: f64) -> Vec<&RuleStyle>
+}
 
 pub struct RuleStyle {
     pub name: String,
@@ -316,6 +334,8 @@ pub enum SldError { XmlError(String), InvalidValue(String) }
 ---
 
 ### 1.6 `symbol_registry` — Pluggable Symbology
+
+Sub-modules: `errors`, `state`, `engine`; submodules `providers` (`declarative`, `nato`, `icao`). Public items are re-exported from `olayer_core::symbol_registry` and `olayer_core::symbol_registry::providers`.
 
 #### Primitives (all `Serialize`/`Deserialize`)
 
@@ -367,7 +387,7 @@ pub fn register_provider(&mut self, provider: Box<dyn SymbologyProvider + Send +
 pub fn resolve_symbol(&self, code: &str, style: &StyleRegistry) -> Result<ResolvedSymbol, SymbologyError>
 ```
 
-Providers are queried in registration order.
+Providers are queried in registration order. The `StyleRegistry` is only used by providers that need styling information; many built-in providers ignore it.
 
 #### Built-in Providers
 
@@ -411,6 +431,8 @@ pub enum SymbologyError {
 
 ### 1.7 `interpolator` — Dead-Reckoning
 
+Sub-modules: `errors`, `state`, `engine`. Public items are re-exported from `olayer_core::interpolator`.
+
 #### Structs
 
 ```rust
@@ -428,20 +450,35 @@ pub struct InterpolatedTarget {
     pub id: String,
     pub position: LatLon,
     pub heading_rad: f64,
+    pub quality: PredictionQuality,
+}
+
+pub enum PredictionQuality { Valid, Stale, ClockSkewed, Unavailable }
+
+pub struct SkippedTarget {
+    pub id: String,
+    pub quality: PredictionQuality,
+    pub age_seconds: f64,
+}
+
+pub struct InterpolationBatch {
+    pub targets: Vec<InterpolatedTarget>,
+    pub skipped: Vec<SkippedTarget>,
 }
 ```
 
 #### `impl InterpolationEngine`
 
 ```rust
-pub fn new() -> Self                                     // stale threshold = 30.0 s; + Default
+pub fn new() -> Self                                    // stale threshold = 30.0 s; + Default
 pub fn with_stale_threshold(stale_threshold: f64) -> Self
 pub fn update_target(&mut self, state: TargetState) -> Result<(), InterpolatorError>
 pub fn remove_target(&mut self, id: &str) -> bool
 pub fn interpolate_all(&self, current_time: f64) -> Result<Vec<InterpolatedTarget>, InterpolatorError>
+pub fn interpolate_all_with_status(&self, current_time: f64) -> Result<InterpolationBatch, InterpolatorError>
 ```
 
-Stale targets and negative-dt targets are silently skipped. Batch never aborts on a single bad target.
+`TargetState` is `Clone` but not `Copy` (contains `String`/`Arc<str>` id).
 
 #### Error
 
@@ -469,8 +506,11 @@ All `#[wasm_bindgen]` structs. Errors returned as `JsValue` strings.
 | `WasmInterpolationEngine` | `new()` + `with_stale_threshold(f64)` |
 | `WasmCameraState` | `pub center_lat` / `center_lon` / `center_height` / `zoom` / `rotation` / `pitch` / `roll` / `aspect_ratio` / `viewport_base_meters` (all `f64`) |
 | `WasmProjection` | Factory methods below |
+| `WasmProjectionType` | Enum: `Lcc`, `Stereographic`, `WebMercator` |
 | `WasmStyleRegistry` | `parse(xml: &str)` |
 | `WasmSymbolRegistry` | `new()` |
+
+`version(): number` is exposed on `WasmProjection` for cache invalidation but is rarely needed by SDK consumers.
 
 ### 2.2 `WasmTerrainEngine`
 
@@ -478,15 +518,18 @@ All `#[wasm_bindgen]` structs. Errors returned as `JsValue` strings.
 // Coordinates are in decimal degrees for elevation queries
 load_tile(data: Uint8Array): WasmTileKey
 unload_tile(lat_deg: i32, lon_deg: i32): boolean
-get_elevation(lat_deg: f64, lon_deg: f64): f64
-get_elevation_rad(lat_rad: f64, lon_rad: f64): f64
+get_elevation(lat_deg: f64, lon_deg: f64): f64            // throws JsValue on error
+get_elevation_rad(lat_rad: f64, lon_rad: f64): f64        // throws JsValue on error
+get_elevation_status(lat_rad: f64, lon_rad: f64): JsValue // { elevation_meters: number | null }
+get_vertical_profile_status(route_coords: Float64Array, step_meters: f64, reject_unknown: boolean): JsValue
+calculate_clearance(lat_rad: f64, lon_rad: f64, aircraft_height_meters: f64, minimum_clearance_meters: f64, reject_unknown: boolean): JsValue
 get_vertical_profile(route_coords: Float64Array, step_meters: f64): Float64Array
   // Input: flat [lat0, lon0, h0, lat1, lon1, h1, ...] in degrees
   // Output: flat [dist0, elev0, lat0, lon0, h0, ...] — 5 values per point
-set_cache_capacity(capacity: usize): void
+set_cache_capacity(capacity: usize): void                 // throws if capacity == 0
 cache_size(): usize
 clear_cache(): void
-free(): void                                            // MUST call to release WASM heap
+free(): void                                              // MUST call to release WASM heap
 ```
 
 ### 2.3 `WasmInterpolationEngine`
@@ -495,9 +538,12 @@ free(): void                                            // MUST call to release 
 // Coordinates are in radians, altitude in metres
 update_target(id: string, lat_rad: f64, lon_rad: f64, height: f64, speed_mps: f64, track_heading_rad: f64, vertical_rate_mps: f64, last_ping_time: f64): void
 remove_target(id: string): boolean
-interpolate_all(current_time: f64): JsValue             // JSON string, parse with JSON.parse()
+interpolate_all(current_time: f64): JsValue             // JSON array, parse with JSON.parse()
+interpolate_all_with_status(current_time: f64): JsValue // JSON batch with skipped statuses
 free(): void
 ```
+
+`update_target` throws a `JsValue` string if the supplied state is invalid (e.g., negative speed).
 
 ### 2.4 `WasmProjection`
 
@@ -559,7 +605,7 @@ class OlayerController {
   readonly atlasManager: TextureAtlasManager
   readonly layerManager: LayerManager
   readonly dataManager: MapDataStack
-  readonly currentViewProjMatrix: Float32Array
+  currentViewProjMatrix: Float32Array
 
   constructor(config: OlayerConfig)
 
@@ -571,15 +617,18 @@ class OlayerController {
   setCenter(latRad: number, lonRad: number): void
   setZoom(zoom: number): void
   setRotation(rotationRad: number): void
-  getCenterLat(): number; getCenterLon(): number
+  getCenterLat(): number; getCenterLon(): number; getCenterHeight(): number
   getZoom(): number; getRotation(): number
   getPitch(): number; setPitch(pitchRad: number): void
   getRoll(): number; setRoll(rollRad: number): void
+  getViewportBaseMeters(): number
   getCameraState(): WasmCameraState
 
   // View mode
   getViewMode(): "2D" | "2.5D" | "3D"
   setViewMode(value: "2D" | "2.5D" | "3D"): void
+  getIs3D(): boolean
+  setIs3D(value: boolean): void
 
   // Lifecycle
   startLoop(): void
@@ -588,20 +637,25 @@ class OlayerController {
 }
 ```
 
+The constructor automatically registers a default `TerrainTileSource` in `dataManager`.
+
 ### 3.2 Layers
 
 ```typescript
 abstract class Layer {
-  constructor(public id: string, public visible?: boolean, public opacity?: number)
+  id: string
+  visible: boolean
+  opacity: number
+  constructor(id: string)
   abstract renderStatic(gl: WebGL2RenderingContext, viewProjMatrix: Float32Array): void
   abstract renderDynamic(ctx: CanvasRenderingContext2D, currentTime: number): void
 }
 
 class LayerManager {
-  addLayer(layer: Layer): void
+  addLayer(layer: Layer): void          // throws on duplicate id
   removeLayer(id: string): boolean
-  reorderLayer(id: string, newIndex: number): void
-  getLayers(): Layer[]
+  reorderLayer(id: string, newIndex: number): void   // throws if not found or out of bounds
+  getLayers(): Layer[]                  // copy of internal array
   renderStaticLayers(gl: WebGL2RenderingContext, viewProjMatrix: Float32Array): void
   renderDynamicLayers(ctx: CanvasRenderingContext2D, currentTime: number): void
 }
@@ -621,63 +675,148 @@ interface MapDataSource {
 }
 
 class TerrainTileSource implements MapDataSource {
-  constructor(engine: WasmTerrainEngine, urlResolver: string | ((key: WasmTileKey) => string))
-  injectTile(dtedBuffer: Uint8Array, latDeg: number, lonDeg: number): void
+  id: "terrain_dted"
+  constructor(engine: WasmTerrainEngine, urlResolver?: string | ((lat: number, lon: number) => string), maxTiles?: number)
+  loadTile(lat: number, lon: number, _unused?: number): Promise<void>
+  unloadTile(lat: number, lon: number, _unused?: number): void
+  injectTile(lat: number, lon: number, bytes: Uint8Array): void
   clearCache(): void
   getCacheSize(): number
 }
+// Alias: export { TerrainTileSource as DataManager }
 
 class RasterTileSource implements MapDataSource {
-  constructor(gl: WebGL2RenderingContext, urlResolver?: string | ((x: number, y: number, z: number) => string))
+  id: "wmts_raster"
+  constructor(gl: WebGL2RenderingContext, urlResolver?: string | ((x: number, y: number, z: number) => string), maxTiles?: number)
+  loadTile(x: number, y: number, z: number): Promise<void>
+  unloadTile(x: number, y: number, z: number): void
   getTileTexture(x: number, y: number, z: number): WebGLTexture | null
   clearCache(): void
   getCacheSize(): number
 }
 
-class VectorTileSource implements MapDataSource { ... }
+interface VectorFeature {
+  type: "Point" | "LineString" | "Polygon"
+  coordinates: number[][]   // [lat_rad, lon_rad] arrays
+  properties: Record<string, any>
+}
+
+class VectorTileSource implements MapDataSource {
+  id: "geoserver_mvt"
+  constructor(
+    urlResolver?: string | ((x: number, y: number, z: number) => string),
+    maxTiles?: number,
+     options?: {
+       geoJsonCrs?: "EPSG:900913" | "EPSG:4326",
+       mvtLayer?: string,
+       maxRetries?: number
+     }
+  )
+  loadTile(x: number, y: number, z: number): Promise<void>
+  unloadTile(x: number, y: number, z: number): void
+  getTileFeatures(x: number, y: number, z: number): VectorFeature[]
+  clearCache(): void
+   getCacheSize(): number
+   getCacheStats(): { items: number; bytes: number; hits: number; misses: number; evictions: number }
+}
+
+`loadTile` optionally accepts `{ signal?: AbortSignal, maxRetries?: number }`.
 
 class MapDataStack {
   registerSource(source: MapDataSource): void
-  getSource<T extends MapDataSource>(id: string): T | undefined
+  getSource<T extends MapDataSource>(id: string): T | null
   clearCache(): void
   getCacheSize(): number
+  getCacheStats(): { items: number; bytes: number; hits: number; misses: number; evictions: number }
   destroy(): void
 }
 ```
 
+`VectorTileSource` decodes binary Mapbox Vector Tiles (MVT/PBF) and GeoJSON
+FeatureCollections. MVT coordinates are converted from tile space to
+`[latitude_rad, longitude_rad]`. GeoJSON defaults to GeoServer Web Mercator
+(`EPSG:900913`) metres; pass `geoJsonCrs: "EPSG:4326"` for longitude/latitude
+degrees. Decode and HTTP failures reject `loadTile` and do not insert fallback
+features into the cache. `mvtLayer` restricts binary decoding to one named MVT
+layer; when omitted, all layers are decoded.
+
+**Resolver templates:**
+- Raster/vector: `{x}`, `{y}`, `{z}`
+- Terrain string resolver: `{lat}`, `{lon}`, `{latStr}`, `{lonStr}` (latStr/lonStr are DTED-style `DD0000N`/`DDD0000E` strings)
+- A function resolver receives `(lat, lon)` for terrain and `(x, y, z)` for raster/vector.
+
 ### 3.4 Renderers
 
+`WebGLRenderer` manages the static grid geometry; `CPURenderer` draws dynamic overlays (targets, labels) on the Canvas 2D layer. Both use the same `InterpolatedTarget` interface returned by the WASM interpolator.
+
 ```typescript
+interface InterpolatedTarget {
+  id: string
+  position: { lat: number; lon: number; height: number }  // radians, metres
+  heading_rad: number
+}
+
 class WebGLRenderer {
   constructor(gl: WebGL2RenderingContext)
-  rebuildGrid(projection: WasmProjection, viewMode: string): void
+  rebuildGrid(projection: WasmProjection | null, viewMode: string = "2D"): void
   renderGrid(viewProjMatrix: Float32Array): void
   destroy(): void
 }
 
 class CPURenderer {
   constructor(ctx: CanvasRenderingContext2D)
-  beginFrame(width: number, height: number): void
-  projectToScreen(lat: number, lon: number, alt: number, viewMode: string, cameraState: WasmCameraState, projection: WasmProjection, viewProjMatrix: Float32Array, width: number, height: number): { x: number, y: number } | null
-  drawTarget(pos: { x: number, y: number }, id: string, headingRad: number, speedMps: number, atlasUV?: SymbolUV): void
+  beginFrame(): void
+  projectToScreen(
+    projection: WasmProjection,
+    latRad: number, lonRad: number, height: number,
+    cx: number, cy: number, zoom: number, rotation: number,
+    viewportBaseMeters: number, canvasWidth: number, canvasHeight: number,
+    viewMode: string = "2D",
+    viewProjMatrix?: Float32Array,
+    centerLat?: number, centerLon?: number
+  ): { x: number, y: number } | null
+  drawTarget(
+    target: InterpolatedTarget,
+    screenPos: { x: number; y: number },
+    projection: WasmProjection,
+    cx: number, cy: number, zoom: number, rotation: number,
+    viewportBaseMeters: number, canvasWidth: number, canvasHeight: number,
+    speedMps: number,
+    atlasTexture: HTMLImageElement | HTMLCanvasElement | null,
+    symbolUv: SymbolUV | undefined,
+    viewMode: string = "2D",
+    viewProjMatrix?: Float32Array,
+    centerLat?: number, centerLon?: number
+  ): void
 }
 
 class TextureAtlasManager {
   constructor(gl: WebGL2RenderingContext, size?: number)  // default 512²
   registerSymbol(id: string, width: number, height: number, drawFn: (ctx: CanvasRenderingContext2D) => void): SymbolUV
-  registerWasmSymbol(symbol: any): SymbolUV                // ResolvedSymbol from WASM
-  registerImageSymbol(id: string, blob: Blob): Promise<SymbolUV>
+  registerWasmSymbol(id: string, registry: any, style: any): SymbolUV
+  registerImageSymbol(id: string, src: string | HTMLImageElement, width?: number, height?: number): Promise<SymbolUV>
   getSymbolUV(id: string): SymbolUV | undefined
-  getTexture(): WebGLTexture
+  getTexture(): WebGLTexture | null
   destroy(): void
 }
 
-interface SymbolUV { u0: number, v0: number, u1: number, v1: number }
+interface SymbolUV { u0: number, v0: number, u1: number, v1: number, width: number, height: number }
+```
 ```
 
 ---
 
 ## 4. Native SDK (`olayer-native`)
+
+### Re-exports from `lib.rs`
+
+```rust
+pub use native_controller::NativeController;
+pub use native_layer_manager::{Layer, NativeLayerManager};
+pub use native_map_data_stack::{MapDataSource, NativeMapDataStack, TerrainDataSource, GeoserverWmtsSource};
+pub use wgpu_gpu_pipeline::{RasterTileUpload, WgpuGpuPipeline, RasterVertex, WgpuRasterTile};
+pub use wgpu_cpu_vertex_pipeline::{WgpuCpuVertexPipeline, project_lla_to_screen, rasterize_svg};
+```
 
 ### 4.1 `NativeController`
 
@@ -692,11 +831,14 @@ pub struct NativeController {
 
 impl NativeController {
     pub fn new(center_lat: f64, center_lon: f64) -> Self
+    pub fn create_geoserver_source(&self, id: &str, base_url: &str, layer_name: &str) -> GeoserverWmtsSource
     pub fn trigger_active(&mut self)
     pub fn check_active(&mut self) -> bool
     pub fn get_target_fps(&mut self) -> u32   // 60 (active) or 15 (idle)
 }
 ```
+
+Public fields: `terrain: TerrainEngine`, `interpolator: InterpolationEngine`, `projection: Box<dyn Projection + Send + Sync>`, `camera: CameraState`, `view_mode: String`.
 
 ### 4.2 `Layer` trait & `NativeLayerManager`
 
@@ -728,6 +870,8 @@ impl NativeLayerManager {
 }
 ```
 
+The manager stores layers in back-to-front render order. `show_*` toggles are hard-wired convenience flags used by the native demo and do not affect custom layers. "Static" layers are regenerated only on camera/projection changes; "dynamic" layers are redrawn every frame.
+
 ### 4.3 `MapDataSource` trait & `NativeMapDataStack`
 
 ```rust
@@ -737,7 +881,7 @@ pub trait MapDataSource {
     fn cache_size(&self) -> usize;
 }
 
-impl NativeMapDataStack {                                    // + Default
+impl NativeMapDataStack {
     pub fn new() -> Self
     pub fn register_source(&mut self, source: Box<dyn MapDataSource>) -> Result<(), String>
     pub fn get_source(&self, id: &str) -> Option<&dyn MapDataSource>
@@ -753,28 +897,89 @@ impl TerrainDataSource {
     pub fn load_buffer(&mut self, buffer: &[u8]) -> Result<(), String>
     pub fn unload_tile(&mut self, lat_deg: i32, lon_deg: i32) -> bool
     pub fn get_elevation(&self, lat_deg: f64, lon_deg: f64) -> Result<f64, String>
+    pub fn clear_cache(&mut self)        // unloads all tracked tiles
+    pub fn cache_size(&self) -> usize    // number of tracked tiles
 }
 // impl MapDataSource for TerrainDataSource
+
+impl GeoserverWmtsSource {                                      // + Clone
+    pub fn new(id: &str, base_url: &str, layer_name: &str) -> Self  // spawns background worker thread
+    pub fn load_tile(&self, x: u32, y: u32, z: u32)                // async, non-blocking
+    pub fn get_tile_pixels(&self, x: u32, y: u32, z: u32) -> Option<Vec<u8>>  // RGBA8
+    pub fn get_cached_keys(&self) -> Vec<String>                   // e.g. ["z/x/y", ...]
+    pub fn base_url(&self) -> &str
+    pub fn layer_name(&self) -> &str
+    pub fn clear_cache(&mut self)
+    pub fn cache_size(&self) -> usize
+}
+// impl MapDataSource for GeoserverWmtsSource
 ```
 
 ### 4.4 `WgpuGpuPipeline`
 
+#### Raster Tile Structs
+
+```rust
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct RasterVertex {
+    pub position: [f32; 3],
+    pub tex_coords: [f32; 2],
+}
+
+pub struct WgpuRasterTile {
+    pub key: String,
+    pub x: u32, pub y: u32, pub z: u32,
+    pub texture: wgpu::Texture,
+    pub bind_group: wgpu::BindGroup,
+    pub vertex_buffer: wgpu::Buffer,
+    pub index_buffer: wgpu::Buffer,
+}
+
+pub struct RasterTileUpload<'a> {
+    pub device: &'a wgpu::Device,
+    pub queue: &'a wgpu::Queue,
+    pub key: &'a str,
+    pub pixels: &'a [u8],       // RGBA8
+    pub x: u32, pub y: u32, pub z: u32,
+    pub controller: &'a NativeController,
+}
+```
+
+#### `WgpuGpuPipeline` Struct
+
 ```rust
 pub struct WgpuGpuPipeline {
+    // Grid rendering
     pub pipeline: wgpu::RenderPipeline,
     pub bind_group: wgpu::BindGroup,
     pub uniform_buffer: wgpu::Buffer,
     pub grid_vertex_buffer: Option<wgpu::Buffer>,
     pub grid_vertices_len: usize,
-}
-
-impl WgpuGpuPipeline {
-    pub fn new(device: &wgpu::Device, config_format: wgpu::TextureFormat) -> Self
-    pub fn generate_grid_vertices(controller: &NativeController) -> Vec<f32>   // pure CPU
-    pub fn rebuild_grid_buffers(&mut self, controller: &NativeController, device: &wgpu::Device, queue: &wgpu::Queue)
-    pub fn render<'a>(&'a self, render_pass: &mut wgpu::RenderPass<'a>)
+    // Raster rendering
+    pub raster_pipeline: wgpu::RenderPipeline,
+    pub raster_bind_group_layout: wgpu::BindGroupLayout,
+    pub raster_sampler: wgpu::Sampler,
+    pub loaded_gpu_tiles: HashMap<String, WgpuRasterTile>,
 }
 ```
+
+All fields are public so advanced users can bind their own uniforms; most callers only need the methods below.
+
+#### `impl WgpuGpuPipeline`
+
+```rust
+pub fn new(device: &wgpu::Device, config_format: wgpu::TextureFormat) -> Self
+pub fn generate_grid_vertices(controller: &NativeController) -> Vec<f32>   // pure CPU, no GPU needed
+pub fn rebuild_grid_buffers(&mut self, controller: &NativeController, device: &wgpu::Device, queue: &wgpu::Queue)
+pub fn render<'a>(&'a self, render_pass: &mut wgpu::RenderPass<'a>)
+pub fn upload_raster_tile(&mut self, upload: RasterTileUpload<'_>)         // hard-coded 256x256 RGBA8 texture
+pub fn rebuild_raster_tile_buffers(&mut self, device: &wgpu::Device, controller: &NativeController)
+pub fn clear_raster_tiles(&mut self)
+pub fn render_raster_tiles<'a>(&'a self, render_pass: &mut wgpu::RenderPass<'a>, visible_keys: &HashSet<String>)
+```
+
+`render` draws the grid; `render_raster_tiles` draws visible quads. The raster pipeline expects an already-bound uniform bind group at group 0 and a per-tile texture/sampler bind group at group 1. Tile vertex positions are generated in either ECEF (3D) or projected planar metres (2D/2.5D) based on `controller.view_mode`.
 
 ### 4.5 `WgpuCpuVertexPipeline`
 
@@ -787,11 +992,11 @@ impl WgpuCpuVertexPipeline {
     pub fn draw_targets(
         &self, painter: &egui::Painter,
         targets: &[InterpolatedTarget],
-        selected_target_id: &Option<String>,
+        selected_target_id: &Option<Arc<str>>,
         controller: &NativeController,
         view_proj_matrix: &[f32; 16],
         width: u32, height: u32,
-        simulated_speeds: &HashMap<String, f64>,
+        simulated_speeds: &HashMap<Arc<str>, f64>,
     )
 }
 
@@ -804,6 +1009,8 @@ pub fn project_lla_to_screen(
 pub fn rasterize_svg(svg_data: &str, width: u32, height: u32) -> Result<Vec<u8>, String>
 ```
 
+`project_lla_to_screen` understands `"2D"`, `"2.5D"`, and `"3D"` view modes. In `"3D"` it performs horizon occlusion culling and multiplies by the supplied `view_proj_matrix`; in `"2.5D"` it projects through the planar projection and applies perspective; in `"2D"` it maps planar coordinates through camera rotation/zoom to screen pixels.
+
 ---
 
 ## 5. C-FFI Bridge (`libolayer_native.h`)
@@ -814,7 +1021,7 @@ All functions return `int32_t`. `>= 0` = success. Negative codes: `-1` null, `-2
 
 ```c
 struct C_LatLon { double lat; double lon; double height; };
-struct C_InterpolatedTarget { char *id; double lat; double lon; double height; double heading_rad; };
+struct C_InterpolatedTarget { char *id; double lat; double lon; double height; double heading_rad; int32_t quality; };
 struct C_ProfilePoint { double distance_meters; double ground_elevation; double lat; double lon; double height; };
 ```
 
@@ -835,11 +1042,22 @@ int olayer_terrain_engine_get_elevation(
 int olayer_terrain_engine_get_elevation_rad(
     TerrainEngine* engine, double lat_rad, double lon_rad, double* out_elevation);
 
+// Returns 0 for valid, 1 for unknown/null elevation, or a negative error.
+int olayer_terrain_engine_get_elevation_status(
+    TerrainEngine* engine, double lat_rad, double lon_rad, double* out_elevation);
+
+// Returns 0 safe, 1 warning, 2 unknown terrain, or a negative error.
+int olayer_terrain_engine_calculate_clearance(
+    TerrainEngine* engine, double lat_rad, double lon_rad,
+    double aircraft_height_meters, double minimum_clearance_meters,
+    bool reject_unknown, double* out_clearance);
+
 int olayer_terrain_engine_get_vertical_profile(
     TerrainEngine* engine,
     const double* route_lat, const double* route_lon, const double* route_height,
     size_t route_len, double step_meters,
     struct C_ProfilePoint** out_profile, size_t* out_count);
+// route_lat/route_lon are in degrees; route_height in metres
 
 int olayer_terrain_engine_set_cache_capacity(TerrainEngine* engine, size_t capacity);
 size_t olayer_terrain_engine_cache_size(TerrainEngine* engine);
@@ -945,5 +1163,15 @@ function compileLibrary(configPath: string, rootDir: string): DeclarativeLibrary
 | `-1` | Null pointer / invalid argument |
 | `-2` | Parse error / tile not loaded / symbol not found |
 | `-3` | Invalid UTF-8 in string parameter |
-| `-4` | Invalid state (e.g., negative speed, out-of-range heading) |
+| `-4` | Invalid target state (e.g., negative speed, out-of-range heading) |
 | `-99` | Rust panic caught via `catch_unwind` |
+
+---
+
+## 8. Version / Changelog Notes
+
+- `WasmProjection` now exposes a `version()` getter used internally by the TypeScript controller to detect projection-center changes.
+- `TerrainEngine` gained `get_elevation_rad`, `set_cache_capacity`, `cache_size`, and `clear_cache` in all bindings.
+- `NativeController` gained `create_geoserver_source`, `check_active`, and `get_target_fps`.
+- `WgpuGpuPipeline` gained raster tile upload/rendering alongside the existing grid pipeline.
+- `CPURenderer`/`WgpuCpuVertexPipeline` signatures were unified to accept explicit camera/projection parameters for 2D, 2.5D, and 3D modes.

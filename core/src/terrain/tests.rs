@@ -1,6 +1,6 @@
 use crate::geodesy::coords::LatLon;
 use crate::terrain::errors::TerrainError;
-use crate::terrain::engine::{TerrainEngine, TileKey};
+use crate::terrain::engine::{MsawState, TerrainEngine, TileKey, UnknownTerrainPolicy};
 
 fn create_mock_dted0(origin_lat: &str, origin_lon: &str, num_cols: usize, num_rows: usize) -> Vec<u8> {
     let mut data = vec![b' '; 3428];
@@ -189,6 +189,54 @@ fn test_null_sentinel() {
 
     // Null sentinel should be treated as 0.0 metres
     assert!((el - 0.0).abs() < 1e-6);
+}
+
+#[test]
+fn test_null_sentinel_is_unknown_in_status_api() {
+    let mut engine = TerrainEngine::new();
+    let data = create_mock_dted0_with_null("230000S", "0480000W", 121, 121);
+    engine.load_tile(&data).unwrap();
+    let sample = engine.get_elevation_status((-22.5_f64).to_radians(), (-47.5_f64).to_radians()).unwrap();
+    assert_eq!(sample.elevation_meters, None);
+}
+
+#[test]
+fn test_unknown_terrain_policy_can_reject_or_propagate() {
+    let mut engine = TerrainEngine::new();
+    let data = create_mock_dted0_with_null("230000S", "0480000W", 121, 121);
+    engine.load_tile(&data).unwrap();
+    let lat = (-22.5_f64).to_radians();
+    let lon = (-47.5_f64).to_radians();
+
+    assert_eq!(engine.get_elevation_with_policy(lat, lon, UnknownTerrainPolicy::Propagate).unwrap(), None);
+    assert!(engine.get_elevation_with_policy(lat, lon, UnknownTerrainPolicy::Reject).is_err());
+}
+
+#[test]
+fn test_msaw_clearance_reports_safe_warning_and_unknown() {
+    let mut engine = TerrainEngine::new();
+    let data = create_mock_dted0("230000S", "0480000W", 121, 121);
+    engine.load_tile(&data).unwrap();
+    let lat = (-23.0_f64).to_radians();
+    let lon = (-48.0_f64).to_radians();
+    let ground = engine.get_elevation_status(lat, lon).unwrap().elevation_meters.unwrap();
+
+    let safe = engine.calculate_clearance(lat, lon, ground + 200.0, 100.0, UnknownTerrainPolicy::Propagate).unwrap();
+    assert_eq!(safe.state, MsawState::Safe);
+    let warning = engine.calculate_clearance(lat, lon, ground + 50.0, 100.0, UnknownTerrainPolicy::Propagate).unwrap();
+    assert_eq!(warning.state, MsawState::Warning);
+
+    let unknown_data = create_mock_dted0_with_null("230000S", "0480000W", 121, 121);
+    let mut unknown_engine = TerrainEngine::new();
+    unknown_engine.load_tile(&unknown_data).unwrap();
+    let unknown = unknown_engine.calculate_clearance(
+        (-22.5_f64).to_radians(),
+        (-47.5_f64).to_radians(),
+        1000.0,
+        100.0,
+        UnknownTerrainPolicy::Propagate,
+    ).unwrap();
+    assert_eq!(unknown.state, MsawState::Unknown);
 }
 
 #[test]

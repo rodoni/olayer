@@ -20,7 +20,8 @@ The provider now decodes binary MVT/PBF tiles, supports multipart geometries,
 and keeps GeoJSON as an explicit supported format. GeoJSON coordinate handling
 supports `EPSG:900913` by default and `EPSG:4326` through
 `VectorTileSourceOptions`. HTTP and decode failures reject without inserting
-mock features.
+mock features. MVT layer selection is explicit through `VectorTileSourceOptions.mvtLayer`;
+omitting it intentionally decodes all layers.
 
 **Problem:** `sdk/ts/src/providers/vector.ts` attempts to parse fetched data as
 JSON and falls back to generated demo features for binary data. A real MVT
@@ -45,10 +46,17 @@ separate, intentional format rather than an implicit fallback.
 
 **Dependencies:** TypeScript provider API and test fixtures.
 
-**Verification:** `cd sdk/ts && npm run test:run` passes 38 tests, and
+**Verification:** `cd sdk/ts && npm run test:run` passes 43 tests, and
 `cd sdk/ts && npm run build` completes successfully.
 
 ## P1: Define One Tile Cache and Request Lifecycle
+
+**Status:** Partially completed. Shared bounded LRU/disposal behavior and
+in-flight request deduplication are implemented in
+`sdk/ts/src/providers/tile_cache.ts`, the web providers, and native WMTS.
+Retry, abort-aware boundaries, byte accounting, and cache statistics are now
+implemented for the web request layer. Native retry/cancellation and complete
+provider-wide request metrics remain pending.
 
 **Problem:** Raster and vector providers each implement their own cache and
 in-flight behavior. Raster requests are not deduplicated, vector has a
@@ -76,6 +84,10 @@ changes.
 
 ## P1: Make SDK Teardown Complete and Idempotent
 
+**Status:** Completed for the current SDK resources. Web listeners and late
+provider completions are cleaned up or ignored, `OlayerController.destroy()`
+is idempotent, and native WMTS workers shut down on drop.
+
 **Problem:** `OlayerController.destroy()` stops rendering and frees WASM and
 atlas resources, but listeners registered in `setupInteractions()` and the
 anonymous window resize listener remain attached. A destroyed controller can
@@ -98,6 +110,12 @@ shutdown/drop path that closes workers and prevents new requests.
 
 ## P1: Establish Cross-Binding API and Documentation Conformance
 
+**Status:** In progress. Added `docs/conformance.md` and
+`docs/core_api_inventory.md` with explicit decisions
+for units, errors, prediction status, unknown terrain, and ownership. Native
+header regeneration is now checked in CI. Shared camera fixtures and complete
+public-core feature inventory remain pending.
+
 **Problem:** The project exposes the same core concepts through Rust, WASM,
 TypeScript, and C-FFI, while camera and data-source logic is duplicated between
 the web and native SDKs. The extensive hand-maintained API documentation can
@@ -117,6 +135,12 @@ the API reference in CI where practical.
 - CI detects stale generated headers or documented signatures.
 
 ## P1: Add Operational Data Quality and Prediction Status
+
+**Status:** In progress. Core, WASM, and C-FFI status surfaces now distinguish
+valid, stale, and clock-skewed predictions, and expose unknown DTED elevation
+through status-aware APIs. Profile and elevation consumers now choose whether
+unknown terrain is propagated or rejected. Unavailable-target status and a
+dedicated MSAW clearance API remain to be completed.
 
 **Problem:** `core/src/interpolator/engine.rs` silently skips targets with
 negative time deltas or stale timestamps. `core/src/terrain/engine.rs` treats
@@ -139,6 +163,10 @@ state to SDK consumers.
 
 ## P2: Improve Rendering and Provider Observability
 
+**Status:** In progress. Cache statistics and optional frame metrics are now
+available through the TypeScript SDK. Request/decode timings, GPU failures,
+WASM lifecycle counts, and native metrics remain pending.
+
 **Problem:** The rendering and data stacks expose little structured telemetry.
 Current paths rely on console logging or silent cache misses, making frame
 budget regressions, tile latency, decode failures, and memory growth difficult
@@ -157,6 +185,11 @@ object lifecycle counts. Keep instrumentation disabled or cheap by default.
 - Long-run tests can assert bounded cache and resource counts.
 
 ## P2: Build a Headless Integration and Visual Regression Suite
+
+**Status:** In progress. CI now exercises `wasm-pack test --headless --chrome`
+and scheduled release benchmarks are configured. Provider cancellation
+integration tests, camera snapshots, GPU snapshots, and endurance baselines
+remain pending.
 
 **Problem:** CI currently runs Rust tests, Clippy, a WASM build, and TypeScript
 unit tests, but not WASM browser tests, end-to-end tile flows, or rendering

@@ -30,6 +30,7 @@ struct C_InterpolatedTarget {
   double lon;
   double height;
   double heading_rad;
+  int quality;
 };
 
 /**
@@ -67,6 +68,26 @@ int olayer_terrain_engine_get_elevation_rad(TerrainEngine *engine,
                                             double lat_rad,
                                             double lon_rad,
                                             double *out_elevation);
+
+/**
+ * Resolves elevation at radians while preserving DTED null samples.
+ * Returns 0 for valid data, 1 for unknown elevation, or a negative error.
+ */
+int olayer_terrain_engine_get_elevation_status(TerrainEngine *engine,
+                                               double lat_rad,
+                                               double lon_rad,
+                                               double *out_elevation);
+
+/**
+ * Computes MSAW clearance. Returns 0 safe, 1 warning, 2 unknown terrain, or a negative error.
+ */
+int olayer_terrain_engine_calculate_clearance(TerrainEngine *engine,
+                                              double lat_rad,
+                                              double lon_rad,
+                                              double aircraft_height_meters,
+                                              double minimum_clearance_meters,
+                                              bool reject_unknown,
+                                              double *out_clearance);
 
 /**
  * Generates a vertical profile. Fills out_profile and out_count.

@@ -181,6 +181,55 @@ fn test_negative_time_delta_skipped_not_aborted() {
 }
 
 #[test]
+fn test_status_reports_stale_and_clock_skewed_targets() {
+    let mut engine = InterpolationEngine::with_stale_threshold(15.0);
+    engine
+        .update_target(TargetState {
+            id: Arc::from("stale"),
+            last_position: LatLon::new(0.0, 0.0, 0.0),
+            speed_mps: 0.0,
+            track_heading_rad: 0.0,
+            vertical_rate_mps: 0.0,
+            last_ping_time: 100.0,
+        })
+        .unwrap();
+    engine
+        .update_target(TargetState {
+            id: Arc::from("future"),
+            last_position: LatLon::new(0.0, 0.0, 0.0),
+            speed_mps: 0.0,
+            track_heading_rad: 0.0,
+            vertical_rate_mps: 0.0,
+            last_ping_time: 130.0,
+        })
+        .unwrap();
+
+    let batch = engine.interpolate_all_with_status(120.0).unwrap();
+    assert!(batch.targets.is_empty());
+    assert_eq!(batch.skipped.len(), 2);
+    assert!(batch.skipped.iter().any(|target| target.quality == PredictionQuality::Stale));
+    assert!(batch.skipped.iter().any(|target| target.quality == PredictionQuality::ClockSkewed));
+}
+
+#[test]
+fn test_status_reports_unavailable_for_non_finite_time() {
+    let mut engine = InterpolationEngine::new();
+    engine
+        .update_target(TargetState {
+            id: Arc::from("target"),
+            last_position: LatLon::new(0.0, 0.0, 0.0),
+            speed_mps: 0.0,
+            track_heading_rad: 0.0,
+            vertical_rate_mps: 0.0,
+            last_ping_time: 10.0,
+        })
+        .unwrap();
+
+    let batch = engine.interpolate_all_with_status(f64::NAN).unwrap();
+    assert_eq!(batch.skipped[0].quality, PredictionQuality::Unavailable);
+}
+
+#[test]
 fn test_multiple_targets_interpolation() {
     let mut engine = InterpolationEngine::new();
 

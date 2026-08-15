@@ -2,11 +2,11 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { PbfWriter } from "pbf";
 import { VectorTileSource } from "./vector";
 
-function createPointMvt(): ArrayBuffer {
+function createPointMvt(layerName = "test"): ArrayBuffer {
   const tile = new PbfWriter();
   tile.writeMessage(3, (_value, writer) => {
     writer.writeVarintField(15, 2);
-    writer.writeStringField(1, "test");
+    writer.writeStringField(1, layerName);
     writer.writeMessage(2, (_feature, featureWriter) => {
       featureWriter.writeVarintField(3, 1);
       featureWriter.writePackedVarint(4, [9, 4096, 4096]);
@@ -79,6 +79,31 @@ describe("VectorTileSource", () => {
     expect(features[0].coordinates).toEqual([[0, 0]]);
   });
 
+  it("decodes only the configured MVT layer", async () => {
+    const source = new VectorTileSource("https://example.com/{z}/{x}/{y}.pbf", 100, {
+      mvtLayer: "test",
+    });
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve({
+      ok: true,
+      arrayBuffer: () => Promise.resolve(createPointMvt("test")),
+    } as Response)));
+
+    await source.loadTile(0, 0, 0);
+    expect(source.getTileFeatures(0, 0, 0)).toHaveLength(1);
+  });
+
+  it("rejects when the configured MVT layer is missing", async () => {
+    const source = new VectorTileSource("https://example.com/{z}/{x}/{y}.pbf", 100, {
+      mvtLayer: "missing",
+    });
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve({
+      ok: true,
+      arrayBuffer: () => Promise.resolve(createPointMvt("test")),
+    } as Response)));
+
+    await expect(source.loadTile(0, 0, 0)).rejects.toThrow("MVT layer not found");
+  });
+
   it("rejects when no URL resolver is configured", async () => {
     const source = new VectorTileSource("");
     await expect(source.loadTile(0, 0, 0)).rejects.toThrow("URL resolver");
@@ -86,7 +111,7 @@ describe("VectorTileSource", () => {
   });
 
   it("rejects fetch and decode failures without inserting mock features", async () => {
-    const source = new VectorTileSource("https://example.com/{z}/{x}/{y}.pbf");
+    const source = new VectorTileSource("https://example.com/{z}/{x}/{y}.pbf", 100, { maxRetries: 0 });
     vi.stubGlobal("fetch", vi.fn(() => Promise.resolve({ ok: false, status: 404 } as Response)));
 
     await expect(source.loadTile(0, 0, 0)).rejects.toThrow("HTTP 404");
@@ -118,5 +143,54 @@ describe("VectorTileSource", () => {
     await source.loadTile(0, 0, 0);
     source.clearCache();
     expect(source.getTileFeatures(0, 0, 0)).toHaveLength(0);
+  });
+
+  it("shares pending requests and evicts the least recently used tile", async () => {
+    const source = new VectorTileSource("https://example.com/{z}/{x}/{y}.pbf", 2);
+    const fetchMock = vi.fn(() => Promise.resolve({
+      ok: true,
+      arrayBuffer: () => Promise.resolve(createPointMvt()),
+    } as Response));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await Promise.all([
+      source.loadTile(0, 0, 0),
+      source.loadTile(0, 0, 0),
+    ]);
+    await source.loadTile(1, 0, 0);
+    source.getTileFeatures(0, 0, 0);
+    await source.loadTile(2, 0, 0);
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(source.getTileFeatures(0, 0, 0)).toHaveLength(1);
+    expect(source.getTileFeatures(1, 0, 0)).toHaveLength(0);
+    expect(source.getCacheStats().bytes).toBeGreaterThan(0);
+  });
+
+  it("retries failed requests according to the configured policy", async () => {
+    const source = new VectorTileSource("https://example.com/{z}/{x}/{y}.pbf", 100, { maxRetries: 1 });
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new Error("temporary failure"))
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(createPointMvt()),
+      } as Response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    await source.loadTile(0, 0, 0);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("honors an aborted request before fetching", async () => {
+    const source = new VectorTileSource("https://example.com/{z}/{x}/{y}.pbf");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(source.loadTile(0, 0, 0, { signal: controller.signal })).rejects.toMatchObject({
+      name: "AbortError",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

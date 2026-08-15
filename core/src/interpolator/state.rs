@@ -43,4 +43,26 @@ pub struct InterpolatedTarget {
     pub id: Arc<str>,      // Shared target identifier
     pub position: LatLon,  // Posição tridimensional interpolada no globo WGS84
     pub heading_rad: f64,  // Rumo interpolado em radianos
+    pub quality: PredictionQuality,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PredictionQuality {
+    Valid,
+    Stale,
+    ClockSkewed,
+    Unavailable,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SkippedTarget {
+    pub id: Arc<str>,
+    pub quality: PredictionQuality,
+    pub age_seconds: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct InterpolationBatch {
+    pub targets: Vec<InterpolatedTarget>,
+    pub skipped: Vec<SkippedTarget>,
 }

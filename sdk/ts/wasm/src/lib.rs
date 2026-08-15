@@ -84,6 +84,61 @@ impl WasmTerrainEngine {
             .map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
+    /// Returns `{ elevation_meters: number | null }`, preserving DTED null samples.
+    pub fn get_elevation_status(&self, lat_rad: f64, lon_rad: f64) -> Result<JsValue, JsValue> {
+        let sample = self.inner.get_elevation_status(lat_rad, lon_rad)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        serde_wasm_bindgen::to_value(&sample)
+            .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    /// Returns profile points with nullable elevations. Set reject_unknown to reject null DTED samples.
+    pub fn get_vertical_profile_status(
+        &self,
+        route_coords: &[f64],
+        step_meters: f64,
+        reject_unknown: bool,
+    ) -> Result<JsValue, JsValue> {
+        let route: Vec<LatLon> = route_coords
+            .chunks_exact(3)
+            .map(|c| LatLon::from_degrees(c[0], c[1], c[2]))
+            .collect();
+        let policy = if reject_unknown {
+            olayer_core::terrain::UnknownTerrainPolicy::Reject
+        } else {
+            olayer_core::terrain::UnknownTerrainPolicy::Propagate
+        };
+        let profile = self.inner.get_vertical_profile_status(&route, step_meters, policy)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        serde_wasm_bindgen::to_value(&profile)
+            .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    /// Computes MSAW clearance. Unknown terrain is propagated when reject_unknown is false.
+    pub fn calculate_clearance(
+        &self,
+        lat_rad: f64,
+        lon_rad: f64,
+        aircraft_height_meters: f64,
+        minimum_clearance_meters: f64,
+        reject_unknown: bool,
+    ) -> Result<JsValue, JsValue> {
+        let policy = if reject_unknown {
+            olayer_core::terrain::UnknownTerrainPolicy::Reject
+        } else {
+            olayer_core::terrain::UnknownTerrainPolicy::Propagate
+        };
+        let result = self.inner.calculate_clearance(
+            lat_rad,
+            lon_rad,
+            aircraft_height_meters,
+            minimum_clearance_meters,
+            policy,
+        ).map_err(|e| JsValue::from_str(&e.to_string()))?;
+        serde_wasm_bindgen::to_value(&result)
+            .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
     /// Generates a vertical terrain profile along a sequence of route points.
     /// Route coordinates must be passed as a flat array of [lat0, lon0, height0, lat1, lon1, height1, ...] in **degrees**.
     /// Returns a flat array of profile points [distance0, elevation0, lat0, lon0, height0, ...] in **degrees**.
@@ -195,6 +250,14 @@ impl WasmInterpolationEngine {
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
         serde_wasm_bindgen::to_value(&targets)
+            .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    /// Interpolates targets and returns valid predictions plus skipped-target status.
+    pub fn interpolate_all_with_status(&self, current_time: f64) -> Result<JsValue, JsValue> {
+        let batch = self.inner.interpolate_all_with_status(current_time)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        serde_wasm_bindgen::to_value(&batch)
             .map_err(|e| JsValue::from_str(&e.to_string()))
     }
 }

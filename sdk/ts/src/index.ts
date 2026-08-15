@@ -16,7 +16,7 @@ export {
 
 // Export SDK Controller
 export { OlayerController } from "./controller";
-export type { OlayerConfig } from "./controller";
+export type { OlayerConfig, OlayerMetrics } from "./controller";
 
 // Export SDK Layer System
 export { Layer, LayerManager, TileLayer, VectorTileLayer } from "./layers";
@@ -27,7 +27,7 @@ export { RasterTileSource } from "./providers/raster";
 export { VectorTileSource } from "./providers/vector";
 export type { VectorFeature, VectorGeometryType, VectorCoordinates, VectorTileSourceOptions } from "./providers/vector";
 export { MapDataStack } from "./providers/stack";
-export type { MapDataSource } from "./providers/datasource";
+export type { MapDataSource, TileCacheStats, TileRequestOptions } from "./providers/datasource";
 
 
 // Export Renderers and Texture Atlas

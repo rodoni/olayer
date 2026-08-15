@@ -12,6 +12,14 @@ import { TextureAtlasManager } from "../renderer/atlas";
 
 export type ViewMode = "2D" | "2.5D" | "3D";
 
+export interface OlayerMetrics {
+  type: "frame";
+  durationMs: number;
+  fps: number;
+  active: boolean;
+  timestamp: number;
+}
+
 export interface OlayerConfig {
   glCanvas: HTMLCanvasElement;
   canvas2D: HTMLCanvasElement;
@@ -20,6 +28,7 @@ export interface OlayerConfig {
   initialCenterLonRad?: number;
   initialZoom?: number;
   viewportBaseMeters?: number;
+  onMetrics?: (metrics: OlayerMetrics) => void;
 }
 
 export class OlayerController {
@@ -68,10 +77,14 @@ export class OlayerController {
   private lastFrameTime = 0;
   private animationFrameId: number | null = null;
   private currentFps = 0;
+  private readonly onMetrics?: (metrics: OlayerMetrics) => void;
+  private destroyed = false;
+  private readonly listenerCleanups: Array<() => void> = [];
 
   constructor(config: OlayerConfig) {
     this.glCanvas = config.glCanvas;
     this.canvas2D = config.canvas2D;
+    this.onMetrics = config.onMetrics;
 
     // Get contexts
     const gl = this.glCanvas.getContext("webgl2");
@@ -107,7 +120,9 @@ export class OlayerController {
     // Initialize Event Listeners
     this.setupInteractions();
     this.resizeCanvas();
-    window.addEventListener("resize", () => this.resizeCanvas());
+    const resizeListener = () => this.resizeCanvas();
+    window.addEventListener("resize", resizeListener);
+    this.listenerCleanups.push(() => window.removeEventListener("resize", resizeListener));
   }
 
   /**
@@ -130,6 +145,7 @@ export class OlayerController {
    * Triggers active (60 FPS) rendering mode.
    */
   public triggerActive(): void {
+    if (this.destroyed) return;
     this.isActive = true;
     this.lastActiveTime = Date.now();
   }
@@ -138,6 +154,7 @@ export class OlayerController {
    * Sets the camera center coordinates in radians.
    */
   public setCenter(latRad: number, lonRad: number): void {
+    if (this.destroyed) return;
     this.centerLat = latRad;
     this.centerLon = lonRad;
     this.projection.update_center(latRad, lonRad);
@@ -148,6 +165,7 @@ export class OlayerController {
    * Sets the zoom level.
    */
   public setZoom(zoom: number): void {
+    if (this.destroyed) return;
     if (zoom > 0) {
       this.zoom = zoom;
       this.triggerActive();
@@ -158,6 +176,7 @@ export class OlayerController {
    * Sets the rotation bearing in radians.
    */
   public setRotation(rotationRad: number): void {
+    if (this.destroyed) return;
     this.rotation = rotationRad;
     this.triggerActive();
   }
@@ -173,6 +192,7 @@ export class OlayerController {
    * Returns the current CameraState.
    */
   public getCameraState(): WasmCameraState {
+    if (this.destroyed) throw new Error("OlayerController has been destroyed");
     const aspect = this.glCanvas.width / this.glCanvas.height;
     return new WasmCameraState(
       this.centerLat,
@@ -192,6 +212,7 @@ export class OlayerController {
   }
 
   public setViewMode(value: ViewMode): void {
+    if (this.destroyed) return;
     this.viewMode = value;
     if (value === "2.5D") {
       this.pitch = 35 * (Math.PI / 180);
@@ -208,6 +229,7 @@ export class OlayerController {
   }
 
   public setIs3D(value: boolean): void {
+    if (this.destroyed) return;
     this.viewMode = value ? "3D" : "2D";
     this.triggerActive();
   }
@@ -243,6 +265,7 @@ export class OlayerController {
    * Sets the camera pitch angle in radians.
    */
   public setPitch(pitchRad: number): void {
+    if (this.destroyed) return;
     this.pitch = Math.max(-180 * Math.PI / 180, Math.min(180 * Math.PI / 180, pitchRad));
     this.triggerActive();
   }
@@ -258,6 +281,7 @@ export class OlayerController {
    * Sets the camera roll angle in radians.
    */
   public setRoll(rollRad: number): void {
+    if (this.destroyed) return;
     this.roll = ((rollRad + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
     this.triggerActive();
   }
@@ -270,6 +294,7 @@ export class OlayerController {
    * Starts the animation render loop.
    */
   public startLoop(): void {
+    if (this.destroyed) return;
     if (this.animationFrameId !== null) return;
     this.lastFrameTime = performance.now();
     const loop = (timestamp: number) => {
@@ -293,6 +318,7 @@ export class OlayerController {
    * Evaluates a frame, throttling the FPS if camera is inactive.
    */
   private tick(timestamp: number): void {
+    if (this.destroyed) return;
     const elapsedMs = timestamp - this.lastFrameTime;
     
     // Check if we should drop out of active mode (timeout reached)
@@ -317,6 +343,7 @@ export class OlayerController {
    * Renders static and dynamic layers using camera states.
    */
   private renderFrame(): void {
+    const frameStart = performance.now();
     const camera = this.getCameraState();
     
     // 1. Get View-Projection Matrix from WASM
@@ -348,6 +375,13 @@ export class OlayerController {
 
     // Free camera wrapper in WebAssembly heap
     camera.free();
+    this.onMetrics?.({
+      type: "frame",
+      durationMs: performance.now() - frameStart,
+      fps: this.currentFps,
+      active: this.isActive,
+      timestamp: Date.now(),
+    });
   }
 
   /**
@@ -360,20 +394,26 @@ export class OlayerController {
     };
 
     // Prevent context menu on canvas to allow smooth right-click dragging
-    this.canvas2D.addEventListener("contextmenu", (e) => e.preventDefault());
+    const contextMenuListener = (e: MouseEvent) => e.preventDefault();
+    this.canvas2D.addEventListener("contextmenu", contextMenuListener);
+    this.listenerCleanups.push(() => this.canvas2D.removeEventListener("contextmenu", contextMenuListener));
 
-    this.canvas2D.addEventListener("mousedown", (e) => {
+    const mouseDownListener = (e: MouseEvent) => {
       this.isDragging = true;
       this.lastMouseX = e.clientX;
       this.lastMouseY = e.clientY;
       this.triggerActive();
-    });
+    };
+    this.canvas2D.addEventListener("mousedown", mouseDownListener);
+    this.listenerCleanups.push(() => this.canvas2D.removeEventListener("mousedown", mouseDownListener));
 
-    window.addEventListener("mouseup", () => {
+    const mouseUpListener = () => {
       this.isDragging = false;
-    });
+    };
+    window.addEventListener("mouseup", mouseUpListener);
+    this.listenerCleanups.push(() => window.removeEventListener("mouseup", mouseUpListener));
 
-    this.canvas2D.addEventListener("mousemove", (e) => {
+    const mouseMoveListener = (e: MouseEvent) => {
       if (!this.isDragging) return;
 
       this.triggerActive();
@@ -453,20 +493,27 @@ export class OlayerController {
       } catch (err) {
         console.error("Pan unproject failed:", err);
       }
-    });
+    };
+    this.canvas2D.addEventListener("mousemove", mouseMoveListener);
+    this.listenerCleanups.push(() => this.canvas2D.removeEventListener("mousemove", mouseMoveListener));
 
-    this.canvas2D.addEventListener("wheel", (e) => {
+    const wheelListener = (e: WheelEvent) => {
       e.preventDefault();
       this.triggerActive();
 
       const factor = e.deltaY < 0 ? 1.1 : 0.9;
       this.zoom = Math.max(0.02, Math.min(this.zoom * factor, 1000.0));
-    }, { passive: false });
+    };
+    this.canvas2D.addEventListener("wheel", wheelListener, { passive: false });
+    this.listenerCleanups.push(() => this.canvas2D.removeEventListener("wheel", wheelListener));
   }
 
   public destroy(): void {
+    if (this.destroyed) return;
+    this.destroyed = true;
+    for (const cleanup of this.listenerCleanups.splice(0)) cleanup();
     this.stopLoop();
-    this.dataManager.clearCache();
+    this.dataManager.destroy();
     this.terrainEngine.free();
     this.interpolator.free();
     this.projection.free();

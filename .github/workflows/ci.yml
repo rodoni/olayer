@@ -26,6 +26,11 @@ jobs:
       - name: Run Clippy
         run: cargo clippy --workspace --exclude olayer-desktop-demo --all-targets
 
+      - name: Verify generated C header
+        run: |
+          cargo build -p olayer-native
+          git diff --exit-code -- sdk/native/libolayer_native.h
+
   wasm:
     name: WASM Build
     runs-on: ubuntu-latest
@@ -47,6 +52,13 @@ jobs:
       - name: Build WASM package
         working-directory: sdk/ts/wasm
         run: wasm-pack build --target web
+
+      - name: Install Chrome
+        uses: browser-actions/setup-chrome@v1
+
+      - name: Run headless WASM tests
+        working-directory: sdk/ts/wasm
+        run: wasm-pack test --headless --chrome
 
   typescript:
     name: TypeScript SDK Tests

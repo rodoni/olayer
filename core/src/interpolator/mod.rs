@@ -5,5 +5,5 @@ mod engine;
 mod tests;
 
 pub use errors::InterpolatorError;
-pub use state::{TargetState, InterpolatedTarget};
+pub use state::{InterpolationBatch, InterpolatedTarget, PredictionQuality, SkippedTarget, TargetState};
 pub use engine::InterpolationEngine;

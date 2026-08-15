@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use crate::geodesy::{Ellipsoid, GeodeticSolver, HaversineSolver, VincentySolver};
 use crate::interpolator::errors::InterpolatorError;
-use crate::interpolator::state::{InterpolatedTarget, TargetState};
+use crate::interpolator::state::{InterpolatedTarget, InterpolationBatch, PredictionQuality, SkippedTarget, TargetState};
 
 pub struct InterpolationEngine {
     targets: HashMap<Arc<str>, TargetState>,
@@ -71,18 +71,43 @@ impl InterpolationEngine {
     /// instability in the Vincenty solver that also fails in the Haversine fallback).
     #[inline]
     pub fn interpolate_all(&self, current_time: f64) -> Result<Vec<InterpolatedTarget>, InterpolatorError> {
+        Ok(self.interpolate_all_with_status(current_time)?.targets)
+    }
+
+    /// Interpolates all targets and reports targets excluded from the batch.
+    #[inline]
+    pub fn interpolate_all_with_status(&self, current_time: f64) -> Result<InterpolationBatch, InterpolatorError> {
         let mut results = Vec::with_capacity(self.targets.len());
+        let mut skipped = Vec::new();
 
         for (id, state) in &self.targets {
+            if !current_time.is_finite() || !state.last_ping_time.is_finite() {
+                skipped.push(SkippedTarget {
+                    id: id.clone(),
+                    quality: PredictionQuality::Unavailable,
+                    age_seconds: f64::NAN,
+                });
+                continue;
+            }
             let dt = current_time - state.last_ping_time;
 
             // Skip targets with retrograde time (clock skew) — do not abort the batch
             if dt < 0.0 {
+                skipped.push(SkippedTarget {
+                    id: id.clone(),
+                    quality: PredictionQuality::ClockSkewed,
+                    age_seconds: dt,
+                });
                 continue;
             }
 
             // Exclude stale targets
             if dt > self.stale_threshold {
+                skipped.push(SkippedTarget {
+                    id: id.clone(),
+                    quality: PredictionQuality::Stale,
+                    age_seconds: dt,
+                });
                 continue;
             }
 
@@ -108,10 +133,11 @@ impl InterpolationEngine {
                 id: id.clone(),
                 position: final_pos,
                 heading_rad: state.track_heading_rad,
+                quality: PredictionQuality::Valid,
             });
         }
 
-        Ok(results)
+        Ok(InterpolationBatch { targets: results, skipped })
     }
 }
 

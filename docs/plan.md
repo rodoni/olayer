@@ -5,6 +5,12 @@ This document establishes the modular development plan for the construction of *
 
 The current enhancement backlog is maintained in [Enhancement Proposals](proposals.md). It records implementation gaps found in the current repository and should be used to refine future milestones.
 
+Current implementation status is also tracked in:
+
+- [Binding Conformance Matrix](conformance.md)
+- [Core API Binding Inventory](core_api_inventory.md)
+- [Enhancement Proposals](proposals.md)
+
 ---
 
 ## Overview of the Roadmap (Roadmap)
@@ -84,9 +90,9 @@ gantt
   * [ ] Integrate `cbindgen` into the native build process to generate C-compatible headers (`libolayer_native.h`) from the Core's FFI directives.
   * [ ] Implement optimized bridges for transferring large volumes of data (binary DTED and MVT buffers) using shared linear memory.
   * [ ] Implement explicit memory deallocation policy (`.free()` calls) in the TS SDK and mapping of native FFI destructors (per ADR-004).
-  * [ ] Configure LRU tile cache for DTED with active memory eviction on the WASM heap and native cache.
+  * [x] Configure LRU tile cache for DTED with active memory eviction on the WASM heap and native cache.
 * **Test Plan:**
-  * [ ] Run automated tests in headless browser via `wasm-bindgen-test` to homologate WebAssembly signatures.
+  * [x] Run automated tests in headless browser via `wasm-bindgen-test` to homologate WebAssembly signatures.
   * [ ] Compile a simple C++ program to validate the auto-generated `.h` headers and attest correct passing of geodetic structs via FFI.
   * [ ] Automated Leak Checking tests monitoring the growth of the WASM/C heap after massively creating and destroying dynamic structures.
 * **Milestones (Milestone 4):** WASM packages and native dynamic/static libraries generated with validated FFI and approved leak tests.

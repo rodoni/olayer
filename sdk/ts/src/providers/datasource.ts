@@ -9,7 +9,7 @@ export interface MapDataSource {
    * For OSM/WMTS/MVT: x, y are tile grid coordinates, z is the zoom level.
    * For Terrain/DTED: x and y represent lat/lon degrees, and z is unused.
    */
-  loadTile(x: number, y: number, z?: number): Promise<void>;
+  loadTile(x: number, y: number, z?: number, options?: TileRequestOptions): Promise<void>;
 
   /**
    * Unloads a tile from the cache and releases associated resources.
@@ -20,4 +20,19 @@ export interface MapDataSource {
    * Clears the local provider cache.
    */
   clearCache(): void;
+
+  getCacheStats?(): TileCacheStats;
+}
+
+export interface TileRequestOptions {
+  signal?: AbortSignal;
+  maxRetries?: number;
+}
+
+export interface TileCacheStats {
+  items: number;
+  bytes: number;
+  hits: number;
+  misses: number;
+  evictions: number;
 }

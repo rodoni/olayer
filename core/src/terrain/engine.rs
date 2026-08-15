@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::num::NonZeroUsize;
+use serde::{Deserialize, Serialize};
 use lru::LruCache;
 use crate::geodesy::coords::LatLon;
 use crate::geodesy::ellipsoid::Ellipsoid;
@@ -23,6 +24,38 @@ pub struct ProfilePoint {
     pub distance_meters: f64,
     pub ground_elevation: f64,
     pub coords: LatLon,
+}
+
+/// Elevation result that distinguishes an unknown DTED sample from zero metres.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ElevationSample {
+    pub elevation_meters: Option<f64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnknownTerrainPolicy {
+    Propagate,
+    Reject,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProfilePointStatus {
+    pub distance_meters: f64,
+    pub ground_elevation: Option<f64>,
+    pub coords: LatLon,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MsawState {
+    Safe,
+    Warning,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ClearanceResult {
+    pub clearance_meters: Option<f64>,
+    pub state: MsawState,
 }
 
 /// DTED terrain engine supporting O(1) elevation lookups and
@@ -98,13 +131,22 @@ impl TerrainEngine {
     /// latitude and longitude in **degrees** using bilinear interpolation.
     #[inline]
     pub fn get_elevation(&self, lat_deg: f64, lon_deg: f64) -> Result<f64, TerrainError> {
-        self.get_elevation_rad(lat_deg.to_radians(), lon_deg.to_radians())
+        Ok(self
+            .get_elevation_status(lat_deg.to_radians(), lon_deg.to_radians())?
+            .elevation_meters
+            .unwrap_or(0.0))
     }
 
     /// Returns the interpolated ground elevation (metres) for the given
     /// latitude and longitude in **radians** using bilinear interpolation.
     #[inline]
     pub fn get_elevation_rad(&self, lat_rad: f64, lon_rad: f64) -> Result<f64, TerrainError> {
+        Ok(self.get_elevation_status(lat_rad, lon_rad)?.elevation_meters.unwrap_or(0.0))
+    }
+
+    /// Returns elevation quality without converting missing DTED samples to zero.
+    #[inline]
+    pub fn get_elevation_status(&self, lat_rad: f64, lon_rad: f64) -> Result<ElevationSample, TerrainError> {
         let lat_deg = lat_rad.to_degrees();
         let lon_deg = lon_rad.to_degrees();
         let lat_floor = tile_key_floor(lat_deg);
@@ -137,18 +179,127 @@ impl TerrainEngine {
         let tx = (col_f - col0 as f64).clamp(0.0, 1.0);
         let ty = (row_f - row0 as f64).clamp(0.0, 1.0);
 
-        // Look up the four neighbouring elevations; treat null sentinels as 0.0
+        // A bilinear result is unknown if any contributing DTED sample is null.
         let z00 = get_elevation_val(tile.get_cell_elevation(row0, col0));
         let z01 = get_elevation_val(tile.get_cell_elevation(row0, col1));
         let z10 = get_elevation_val(tile.get_cell_elevation(row1, col0));
         let z11 = get_elevation_val(tile.get_cell_elevation(row1, col1));
+        if [z00, z01, z10, z11].iter().any(Option::is_none) {
+            return Ok(ElevationSample { elevation_meters: None });
+        }
+        let z00 = z00.unwrap();
+        let z01 = z01.unwrap();
+        let z10 = z10.unwrap();
+        let z11 = z11.unwrap();
 
         // Bilinear interpolation
         let z_left = z00 * (1.0 - ty) + z10 * ty;
         let z_right = z01 * (1.0 - ty) + z11 * ty;
         let z_final = z_left * (1.0 - tx) + z_right * tx;
 
-        Ok(z_final)
+        Ok(ElevationSample { elevation_meters: Some(z_final) })
+    }
+
+    /// Applies an explicit policy to unknown terrain samples.
+    #[inline]
+    pub fn get_elevation_with_policy(
+        &self,
+        lat_rad: f64,
+        lon_rad: f64,
+        policy: UnknownTerrainPolicy,
+    ) -> Result<Option<f64>, TerrainError> {
+        let elevation = self.get_elevation_status(lat_rad, lon_rad)?.elevation_meters;
+        if elevation.is_none() && policy == UnknownTerrainPolicy::Reject {
+            return Err(TerrainError::MalformedData(
+                "Unknown terrain elevation".to_string(),
+            ));
+        }
+        Ok(elevation)
+    }
+
+    /// Builds a profile while preserving unknown samples or rejecting them by policy.
+    #[inline]
+    pub fn get_vertical_profile_status(
+        &self,
+        route: &[LatLon],
+        step_meters: f64,
+        policy: UnknownTerrainPolicy,
+    ) -> Result<Vec<ProfilePointStatus>, TerrainError> {
+        if route.len() < 2 {
+            return Err(TerrainError::MalformedData(
+                "Route must contain at least 2 points".to_string(),
+            ));
+        }
+
+        let solver = VincentySolver;
+        let ellipsoid = Ellipsoid::wgs84();
+        let mut profile = Vec::new();
+        let mut accumulated_distance = 0.0;
+
+        for i in 0..route.len() - 1 {
+            let p1 = &route[i];
+            let p2 = &route[i + 1];
+            let res = solver.inverse(p1, p2, &ellipsoid).map_err(|e| {
+                TerrainError::MalformedData(format!("Failed to compute route distance: {e}"))
+            })?;
+            let segment_dist = res.distance;
+            let num_steps = (segment_dist / step_meters).floor() as usize;
+            for s in 0..num_steps {
+                let d = s as f64 * step_meters;
+                let pt = solver.direct(p1, res.initial_bearing, d, &ellipsoid).map_err(|e| {
+                    TerrainError::MalformedData(format!("Failed to interpolate route point: {e}"))
+                })?;
+                profile.push(ProfilePointStatus {
+                    distance_meters: accumulated_distance + d,
+                    ground_elevation: self.get_elevation_with_policy(pt.lat, pt.lon, policy)?,
+                    coords: pt,
+                });
+            }
+            accumulated_distance += segment_dist;
+        }
+
+        let last_pt = route.last().unwrap();
+        profile.push(ProfilePointStatus {
+            distance_meters: accumulated_distance,
+            ground_elevation: self.get_elevation_with_policy(last_pt.lat, last_pt.lon, policy)?,
+            coords: *last_pt,
+        });
+        Ok(profile)
+    }
+
+    /// Computes aircraft-to-ground clearance and applies an explicit unknown-terrain policy.
+    #[inline]
+    pub fn calculate_clearance(
+        &self,
+        lat_rad: f64,
+        lon_rad: f64,
+        aircraft_height_meters: f64,
+        minimum_clearance_meters: f64,
+        policy: UnknownTerrainPolicy,
+    ) -> Result<ClearanceResult, TerrainError> {
+        if !aircraft_height_meters.is_finite() || !minimum_clearance_meters.is_finite()
+            || minimum_clearance_meters < 0.0
+        {
+            return Err(TerrainError::MalformedData(
+                "Aircraft height and minimum clearance must be finite; minimum clearance must be non-negative".to_string(),
+            ));
+        }
+        let ground = self.get_elevation_with_policy(lat_rad, lon_rad, policy)?;
+        let Some(ground) = ground else {
+            return Ok(ClearanceResult {
+                clearance_meters: None,
+                state: MsawState::Unknown,
+            });
+        };
+        let clearance = aircraft_height_meters - ground;
+        Ok(ClearanceResult {
+            clearance_meters: Some(clearance),
+            state: if clearance < minimum_clearance_meters {
+                MsawState::Warning
+            } else {
+                MsawState::Safe
+            },
+        })
     }
 
     /// Generates a vertical terrain profile along a sequence of route points.
@@ -223,11 +374,11 @@ impl Default for TerrainEngine {
 
 /// Converts a raw DTED cell value to metres, treating null sentinels as 0.0.
 #[inline]
-fn get_elevation_val(val: i16) -> f64 {
+fn get_elevation_val(val: i16) -> Option<f64> {
     if val <= -32767 {
-        0.0
+        None
     } else {
-        f64::from(val)
+        Some(f64::from(val))
     }
 }
 

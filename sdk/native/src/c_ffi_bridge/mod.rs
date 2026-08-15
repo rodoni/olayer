@@ -28,6 +28,17 @@ pub struct C_InterpolatedTarget {
     pub lon: f64,
     pub height: f64,
     pub heading_rad: f64,
+    pub quality: c_int,
+}
+
+/// Prediction quality: 0 valid, 1 stale, 2 clock-skewed, 3 unavailable.
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub enum C_PredictionQuality {
+    Valid = 0,
+    Stale = 1,
+    ClockSkewed = 2,
+    Unavailable = 3,
 }
 
 /// C representation of vertical profile point.
@@ -160,6 +171,78 @@ pub unsafe extern "C" fn olayer_terrain_engine_get_elevation_rad(
             0
         }
         Ok(Err(_)) => -2, // Tile not loaded
+        Err(_) => -99,
+    }
+}
+
+/// Resolves elevation at radians while preserving DTED null samples.
+/// Returns 0 for valid data, 1 for unknown elevation, or a negative error.
+#[no_mangle]
+pub unsafe extern "C" fn olayer_terrain_engine_get_elevation_status(
+    engine: *mut TerrainEngine,
+    lat_rad: f64,
+    lon_rad: f64,
+    out_elevation: *mut f64,
+) -> c_int {
+    if engine.is_null() || out_elevation.is_null() {
+        return -1;
+    }
+    let engine_ref = &mut *engine;
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        engine_ref.get_elevation_status(lat_rad, lon_rad)
+    })) {
+        Ok(Ok(sample)) => match sample.elevation_meters {
+            Some(elevation) => {
+                *out_elevation = elevation;
+                0
+            }
+            None => 1,
+        },
+        Ok(Err(_)) => -2,
+        Err(_) => -99,
+    }
+}
+
+/// Computes MSAW clearance. Returns 0 safe, 1 warning, 2 unknown terrain, or a negative error.
+#[no_mangle]
+pub unsafe extern "C" fn olayer_terrain_engine_calculate_clearance(
+    engine: *mut TerrainEngine,
+    lat_rad: f64,
+    lon_rad: f64,
+    aircraft_height_meters: f64,
+    minimum_clearance_meters: f64,
+    reject_unknown: bool,
+    out_clearance: *mut f64,
+) -> c_int {
+    if engine.is_null() || out_clearance.is_null() {
+        return -1;
+    }
+    let engine_ref = &mut *engine;
+    let policy = if reject_unknown {
+        olayer_core::terrain::UnknownTerrainPolicy::Reject
+    } else {
+        olayer_core::terrain::UnknownTerrainPolicy::Propagate
+    };
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        engine_ref.calculate_clearance(
+            lat_rad,
+            lon_rad,
+            aircraft_height_meters,
+            minimum_clearance_meters,
+            policy,
+        )
+    })) {
+        Ok(Ok(result)) => {
+            if let Some(clearance) = result.clearance_meters {
+                *out_clearance = clearance;
+            }
+            match result.state {
+                olayer_core::terrain::MsawState::Safe => 0,
+                olayer_core::terrain::MsawState::Warning => 1,
+                olayer_core::terrain::MsawState::Unknown => 2,
+            }
+        }
+        Ok(Err(_)) => -2,
         Err(_) => -99,
     }
 }
@@ -395,6 +478,12 @@ pub unsafe extern "C" fn olayer_interpolator_interpolate_all(
                     lon: t.position.lon,
                     height: t.position.height,
                     heading_rad: t.heading_rad,
+                    quality: match t.quality {
+                        olayer_core::interpolator::PredictionQuality::Valid => 0,
+                        olayer_core::interpolator::PredictionQuality::Stale => 1,
+                        olayer_core::interpolator::PredictionQuality::ClockSkewed => 2,
+                        olayer_core::interpolator::PredictionQuality::Unavailable => 3,
+                    },
                 });
             }
 

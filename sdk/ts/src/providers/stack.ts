@@ -1,4 +1,4 @@
-import { MapDataSource } from "./datasource";
+import { MapDataSource, TileCacheStats } from "./datasource";
 
 /**
  * Orchestrator for the Map Data Stack.
@@ -53,6 +53,20 @@ export class MapDataStack {
       }
     }
     return size;
+  }
+
+  public getCacheStats(): TileCacheStats {
+    const total: TileCacheStats = { items: 0, bytes: 0, hits: 0, misses: 0, evictions: 0 };
+    for (const source of this.sources.values()) {
+      const stats = source.getCacheStats?.();
+      if (!stats) continue;
+      total.items += stats.items;
+      total.bytes += stats.bytes;
+      total.hits += stats.hits;
+      total.misses += stats.misses;
+      total.evictions += stats.evictions;
+    }
+    return total;
   }
 }
 export default MapDataStack;

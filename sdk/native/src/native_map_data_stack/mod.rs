@@ -1,8 +1,8 @@
-use std::collections::{HashMap, HashSet};
-use std::io::Read;
-use std::sync::{Arc, Mutex};
-use std::sync::mpsc::{channel, Sender};
 use olayer_core::terrain::TerrainEngine;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::io::Read;
+use std::sync::mpsc::{channel, Sender};
+use std::sync::{Arc, Mutex};
 
 // =============================================================================
 // 1. DATA SOURCE TRAIT
@@ -82,8 +82,7 @@ impl NativeMapDataStack {
 
     /// Loads a DTED tile from a file path into the given terrain engine.
     pub fn load_dted_file(&self, path: &str, terrain: &mut TerrainEngine) -> Result<(), String> {
-        let data =
-            std::fs::read(path).map_err(|e| format!("Failed to read DTED file: {}", e))?;
+        let data = std::fs::read(path).map_err(|e| format!("Failed to read DTED file: {}", e))?;
         terrain
             .load_tile(&data)
             .map_err(|e| format!("Failed to parse DTED data: {:?}", e))?;
@@ -91,7 +90,11 @@ impl NativeMapDataStack {
     }
 
     /// Loads a DTED tile from a raw buffer into the given terrain engine.
-    pub fn load_dted_buffer(&self, buffer: &[u8], terrain: &mut TerrainEngine) -> Result<(), String> {
+    pub fn load_dted_buffer(
+        &self,
+        buffer: &[u8],
+        terrain: &mut TerrainEngine,
+    ) -> Result<(), String> {
         terrain
             .load_tile(buffer)
             .map_err(|e| format!("Failed to parse DTED data: {:?}", e))?;
@@ -124,8 +127,7 @@ impl TerrainDataSource {
 
     /// Loads a DTED tile from a file path into the internal engine.
     pub fn load_file(&mut self, path: &str) -> Result<(), String> {
-        let data =
-            std::fs::read(path).map_err(|e| format!("Failed to read DTED file: {}", e))?;
+        let data = std::fs::read(path).map_err(|e| format!("Failed to read DTED file: {}", e))?;
         let key = self
             .engine
             .load_tile(&data)
@@ -188,6 +190,8 @@ impl MapDataSource for TerrainDataSource {
 // 3.1 GEOSERVER WMTS DATA SOURCE
 // =============================================================================
 
+const DEFAULT_WMTS_CACHE_CAPACITY: usize = 128;
+
 /// A concrete `MapDataSource` that loads raster tiles from GeoServer WMTS endpoint.
 ///
 /// It uses background thread workers to fetch PNG/JPEG tiles and decodes them
@@ -198,19 +202,35 @@ pub struct GeoserverWmtsSource {
     base_url: String,
     layer_name: String,
     cache: Arc<Mutex<HashMap<String, Vec<u8>>>>,
+    order: Arc<Mutex<VecDeque<String>>>,
     pending: Arc<Mutex<HashSet<String>>>,
-    tx_request: Sender<String>,
+    generation: Arc<Mutex<u64>>,
+    worker: Arc<WmtsWorker>,
+}
+
+enum WorkerCommand {
+    Load(String, u64),
+    Shutdown,
+}
+
+struct WmtsWorker {
+    tx: Sender<WorkerCommand>,
+    handle: Mutex<Option<std::thread::JoinHandle<()>>>,
 }
 
 impl GeoserverWmtsSource {
     /// Creates a new `GeoserverWmtsSource` and spawns its background worker thread.
     pub fn new(id: &str, base_url: &str, layer_name: &str) -> Self {
-        let (tx_req, rx_req) = channel::<String>();
+        let (tx_req, rx_req) = channel::<WorkerCommand>();
         let cache = Arc::new(Mutex::new(HashMap::new()));
+        let order = Arc::new(Mutex::new(VecDeque::new()));
         let pending = Arc::new(Mutex::new(HashSet::new()));
+        let generation = Arc::new(Mutex::new(0_u64));
 
         let cache_clone = cache.clone();
         let pending_clone = pending.clone();
+        let order_clone = order.clone();
+        let generation_clone = generation.clone();
         let base_url = base_url.to_string();
         let layer_name = layer_name.to_string();
 
@@ -218,10 +238,29 @@ impl GeoserverWmtsSource {
         let layer_name_for_thread = layer_name.clone();
 
         // Spawn background worker thread
-        std::thread::spawn(move || {
+        let handle = std::thread::spawn(move || {
             println!("[GeoserverWmtsSource] Background worker thread started.");
-            while let Ok(key) = rx_req.recv() {
-                println!("[GeoserverWmtsSource] Received request for tile key: {}", key);
+            while let Ok(command) = rx_req.recv() {
+                let (key, request_generation) = match command {
+                    WorkerCommand::Load(key, request_generation) => {
+                        if generation_clone
+                            .lock()
+                            .map(|value| *value != request_generation)
+                            .unwrap_or(true)
+                        {
+                            if let Ok(mut p) = pending_clone.lock() {
+                                p.remove(&key);
+                            }
+                            continue;
+                        }
+                        (key, request_generation)
+                    }
+                    WorkerCommand::Shutdown => break,
+                };
+                println!(
+                    "[GeoserverWmtsSource] Received request for tile key: {}",
+                    key
+                );
                 // Parse key "z/x/y"
                 let parts: Vec<&str> = key.split('/').collect();
                 if parts.len() != 3 {
@@ -252,7 +291,11 @@ impl GeoserverWmtsSource {
                         let mut bytes = Vec::new();
                         let mut reader = response.into_reader();
                         if reader.read_to_end(&mut bytes).is_ok() {
-                            println!("[GeoserverWmtsSource] Read {} bytes for tile {}", bytes.len(), key);
+                            println!(
+                                "[GeoserverWmtsSource] Read {} bytes for tile {}",
+                                bytes.len(),
+                                key
+                            );
                             // Decode image using image crate to raw RGBA8
                             match image::load_from_memory(&bytes) {
                                 Ok(img) => {
@@ -275,21 +318,43 @@ impl GeoserverWmtsSource {
                                              width, height, transparent, opaque, unique_colors.len());
 
                                     // Insert into cache
-                                    if let Ok(mut c) = cache_clone.lock() {
-                                        c.insert(key.clone(), raw_pixels);
+                                    let current_generation =
+                                        generation_clone.lock().map(|value| *value).unwrap_or(0);
+                                    if current_generation == request_generation {
+                                        if let Ok(mut c) = cache_clone.lock() {
+                                            c.insert(key.clone(), raw_pixels);
+                                            if let Ok(mut keys) = order_clone.lock() {
+                                                keys.retain(|cached_key| cached_key != &key);
+                                                keys.push_back(key.clone());
+                                                while keys.len() > DEFAULT_WMTS_CACHE_CAPACITY {
+                                                    if let Some(oldest) = keys.pop_front() {
+                                                        c.remove(&oldest);
+                                                    }
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                                 Err(e) => {
-                                    println!("[GeoserverWmtsSource] Failed to decode image: {:?}", e);
+                                    println!(
+                                        "[GeoserverWmtsSource] Failed to decode image: {:?}",
+                                        e
+                                    );
                                     log::error!("Failed to decode image from GeoServer: {:?}", e);
                                 }
                             }
                         } else {
-                            println!("[GeoserverWmtsSource] Failed to read response body for tile {}", key);
+                            println!(
+                                "[GeoserverWmtsSource] Failed to read response body for tile {}",
+                                key
+                            );
                         }
                     }
                     Err(e) => {
-                        println!("[GeoserverWmtsSource] HTTP request failed for URL: {}. Error: {:?}", url, e);
+                        println!(
+                            "[GeoserverWmtsSource] HTTP request failed for URL: {}. Error: {:?}",
+                            url, e
+                        );
                         log::error!("Failed to fetch tile from GeoServer at {}: {:?}", url, e);
                     }
                 }
@@ -301,13 +366,20 @@ impl GeoserverWmtsSource {
             }
         });
 
+        let worker = Arc::new(WmtsWorker {
+            tx: tx_req,
+            handle: Mutex::new(Some(handle)),
+        });
+
         Self {
             id: id.to_string(),
             base_url,
             layer_name,
             cache,
+            order,
             pending,
-            tx_request: tx_req,
+            generation,
+            worker,
         }
     }
 
@@ -331,7 +403,11 @@ impl GeoserverWmtsSource {
         }
 
         // Send request to worker thread
-        let _ = self.tx_request.send(key);
+        let request_generation = self.generation.lock().map(|value| *value).unwrap_or(0);
+        let _ = self
+            .worker
+            .tx
+            .send(WorkerCommand::Load(key, request_generation));
     }
 
     /// Retrieves the loaded raw RGBA8 pixel bytes for a tile.
@@ -339,6 +415,17 @@ impl GeoserverWmtsSource {
     /// Returns `None` if the tile is still loading or failed to load.
     pub fn get_tile_pixels(&self, x: u32, y: u32, z: u32) -> Option<Vec<u8>> {
         let key = format!("{}/{}/{}", z, x, y);
+        let cached = self
+            .cache
+            .lock()
+            .map(|cache| cache.contains_key(&key))
+            .unwrap_or(false);
+        if cached {
+            if let Ok(mut keys) = self.order.lock() {
+                keys.retain(|cached_key| cached_key != &key);
+                keys.push_back(key.clone());
+            }
+        }
         if let Ok(c) = self.cache.lock() {
             c.get(&key).cloned()
         } else {
@@ -372,8 +459,14 @@ impl MapDataSource for GeoserverWmtsSource {
     }
 
     fn clear_cache(&mut self) {
+        if let Ok(mut generation) = self.generation.lock() {
+            *generation = generation.wrapping_add(1);
+        }
         if let Ok(mut c) = self.cache.lock() {
             c.clear();
+        }
+        if let Ok(mut keys) = self.order.lock() {
+            keys.clear();
         }
         if let Ok(mut p) = self.pending.lock() {
             p.clear();
@@ -385,6 +478,20 @@ impl MapDataSource for GeoserverWmtsSource {
             c.len()
         } else {
             0
+        }
+    }
+}
+
+impl Drop for GeoserverWmtsSource {
+    fn drop(&mut self) {
+        if Arc::strong_count(&self.worker) != 1 {
+            return;
+        }
+        let _ = self.worker.tx.send(WorkerCommand::Shutdown);
+        if let Ok(mut handle) = self.worker.handle.lock() {
+            if let Some(handle) = handle.take() {
+                let _ = handle.join();
+            }
         }
     }
 }
@@ -559,9 +666,16 @@ mod tests {
 
     #[test]
     fn test_geoserver_wmts_source_cache_logic() {
-        let mut source = GeoserverWmtsSource::new("geo", "http://localhost:8080/geoserver/gwc/service/wmts", "test_layer");
+        let mut source = GeoserverWmtsSource::new(
+            "geo",
+            "http://localhost:8080/geoserver/gwc/service/wmts",
+            "test_layer",
+        );
         assert_eq!(source.id(), "geo");
-        assert_eq!(source.base_url(), "http://localhost:8080/geoserver/gwc/service/wmts");
+        assert_eq!(
+            source.base_url(),
+            "http://localhost:8080/geoserver/gwc/service/wmts"
+        );
         assert_eq!(source.layer_name(), "test_layer");
         assert_eq!(source.cache_size(), 0);
         assert!(source.get_tile_pixels(0, 0, 0).is_none());
