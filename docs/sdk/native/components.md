@@ -80,13 +80,16 @@ The `Native Map Data Stack` manages the ingestion and local caching of static an
 * `MapDataSource` trait (defined in [mod.rs](../../../sdk/native/src/native_map_data_stack/mod.rs)):
   * `id(&self) -> &str` — Unique identifier for the data source.
   * `clear_cache(&mut self)` — Clears the local provider cache.
-  * `cache_size(&self) -> usize` — Returns the number of cached items.
+   * `cache_size(&self) -> usize` — Returns the number of cached items.
+   * `GeoserverWmtsSource` uses a bounded decoded-pixel LRU cache and shuts down
+     its background worker when dropped.
 * `NativeMapDataStack`:
   * `sources: HashMap<String, Box<dyn MapDataSource>>` — Registry of registered data sources.
   * `register_source(source: Box<dyn MapDataSource>) -> Result<(), String>` — Registers a new data source. Returns `Err` if the ID already exists.
   * `get_source(id: &str) -> Option<&dyn MapDataSource>` — Retrieves a registered source by ID.
   * `clear_cache()` — Clears the caches of all registered sources.
-  * `get_cache_size() -> usize` — Returns the aggregate cache size across all sources.
+   * `get_cache_size() -> usize` — Returns the aggregate cache size across all sources.
+   * Native cache byte/request metrics remain a planned observability extension.
   * `load_dted_file(path: &str, terrain: &mut TerrainEngine) -> Result<(), String>` — Loads a DTED tile from a file path into the given terrain engine (backward-compatible helper).
   * `load_dted_buffer(buffer: &[u8], terrain: &mut TerrainEngine) -> Result<(), String>` — Loads a DTED tile from a raw buffer into the given terrain engine.
 * `TerrainDataSource` (concrete `MapDataSource` implementation):

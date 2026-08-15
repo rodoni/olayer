@@ -121,6 +121,9 @@ The framework manages professional symbol libraries for civil aviation and defen
 
 * The GIS engine will not make I/O requests to read files from disk in web mode. It will accept passive injection of elevation chunks via memory buffers (`ArrayBuffer` or mapped structures).
 * The Core will provide $O(1)$ complexity lookups to determine ground altitude and calculate the vertical *Clearance* safety margin of an aircraft (MSAW alerts).
+* Status-aware terrain queries distinguish a measured zero from unknown DTED
+  samples. Profile and MSAW consumers explicitly choose whether unknown terrain
+  is propagated as `Unknown` or rejected.
 
 ---
 
@@ -161,7 +164,7 @@ To feed the framework with cartographic and aviation structural data, the projec
 To isolate the network and file management from WebGL rendering and radar calculations, the SDKs implement the data stack based on `MapDataSource`:
 * **`VectorTileSource` (MVT / GeoServer):** Manages paging and geometric calculation of the camera's visible limits (Bounding Box) in real-time, performing parallel searches of vector blocks in GeoServer.
 * **`RasterTileSource` (WMTS / OSM):** Controls map image download and asynchronous texture upload to the GPU.
-* **`TerrainTileSource` (DTED / Terrain):** Automatic paging based on controller position. Replaces pure passive injection with a dynamic network resolver with download queues and LRU (Least Recently Used) memory eviction algorithm to ensure stable RAM/WASM consumption.
+* **`TerrainTileSource` (DTED / Terrain):** Automatic paging based on controller position. The provider resolves network URLs, deduplicates concurrent requests, retries transient failures, honors abort signals, and uses LRU eviction with explicit `unload_tile` calls to ensure stable RAM/WASM consumption.
 * **Decoupling by Concurrency:** Complex geographic format decoding (MVT/DTED) will be executed in support threads (Web Workers in browser, local threads in desktop) so that the main rendering thread never blocks radar traffic.
 
 ---
@@ -188,6 +191,5 @@ To isolate the network and file management from WebGL rendering and radar calcul
 ```
 
 ---
-
 
 

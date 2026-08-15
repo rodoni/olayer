@@ -89,6 +89,7 @@ pub struct C_InterpolatedTarget {
     pub lon: f64,
     pub height: f64,
     pub heading_rad: f64,
+    pub quality: c_int,
 }
 
 /// C representation of a vertical profile point.
@@ -107,6 +108,8 @@ pub struct C_ProfilePoint {
 * `olayer_terrain_engine_load_tile`: Parses and registers a raw binary DTED buffer in memory. Writes the origin coordinates to the passed pointers.
 * `olayer_terrain_engine_unload_tile`: Removes a terrain cell from memory by its coordinate degree.
 * `olayer_terrain_engine_get_elevation`: Queries and returns the ground altitude at the specified geographic point in constant time $O(1)$.
+* `olayer_terrain_engine_get_elevation_status`: Preserves unknown DTED samples; returns status `1` instead of converting them to zero.
+* `olayer_terrain_engine_calculate_clearance`: Computes MSAW safe, warning, or unknown status.
 * `olayer_terrain_engine_get_vertical_profile`: Calculates the terrain vertical profile under the provided route.
 * `olayer_profile_points_free`: Frees the memory of the profile point array allocated by Rust.
 * `olayer_terrain_engine_free`: Safely destroys the terrain engine instance.
@@ -151,6 +154,6 @@ Native FFI integration requires rigid rules about who is the "owner" of each all
 * **Data Allocated by the C++ Host:** Binary buffers of DTED files loaded by C++ into system memory are passed to Rust via simple pointer (`*const u8`). Rust accesses these bytes strictly for reading and **does not attempt** to free or take ownership of the original pointer. The responsibility for deallocating the file buffer after reading completion remains 100% with the C++ host.
 
 ### 5.2 Concurrency Safety (Thread-Safety)
-* The Olayer Core is designed to be thread-safe (structs implement `Send` and `Sync` in Rust).
-* Pointers returned from constructors (e.g., `*mut TerrainEngine`) can be shared between different execution threads of the host application (such as a radar tactical processing thread and a local wgpu/Vulkan interface rendering thread).
-* **Important:** Mutual concurrent safety is guaranteed because the geographic data and mathematical models of reading (such as loaded `TerrainEngine`) perform only simultaneous reads without internal mutable concurrent state. If dynamic modifications (writing of new terrain tiles) occur in parallel with reads, the C++ host must synchronize access to these pointers using native locks (`std::mutex` or equivalents).
+* Opaque engine pointers are owned by the creating host context and are not implicitly thread-safe handles.
+* The C++ host must synchronize access when loading/unloading tiles or updating/interpolating targets.
+* If a pointer is used by rendering and tactical threads, the host must provide the required mutex or single-owner queue; C-FFI functions do not provide cross-call locking.

@@ -54,7 +54,7 @@ graph TB
 The **WASM Bridge** component has the following main assignments:
 1. **Core API Exposure:** Package internal Rust types into structures marked with `#[wasm_bindgen]` so they are available as normal JavaScript classes.
 2. **Data Translation and Marshaling:** Convert complex dynamic structures using the fast serialization bridge `serde-wasm-bindgen` or mapping primitive type arrays (*flat-arrays*).
-3. **Optimized Terrain and Map I/O Management (Zero-Copy):** Map browser binary arrays (`ArrayBuffer`/`Uint8Array`) directly as Rust byte slices (`&[u8]`) on the WASM heap without performing physical data copy.
+3. **Optimized Terrain and Map I/O Management:** Accept browser binary arrays (`ArrayBuffer`/`Uint8Array`) at the binding boundary and pass them to Rust as slices. `wasm-bindgen` performs the required boundary transfer into linear memory; the Core then parses the slice without additional application-level copies.
 4. **WASM Heap Lifecycle Management:** Provide clear hooks for deallocating memory of native Rust structs from the main JavaScript thread.
 
 ---
@@ -103,7 +103,7 @@ impl WasmTerrainEngine {
     }
 
     /// Loads the elevation binary buffer passively.
-    /// The data parameter maps a JS Uint8Array directly as a Rust slice.
+    /// The data parameter is transferred by wasm-bindgen and exposed to Rust as a slice.
     /// Returns the tile key (origin coordinates in integer degrees).
     pub fn load_tile(&mut self, data: &[u8]) -> Result<WasmTileKey, JsValue> { ... }
 
@@ -115,6 +115,15 @@ impl WasmTerrainEngine {
 
     /// Returns the interpolated elevation for geographic coordinates in **radians**.
     pub fn get_elevation_rad(&self, lat_rad: f64, lon_rad: f64) -> Result<f64, JsValue> { ... }
+
+    /// Returns `{ elevation_meters: number | null }` without converting null DTED samples to zero.
+    pub fn get_elevation_status(&self, lat_rad: f64, lon_rad: f64) -> Result<JsValue, JsValue> { ... }
+
+    /// Returns a profile with nullable elevations; reject_unknown selects strict policy.
+    pub fn get_vertical_profile_status(&self, route_coords: &[f64], step_meters: f64, reject_unknown: bool) -> Result<JsValue, JsValue> { ... }
+
+    /// Returns MSAW safe, warning, or unknown status.
+    pub fn calculate_clearance(&self, lat_rad: f64, lon_rad: f64, aircraft_height_meters: f64, minimum_clearance_meters: f64, reject_unknown: bool) -> Result<JsValue, JsValue> { ... }
 
     /// Sets the maximum number of DTED tiles kept in memory.
     pub fn set_cache_capacity(&self, capacity: usize) -> Result<(), JsValue> { ... }
@@ -175,6 +184,9 @@ impl WasmInterpolationEngine {
 
     /// Executes Dead Reckoning of all targets and returns a serialized JSON array.
     pub fn interpolate_all(&self, current_time: f64) -> Result<JsValue, JsValue> { ... }
+
+    /// Executes dead reckoning and returns valid targets plus skipped statuses.
+    pub fn interpolate_all_with_status(&self, current_time: f64) -> Result<JsValue, JsValue> { ... }
 }
 ```
 
@@ -204,9 +216,9 @@ WebAssembly manages execution through a **Linear Memory**. Rust objects created 
 
 ---
 
-## 5. Performance Strategy: Zero-Copy Transfers
+## 5. Performance Strategy: Linear-Memory Transfers
 
-To maintain operational 60 FPS rates in the browser during dense geographic interactions, data transfer from JS to Rust uses the flexibility of the shared linear memory.
+To maintain operational 60 FPS rates in the browser during dense geographic interactions, data transfer from JS to Rust is kept explicit and bounded through WASM linear memory.
 
 ```
 +-------------------------------------------------------------+
@@ -223,5 +235,5 @@ To maintain operational 60 FPS rates in the browser during dense geographic inte
 * When transferring a DTED buffer (usually $1.5\text{ MB}$ per Level 1 block):
   1. The TS SDK reads the binary file as an `ArrayBuffer` using the browser (`fetch`).
   2. The WASM bridge receives the typed array reference (`Uint8Array`) from JavaScript.
-  3. The `wasm-bindgen` library converts the reference directly into a safe `&[u8]` slice pointing to the bytes residing in the shared memory.
-  4. The Rust Core processes and builds the grid directly from this geographic slice without additional buffer allocations, saving CPU cycles.
+   3. `wasm-bindgen` transfers the bytes into linear memory and exposes a safe `&[u8]` slice to Rust.
+   4. The Rust Core processes and builds the grid from that slice without another application-level buffer copy.

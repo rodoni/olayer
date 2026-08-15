@@ -203,7 +203,7 @@ Keep large stress and 24-hour endurance tests in a scheduled workflow.
 
 **Acceptance criteria:**
 
-- CI exercises the documented `wasm-pack test --headless` path.
+- CI exercises the documented `wasm-pack test --headless --chrome` path.
 - Provider tests cover successful, malformed, missing, and cancelled tile
   responses.
 - Projection/camera snapshots cover 2D, 2.5D, 3D, center changes, and

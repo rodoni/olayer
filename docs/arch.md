@@ -230,14 +230,14 @@ graph TB
 #### 2. TypeScript SDK Components (Web Client)
 * **TS Controller:** Controls the screen animation loop in the browser using `requestAnimationFrame` and manages dynamic FPS modulation (15 FPS idle / 60 FPS active).
 * **TS Layer Manager:** Coordinates the layer stack (Layer Stack) on the Web, managing the optimized paint cycle with isolation of static and dynamic layers.
-* **TS Map Data Stack:** Manages the web map data infrastructure. Implements the `MapDataSource` abstractions and manages sub-providers such as `VectorTileSource` (for MVT/GeoServer), `RasterTileSource` (WMTS/OpenStreetMap), and `TerrainTileSource` (dynamic terrain paging). Controls request queues, browser concurrency, and local LRU cache.
+   * **TS Map Data Stack:** Manages the web map data infrastructure. Implements the `MapDataSource` abstractions and manages sub-providers such as `VectorTileSource` (for MVT/GeoServer), `RasterTileSource` (WMTS/OpenStreetMap), and `TerrainTileSource` (dynamic terrain paging). Controls bounded LRU caches, request deduplication, abort-aware retries, cache statistics, and resource disposal.
 * **WebGL/WebGPU GPU Pipeline:** Binds static vertex buffers and renders on the GPU from $4 \times 4$ matrices sent by the WASM bridge.
 * **WebGL/Canvas 2D CPU Pipeline:** Renders dynamic targets by resolving sprites in the GPU *Texture Atlas* and calculating label anti-overlapping.
 
 #### 3. Native SDK Components (Desktop Client)
 * **Native Controller:** Controls the native frame loop and manages local desktop window creation (using the `winit` crate or the host application's message loop).
 * **Native Layer Manager:** Manages the native layer stack for visibility, blending, and repainting at the native level.
-* **Native Map Data Stack:** Desktop equivalent of data infrastructure. Manages high-performance network connections (via `reqwest`), tactical format decoding, and efficient local disk I/O for DTED files.
+   * **Native Map Data Stack:** Desktop equivalent of data infrastructure. Manages background WMTS fetching, bounded decoded-pixel caching, worker shutdown, tactical format decoding, and efficient local disk I/O for DTED files.
 * **wgpu GPU Pipeline:** Compiles pipelines and renders on the GPU (Vulkan, Metal, or DirectX 12) through the Rust `wgpu` library to draw 3D terrain and vector background maps.
 * **wgpu CPU/Vertex Pipeline:** Renders dynamic targets on the desktop using instanced calls and *billboards* from a local texture atlas.
 
@@ -317,9 +317,8 @@ sequenceDiagram
     Host->>SDK: checkAltimetry(aircraftId)
     SDK->>Core: get_terrain_elevation(lat, lon)
     Core->>Core: O(1) access in active Grid Index cache
-    Core-->>SDK: ground_altitude (meters WGS84)
-    SDK->>SDK: Compare: (aircraft_alt - ground_altitude) < Safety Margin?
-    SDK-->>Host: Returns MSAW Alert (True/False)
+     Core-->>SDK: ClearanceResult (Safe / Warning / Unknown)
+     SDK-->>Host: Returns MSAW status and optional clearance
 
     Note over Host, Core: Phase 3: Vertical Profile Generation (2.5D View)
     Host->>SDK: getFlightVerticalProfile(routePoints, samplingStep)

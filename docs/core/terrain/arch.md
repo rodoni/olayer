@@ -56,7 +56,10 @@ classDiagram
         +unload_tile(key: &TileKey) bool
         +get_elevation(lat_deg: f64, lon_deg: f64) Result~f64, TerrainError~
         +get_elevation_rad(lat_rad: f64, lon_rad: f64) Result~f64, TerrainError~
+        +get_elevation_status(lat_rad: f64, lon_rad: f64) Result~ElevationSample, TerrainError~
+        +get_elevation_with_policy(lat_rad: f64, lon_rad: f64, policy: UnknownTerrainPolicy) Result~Option~f64~, TerrainError~
         +get_vertical_profile(route: &[LatLon], step_meters: f64) Result~Vec~ProfilePoint~~, TerrainError~
+        +calculate_clearance(...) Result~ClearanceResult, TerrainError~
     }
 
     class TileKey {
@@ -79,6 +82,15 @@ classDiagram
         +distance_meters: f64
         +ground_elevation: f64
         +coords: LatLon
+    }
+
+    class ElevationSample {
+        +elevation_meters: Option~f64~
+    }
+
+    class ClearanceResult {
+        +clearance_meters: Option~f64~
+        +state: MsawState
     }
 
     class TerrainError {
@@ -128,7 +140,10 @@ row_j    P01 ------ P02
    $$z_{right} = z_{01} \cdot (1 - ty) + z_{11} \cdot ty$$
    $$z_{final} = z_{left} \cdot (1 - tx) + z_{right} \cdot tx$$
 
-If any of the four neighboring points contains the null data sentinel (`-32767`), the corresponding point is ignored or treated as altitude 0.0.
+If any of the four neighboring points contains the null data sentinel (`-32767`),
+the status-aware API returns `elevation_meters: None`. Legacy elevation methods
+retain their compatibility behavior of returning `0.0`. Profile and MSAW callers
+must choose `UnknownTerrainPolicy::Propagate` or `Reject`.
 
 ---
 

@@ -36,6 +36,15 @@ export interface OlayerConfig {
   initialCenterLonRad?: number;
   initialZoom?: number;
   viewportBaseMeters?: number;
+  onMetrics?: (metrics: OlayerMetrics) => void;
+}
+
+export interface OlayerMetrics {
+  type: "frame";
+  durationMs: number;
+  fps: number;
+  active: boolean;
+  timestamp: number;
 }
 
 export class OlayerController {
@@ -69,6 +78,8 @@ export class OlayerController {
   public stopLoop(): void;
   public triggerActive(): void;
   public getFPS(): number;
+  public getCameraState(): WasmCameraState;
+  public destroy(): void; // idempotent; removes listeners and frees resources
   
   public getViewMode(): ViewMode;
   public setViewMode(value: ViewMode): void;

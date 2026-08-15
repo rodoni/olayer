@@ -25,7 +25,8 @@ classDiagram
         +new() InterpolationEngine
         +update_target(state: TargetState) Result~() , InterpolatorError~
         +remove_target(id: &str) bool
-        +interpolate_all(current_time: f64) Result~Vec~InterpolatedTarget~, InterpolatorError~
+         +interpolate_all(current_time: f64) Result~Vec~InterpolatedTarget~, InterpolatorError~
+         +interpolate_all_with_status(current_time: f64) Result~InterpolationBatch, InterpolatorError~
     }
 
     class TargetState {
@@ -42,6 +43,14 @@ classDiagram
         +id: String
         +position: LatLon
         +heading_rad: f64
+        +quality: PredictionQuality
+    }
+
+    class PredictionQuality {
+        Valid
+        Stale
+        ClockSkewed
+        Unavailable
     }
 
     class InterpolatorError {
@@ -81,7 +90,9 @@ At each update or frame request, the interpolation engine estimates the new coor
 
 ### 4.1 Time Delta ($dt$)
 $$dt = t_{\text{current}} - t_{\text{last\_ping}}$$
-*If $dt < 0$, the corresponding target is ignored and omitted from that frame's response to avoid a single sensor's temporal deviations interfering with the rest of the target batch (clock skew).*
+*If $dt < 0$, the target is omitted from the legacy response and reported as
+`ClockSkewed` by `interpolate_all_with_status`. Targets beyond the stale
+threshold are reported as `Stale`; non-finite timestamps are `Unavailable`.*
 
 ### 4.2 Horizontal Geodetic Translation
 The target's horizontal movement over the WGS84 ellipsoid is obtained by solving the **Direct Geodetic Problem**:

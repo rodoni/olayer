@@ -125,8 +125,8 @@ cargo clippy --workspace --exclude olayer-desktop-demo --all-targets
 # TypeScript SDK tests
 cd sdk/ts && npm run test:run
 
-# WASM browser tests
-cd sdk/ts/wasm && wasm-pack test --headless
+# WASM browser tests (Chrome required)
+cd sdk/ts/wasm && wasm-pack test --headless --chrome
 
 # Benchmarks (Core geodesy)
 cd core && cargo bench
@@ -248,13 +248,20 @@ require the active projection; 3D operates directly in ECEF.
 use olayer_core::terrain::{TerrainEngine, TileKey, ProfilePoint};
 
 let mut engine = TerrainEngine::new();
+// or: let mut engine = TerrainEngine::with_capacity(128); // custom cache
+
+// Cache management
+engine.set_cache_capacity(128);   // resize LRU cache
+let cached: usize = engine.cache_size();
+engine.clear_cache();
 
 // Load a DTED buffer (Level 0/1/2)
 let tile_key: TileKey = engine.load_tile(&dted_bytes)?;
 //   tile_key.lat_deg: i32, tile_key.lon_deg: i32
 
-// O(1) elevation lookup (bilinear interpolation, degrees)
-let elevation: f64 = engine.get_elevation(lat_deg, lon_deg)?;
+// O(1) elevation lookup (bilinear interpolation)
+let elevation: f64 = engine.get_elevation(lat_deg, lon_deg)?;     // degrees
+let elevation: f64 = engine.get_elevation_rad(lat_rad, lon_rad)?; // radians
 
 // Unload a tile
 engine.unload_tile(&tile_key);
@@ -265,6 +272,18 @@ let profile: Vec<ProfilePoint> = engine.get_vertical_profile(&route_points, step
 
 // TileKey is re-exported at terrain module level
 use olayer_core::terrain::TileKey;
+
+// Operational status and MSAW policy
+use olayer_core::terrain::UnknownTerrainPolicy;
+let sample = engine.get_elevation_status(lat_rad, lon_rad)?;
+let clearance = engine.calculate_clearance(
+    lat_rad,
+    lon_rad,
+    aircraft_height_meters,
+    minimum_clearance_meters,
+    UnknownTerrainPolicy::Propagate,
+)?;
+// clearance.state: Safe, Warning, or Unknown
 ```
 
 **TerrainError variants**: `InvalidHeader`, `MalformedData`, `TileNotLoaded(lat_deg, lon_deg)`.
@@ -272,7 +291,7 @@ use olayer_core::terrain::TileKey;
 The DTED parser supports:
 - Levels 0, 1, 2 (121, 1201, 3601 samples per column)
 - Both DMS (`230000S`) and decimal-degree (`23.500S`) UHL origin formats
-- Null sentinel `-32767` treated as 0.0 m
+- Null sentinel `-32767` is `None` in status-aware APIs; legacy elevation methods retain `0.0 m` compatibility behavior
 - Column-major internal storage with block sentinel (`0xAA`) verification
 - Floating-point boundary snap via `tile_key_floor` (1e-12 tolerance)
 
@@ -410,12 +429,19 @@ await init();  // Load and instantiate the WASM module
 ```typescript
 const terrain = new WasmTerrainEngine();
 
+// Cache management
+terrain.set_cache_capacity(128);
+const cached: number = terrain.cache_size();
+terrain.clear_cache();
+
 // Load DTED buffer (Uint8Array → WASM linear memory)
 const tileKey: WasmTileKey = terrain.load_tile(dtedBuffer);
 // tileKey.lat_deg, tileKey.lon_deg (integers)
 
 // Query elevation (decimal degrees)
 const elevation: number = terrain.get_elevation(lat_deg, lon_deg);
+// Or in radians:
+const elevation: number = terrain.get_elevation_rad(lat_rad, lon_rad);
 
 // Vertical profile (flat arrays in degrees)
 const profile = terrain.get_vertical_profile(
@@ -460,8 +486,16 @@ const vp3d = proj.get_3d_view_proj_matrix(cameraState);
 ### 4.5 Camera
 
 ```typescript
-const camera = new WasmCameraState(center_lat, center_lon, zoom, rotation, aspect, viewport);
+// Full constructor: (center_lat, center_lon, center_height, zoom, rotation, pitch, roll, aspect_ratio, viewport_base_meters)
+const camera = new WasmCameraState(
+  centerLat, centerLon, centerHeight,
+  zoom, rotation, pitch, roll,
+  aspect, viewportMeters
+);
 const matrix = camera.get_2d_view_proj_matrix(projection);
+// Also: camera.get_25d_view_proj_matrix(projection)
+//       projection.get_3d_view_proj_matrix(camera)
+camera.free();  // release WASM heap
 ```
 
 ### 4.6 Symbol Registry
@@ -528,6 +562,24 @@ controller.setZoom(zoom);
 controller.setRotation(rotationRad);
 controller.setViewMode("2D" | "2.5D" | "3D");
 controller.triggerActive();  // Boost to 60 FPS for 1 second
+
+// Getters
+controller.getCenterLat();   // radians
+controller.getCenterLon();   // radians
+controller.getCenterHeight(); // metres
+controller.getZoom();
+controller.getRotation();    // radians
+controller.getPitch();       // radians
+controller.setPitch(pitchRad);
+controller.getRoll();        // radians
+controller.setRoll(rollRad);
+controller.getViewportBaseMeters();
+controller.getCameraState(); // WasmCameraState (must .free() after use)
+controller.getFPS();
+
+// 3D convenience
+controller.getIs3D();        // boolean
+controller.setIs3D(true);    // equivalent to setViewMode("3D")
 ```
 
 ### 5.3 Layer System
@@ -555,10 +607,10 @@ controller.layerManager.reorderLayer("osm-base", 0);
 ```typescript
 const stack = new MapDataStack();
 
-// Terrain
+// Terrain — urlResolver receives (lat, lon) in degrees
 const terrainSource = new TerrainTileSource(
   controller.terrainEngine,
-  (key) => `/api/dted/${key.lat_deg}/${key.lon_deg}.dt1`
+  (lat, lon) => `/api/dted/${lat}/${lon}.dt1`
 );
 stack.registerSource(terrainSource);
 
@@ -573,6 +625,7 @@ stack.registerSource(vectorSource);
 // Aggregate cache management
 stack.clearCache();
 const size = stack.getCacheSize();
+stack.destroy();  // cleanup all sources
 ```
 
 ### 5.5 Texture Atlas
@@ -612,6 +665,13 @@ let mut controller = NativeController::new(center_lat_rad, center_lon_rad);
 controller.trigger_active();              // Boost to 60 FPS
 let fps: u32 = controller.get_target_fps(); // 60 (active) or 15 (idle)
 // Returns to idle after 1 second of inactivity
+
+// Create a GeoServer WMTS raster source (spawns background fetch thread)
+let wmts = controller.create_geoserver_source("osm", "http://geoserver/wmts", "osm_base");
+wmts.load_tile(x, y, z);                         // async, non-blocking
+if let Some(pixels) = wmts.get_tile_pixels(x, y, z) {  // RGBA8
+    // upload to GPU...
+}
 ```
 
 ### 6.2 Layer Manager
@@ -642,7 +702,9 @@ let dynamic_layers: Vec<&dyn Layer> = mgr.visible_dynamic_layers();
 ### 6.3 Map Data Stack
 
 ```rust
-use olayer_native::native_map_data_stack::{NativeMapDataStack, TerrainDataSource, MapDataSource};
+use olayer_native::native_map_data_stack::{
+    NativeMapDataStack, TerrainDataSource, GeoserverWmtsSource, MapDataSource,
+};
 
 let mut stack = NativeMapDataStack::new();
 
@@ -653,8 +715,15 @@ let elev = terrain.get_elevation(lat_deg, lon_deg)?;
 terrain.unload_tile(lat_deg, lon_deg);
 terrain.clear_cache();  // unloads all tiles
 
+// GeoServer WMTS raster source (background thread for async fetch)
+let wmts = GeoserverWmtsSource::new("osm", "http://geoserver/wmts", "osm_base");
+wmts.load_tile(x, y, z);  // async, non-blocking
+let pixels: Option<Vec<u8>> = wmts.get_tile_pixels(x, y, z);  // RGBA8
+let cached_keys: Vec<String> = wmts.get_cached_keys();
+
 // Register custom data sources
 stack.register_source(Box::new(terrain))?;
+stack.register_source(Box::new(wmts))?;
 let source = stack.get_source("dted");
 stack.clear_cache();  // clears all registered sources
 
@@ -663,21 +732,42 @@ stack.load_dted_file("/path/to/tile.dt1", &mut engine)?;
 stack.load_dted_buffer(&buffer, &mut engine)?;
 ```
 
-### 6.4 GPU Pipeline (Grid)
+### 6.4 GPU Pipeline (Grid + Raster Tiles)
 
 ```rust
-use olayer_native::wgpu_gpu_pipeline::WgpuGpuPipeline;
+use olayer_native::wgpu_gpu_pipeline::{WgpuGpuPipeline, RasterTileUpload};
 
 let mut gpu = WgpuGpuPipeline::new(&device, surface_format);
 
+// --- Grid ---
 // Generate grid vertices on CPU (pure, benchmarkable)
 let vertices: Vec<f32> = WgpuGpuPipeline::generate_grid_vertices(&controller);
 
 // Upload to GPU
 gpu.rebuild_grid_buffers(&controller, &device, &queue);
 
-// Render
+// Render grid
 gpu.render(&mut render_pass);
+
+// --- Raster Tiles ---
+// Upload a decoded RGBA8 tile to GPU
+gpu.upload_raster_tile(RasterTileUpload {
+    device: &device,
+    queue: &queue,
+    key: "0/1/2",
+    pixels: &rgba_bytes,
+    x: 1, y: 2, z: 0,
+    controller: &controller,
+});
+
+// Rebuild tile vertex buffers when projection changes
+gpu.rebuild_raster_tile_buffers(&device, &controller);
+
+// Render visible raster tiles
+gpu.render_raster_tiles(&mut render_pass, &visible_keys);
+
+// Clear all raster tiles from GPU
+gpu.clear_raster_tiles();
 ```
 
 ### 6.5 CPU/Vertex Pipeline (Targets)
@@ -735,12 +825,20 @@ int olayer_terrain_engine_get_elevation(
     TerrainEngine* engine, double lat_deg, double lon_deg, double* out_elevation
 );
 
+int olayer_terrain_engine_get_elevation_rad(
+    TerrainEngine* engine, double lat_rad, double lon_rad, double* out_elevation
+);
+
 int olayer_terrain_engine_get_vertical_profile(
     TerrainEngine* engine,
-    const double* route_coords, size_t route_count,   // flat [lat, lon, h, ...]
-    double step_meters,
+    const double* route_lat, const double* route_lon, const double* route_height,
+    size_t route_len, double step_meters,
     C_ProfilePoint** out_profile, size_t* out_count
 );
+
+int olayer_terrain_engine_set_cache_capacity(TerrainEngine* engine, size_t capacity);
+size_t olayer_terrain_engine_cache_size(TerrainEngine* engine);
+void olayer_terrain_engine_clear_cache(TerrainEngine* engine);
 
 void olayer_profile_points_free(C_ProfilePoint* points, size_t count);
 void olayer_terrain_engine_free(TerrainEngine* engine);
@@ -922,8 +1020,8 @@ cargo bench --package olayer-native --bench grid_generation
 # TypeScript
 cd sdk/ts && npm run test:run
 
-# WASM browser tests
-cd sdk/ts/wasm && wasm-pack test --headless
+# WASM browser tests (Chrome required)
+cd sdk/ts/wasm && wasm-pack test --headless --chrome
 ```
 
 ---
@@ -936,11 +1034,15 @@ cd sdk/ts/wasm && wasm-pack test --headless
 |---------|------|
 | Core Rust `LatLon.lat`, `LatLon.lon` | Radians |
 | Core Rust heading, bearing, rotation, pitch, roll | Radians |
+| Core Rust `get_elevation(lat_deg, lon_deg)` | **Degrees** |
+| Core Rust `get_elevation_rad(lat_rad, lon_rad)` | Radians |
 | WASM `WasmLatLon.lat`, `WasmLatLon.lon` | Radians |
 | WASM `update_target(lat, lon, ...)` | Radians |
 | WASM `get_elevation(lat, lon)` | **Degrees** |
+| WASM `get_elevation_rad(lat, lon)` | Radians |
 | WASM `get_vertical_profile(route, ...)` | **Degrees** |
 | C-FFI `olayer_terrain_engine_get_elevation(lat, lon, ...)` | **Degrees** |
+| C-FFI `olayer_terrain_engine_get_elevation_rad(lat, lon, ...)` | Radians |
 | C-FFI `olayer_interpolator_update(lat, lon, ...)` | Radians |
 | TypeScript `OlayerController.setCenter(lat, lon)` | Radians |
 
@@ -1105,10 +1207,10 @@ async function startMap() {
   );
   controller.layerManager.addLayer(new TileLayer("osm-base", osmSource));
 
-  // Terrain elevation source
+  // Terrain elevation source — urlResolver receives (lat, lon) in degrees
   const terrainSource = new TerrainTileSource(
     controller.terrainEngine,
-    (key) => `/api/terrain/${key.lat_deg}/${key.lon_deg}.dt1`
+    (lat, lon) => `/api/terrain/${lat}/${lon}.dt1`
   );
   controller.dataManager.registerSource(terrainSource);
 
@@ -1171,3 +1273,67 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 ```
+
+## 16. Current Proposal APIs
+
+### 16.1 Provider Requests And Metrics
+
+All web tile providers accept optional abort/retry options. Concurrent requests
+for the same tile share one in-flight operation.
+
+```typescript
+const abort = new AbortController();
+const source = new VectorTileSource(urlTemplate, 100, {
+  geoJsonCrs: "EPSG:900913",
+  mvtLayer: "airways",
+  maxRetries: 2,
+});
+
+await source.loadTile(x, y, z, { signal: abort.signal, maxRetries: 1 });
+console.log(source.getCacheStats());
+abort.abort();
+```
+
+`getCacheStats()` reports `items`, `bytes`, `hits`, `misses`, and `evictions`.
+`MapDataStack.getCacheStats()` aggregates registered providers.
+
+### 16.2 Prediction And Terrain Status
+
+Use status-aware APIs when operational consumers must distinguish valid data from
+stale, clock-skewed, unavailable, or unknown terrain data.
+
+```typescript
+const predictions = controller.interpolator.interpolate_all_with_status(now);
+const elevation = controller.terrainEngine.get_elevation_status(latRad, lonRad);
+const clearance = controller.terrainEngine.calculate_clearance(
+  latRad,
+  lonRad,
+  aircraftHeightMeters,
+  minimumClearanceMeters,
+  false, // propagate unknown terrain as state: "Unknown"
+);
+```
+
+`calculate_clearance` reports `Safe`, `Warning`, or `Unknown`. Set the final
+argument to `true` to reject unknown terrain instead of returning an unknown
+alert state.
+
+### 16.3 Controller Metrics And Teardown
+
+Frame metrics can be collected without parsing console output. Teardown is
+idempotent and removes registered listeners.
+
+```typescript
+const controller = new OlayerController({
+  glCanvas,
+  canvas2D,
+  projection,
+  onMetrics: (metrics) => performanceLog.write(metrics),
+});
+
+controller.destroy();
+controller.destroy(); // safe no-op
+```
+
+See [`conformance.md`](conformance.md), [`core_api_inventory.md`](core_api_inventory.md),
+and [`api_reference.md`](api_reference.md) for boundary contracts.

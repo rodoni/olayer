@@ -20,9 +20,23 @@ The **TS Map Data Stack** manages all ingestion and caching of cartographic data
  */
 export interface MapDataSource {
   id: string;
-  loadTile(x: number, y: number, z: number): Promise<void>;
+  loadTile(x: number, y: number, z?: number, options?: TileRequestOptions): Promise<void>;
   unloadTile(x: number, y: number, z: number): void;
   clearCache(): void;
+  getCacheStats?(): TileCacheStats;
+}
+
+export interface TileRequestOptions {
+  signal?: AbortSignal;
+  maxRetries?: number;
+}
+
+export interface TileCacheStats {
+  items: number;
+  bytes: number;
+  hits: number;
+  misses: number;
+  evictions: number;
 }
 
 /**
@@ -36,9 +50,9 @@ export class TerrainTileSource implements MapDataSource {
   constructor(terrainEngine: any);
 
   /**
-   * Downloads a DTED tile via HTTP and registers it in Zero-Copy in the Core WASM memory.
+   * Downloads a DTED tile via HTTP and transfers it through the WASM boundary into the Core terrain cache.
    */
-  public loadTile(lat: number, lon: number, _unused?: number): Promise<void>;
+  public loadTile(lat: number, lon: number, _unused?: number, options?: TileRequestOptions): Promise<void>;
 
   /**
    * Removes the tile from the JS cache and unloads from the WebAssembly heap.
@@ -49,6 +63,7 @@ export class TerrainTileSource implements MapDataSource {
    * Clears cache and deallocates everything from the WASM heap.
    */
   public clearCache(): void;
+  public getCacheStats(): TileCacheStats;
 }
 
 /**
@@ -57,9 +72,10 @@ export class TerrainTileSource implements MapDataSource {
 export class VectorTileSource implements MapDataSource {
   public id: string = "geoserver_mvt";
   
-  public loadTile(x: number, y: number, z: number): Promise<void>;
+  public loadTile(x: number, y: number, z: number, options?: TileRequestOptions): Promise<void>;
   public unloadTile(x: number, y: number, z: number): void;
   public clearCache(): void;
+  public getCacheStats(): TileCacheStats;
 }
 
 /**
@@ -68,9 +84,10 @@ export class VectorTileSource implements MapDataSource {
 export class RasterTileSource implements MapDataSource {
   public id: string = "wmts_raster";
 
-  public loadTile(x: number, y: number, z: number): Promise<void>;
+  public loadTile(x: number, y: number, z: number, options?: TileRequestOptions): Promise<void>;
   public unloadTile(x: number, y: number, z: number): void;
   public clearCache(): void;
+  public getCacheStats(): TileCacheStats;
 }
 ```
 
@@ -96,6 +113,6 @@ sequenceDiagram
     end
     MDS->>Network: fetch(dted_tile_url)
     Network-->>MDS: Binary buffer (.dt0)
-    MDS->>WASM: load_tile(bytes) (Zero-Copy)
+    MDS->>WASM: load_tile(bytes) (linear-memory transfer)
     MDS->>MDS: Adds to local Map cache
 ```

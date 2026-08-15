@@ -44,6 +44,15 @@ export interface OlayerConfig {
   initialCenterLonRad?: number;             // Initial camera longitude in radians (default: 0.0)
   initialZoom?: number;                     // Initial scale zoom level (default: 1.0)
   viewportBaseMeters?: number;              // Reference viewport width in meters (default: 100000.0)
+  onMetrics?: (metrics: OlayerMetrics) => void; // Optional frame instrumentation callback
+}
+
+interface OlayerMetrics {
+  type: "frame";
+  durationMs: number;
+  fps: number;
+  active: boolean;
+  timestamp: number;
 }
 ```
 
@@ -70,7 +79,7 @@ constructor(config: OlayerConfig)
 - `startLoop(): void` - Starts the animation render loop (`requestAnimationFrame`). Frame rate automatically toggles between active interaction rendering (60 FPS) and idle rendering (15 FPS).
 - `stopLoop(): void` - Stops the animation loop.
 - `triggerActive(): void` - Temporarily forces the renderer into high-responsiveness mode (60 FPS) for visual smoothness. Called automatically on drag/wheel interactions.
-- `destroy(): void` - Stops rendering loops and fully deallocates WebGL textures, buffers, and WASM memory allocations.
+- `destroy(): void` - Stops rendering loops, removes listeners, and fully deallocates WebGL textures, buffers, and WASM memory allocations. Safe to call repeatedly.
 - `getFPS(): number` - Returns the actual current frame rate.
 
 **Camera Setters & Getters:**
@@ -156,9 +165,19 @@ Data providers handle background loading, caching (using Least-Recently Used evi
 ```typescript
 export interface MapDataSource {
   id: string;
-  loadTile(x: number, y: number, z?: number): Promise<void>;
+  loadTile(x: number, y: number, z?: number, options?: {
+    signal?: AbortSignal;
+    maxRetries?: number;
+  }): Promise<void>;
   unloadTile(x: number, y: number, z?: number): void;
   clearCache(): void;
+  getCacheStats?(): {
+    items: number;
+    bytes: number;
+    hits: number;
+    misses: number;
+    evictions: number;
+  };
 }
 ```
 
@@ -170,6 +189,7 @@ Stores and orchestrates multiple map data sources.
 - `getSource<T extends MapDataSource>(id: string): T | null` - Retrieves a source, casting it to its original class type.
 - `clearCache(): void` - Clears caches of all registered data sources.
 - `getCacheSize(): number` - Returns total loaded tiles across all sources.
+- `getCacheStats(): TileCacheStats` - Returns aggregate item, byte, hit, miss, and eviction counts.
 - `destroy(): void` - Clears caches and removes registered sources.
 
 ---
@@ -186,11 +206,12 @@ Downloads image tiles and uploads them as WebGL textures.
   )
   ```
 - **Methods:**
-  - `loadTile(x: number, y: number, z: number): Promise<void>`
+  - `loadTile(x: number, y: number, z: number, options?: TileRequestOptions): Promise<void>`
   - `getTileTexture(x: number, y: number, z: number): WebGLTexture | null`
   - `unloadTile(x: number, y: number, z: number): void`
   - `clearCache(): void`
   - `getCacheSize(): number`
+  - `getCacheStats(): TileCacheStats`
 
 ---
 
@@ -201,14 +222,16 @@ Downloads and parses vector tiles (MVT) or GeoJSON files representing geographic
   ```typescript
   constructor(
     urlResolver?: string | ((x: number, y: number, z: number) => string),
-    maxTiles?: number // Default: 100
+     maxTiles?: number, // Default: 100
+     options?: { geoJsonCrs?: "EPSG:900913" | "EPSG:4326"; mvtLayer?: string; maxRetries?: number }
   )
   ```
 - **Methods:**
-  - `loadTile(x: number, y: number, z: number): Promise<void>`
+  - `loadTile(x: number, y: number, z: number, options?: TileRequestOptions): Promise<void>`
   - `getTileFeatures(x: number, y: number, z: number): VectorFeature[]`
   - `unloadTile(x: number, y: number, z: number): void`
   - `clearCache(): void`
+  - `getCacheStats(): TileCacheStats`
 
 **Interface `VectorFeature`**:
 ```typescript
@@ -229,7 +252,8 @@ Manages Digital Terrain Elevation Data (DTED) files, feeding them directly into 
   constructor(
     terrainEngine: WasmTerrainEngine,
     urlResolver?: string | ((lat: number, lon: number) => string),
-    maxTiles?: number // Default: 9
+     maxTiles?: number, // Default: 9
+     maxRetries?: number // Default: 2
   )
   ```
 - **Methods:**
@@ -238,6 +262,7 @@ Manages Digital Terrain Elevation Data (DTED) files, feeding them directly into 
   - `unloadTile(lat: number, lon: number): void`
   - `clearCache(): void`
   - `getCacheSize(): number`
+  - `getCacheStats(): TileCacheStats`
 
 ---
 

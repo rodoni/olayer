@@ -11,6 +11,13 @@ Current implementation status is also tracked in:
 - [Core API Binding Inventory](core_api_inventory.md)
 - [Enhancement Proposals](proposals.md)
 
+The milestone checkboxes below are the original delivery plan and are not a
+generated build report. For current implementation truth, use the proposal
+statuses and conformance inventory. In particular, cache lifecycle, MVT
+decoding/layer selection, status-aware terrain/interpolation, MSAW clearance,
+and generated binding checks are implemented; visual regression, native
+telemetry, endurance, and large-scale stress validation remain open.
+
 ---
 
 ## Overview of the Roadmap (Roadmap)

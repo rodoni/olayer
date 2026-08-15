@@ -667,32 +667,38 @@ class VectorTileLayer extends Layer { ... }
 ### 3.3 Data Sources
 
 ```typescript
+type TileRequestOptions = { signal?: AbortSignal; maxRetries?: number }
+type TileCacheStats = { items: number; bytes: number; hits: number; misses: number; evictions: number }
+
 interface MapDataSource {
   id: string
-  loadTile(x: number, y: number, z?: number): Promise<void>
+  loadTile(x: number, y: number, z?: number, options?: TileRequestOptions): Promise<void>
   unloadTile(x: number, y: number, z?: number): void
   clearCache(): void
+  getCacheStats?(): TileCacheStats
 }
 
 class TerrainTileSource implements MapDataSource {
   id: "terrain_dted"
   constructor(engine: WasmTerrainEngine, urlResolver?: string | ((lat: number, lon: number) => string), maxTiles?: number)
-  loadTile(lat: number, lon: number, _unused?: number): Promise<void>
+  loadTile(lat: number, lon: number, _unused?: number, options?: TileRequestOptions): Promise<void>
   unloadTile(lat: number, lon: number, _unused?: number): void
   injectTile(lat: number, lon: number, bytes: Uint8Array): void
   clearCache(): void
   getCacheSize(): number
+  getCacheStats?(): TileCacheStats
 }
 // Alias: export { TerrainTileSource as DataManager }
 
 class RasterTileSource implements MapDataSource {
   id: "wmts_raster"
   constructor(gl: WebGL2RenderingContext, urlResolver?: string | ((x: number, y: number, z: number) => string), maxTiles?: number)
-  loadTile(x: number, y: number, z: number): Promise<void>
+  loadTile(x: number, y: number, z: number, options?: TileRequestOptions): Promise<void>
   unloadTile(x: number, y: number, z: number): void
   getTileTexture(x: number, y: number, z: number): WebGLTexture | null
   clearCache(): void
   getCacheSize(): number
+  getCacheStats(): TileCacheStats
 }
 
 interface VectorFeature {
@@ -712,12 +718,12 @@ class VectorTileSource implements MapDataSource {
        maxRetries?: number
      }
   )
-  loadTile(x: number, y: number, z: number): Promise<void>
+  loadTile(x: number, y: number, z: number, options?: TileRequestOptions): Promise<void>
   unloadTile(x: number, y: number, z: number): void
   getTileFeatures(x: number, y: number, z: number): VectorFeature[]
   clearCache(): void
    getCacheSize(): number
-   getCacheStats(): { items: number; bytes: number; hits: number; misses: number; evictions: number }
+   getCacheStats(): TileCacheStats
 }
 
 `loadTile` optionally accepts `{ signal?: AbortSignal, maxRetries?: number }`.
@@ -727,7 +733,7 @@ class MapDataStack {
   getSource<T extends MapDataSource>(id: string): T | null
   clearCache(): void
   getCacheSize(): number
-  getCacheStats(): { items: number; bytes: number; hits: number; misses: number; evictions: number }
+   getCacheStats(): TileCacheStats
   destroy(): void
 }
 ```

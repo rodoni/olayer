@@ -31,6 +31,8 @@ pub trait MapDataSource {
   * `get_source(id: &str) -> Option<&dyn MapDataSource>`
   * `clear_cache()` — clears all registered sources.
   * `get_cache_size() -> usize` — aggregate cache size.
+  * `GeoserverWmtsSource` uses a bounded LRU cache, deduplicates pending requests,
+    rejects stale completions after cache clear, and shuts down its worker on drop.
 
 ---
 
@@ -46,7 +48,10 @@ Unlike the WebAssembly version (which consumes elevation tiles via HTTP requests
   * `load_file(path: &str) -> Result<(), String>`
   * `load_buffer(buffer: &[u8]) -> Result<(), String>`
   * `unload_tile(lat_deg: i32, lon_deg: i32) -> bool`
-  * `get_elevation(lat_deg: f64, lon_deg: f64) -> Result<f64, String>`
+   * `get_elevation(lat_deg: f64, lon_deg: f64) -> Result<f64, String>`
+* **GeoServer WMTS source:** `GeoserverWmtsSource` fetches and decodes raster
+  tiles on a worker thread, deduplicates pending keys, bounds the decoded pixel
+  cache, and terminates the worker when the final clone is dropped.
 * **Initialization:** In [main.rs](../../../../sdk/native/demo/src/main.rs), mock tile reading/generation is performed for the São Paulo TMA area and its subsequent injection into the controller.
 
 ---
