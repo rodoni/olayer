@@ -8,12 +8,13 @@
 //!
 //! | Module | Purpose |
 //! |--------|---------|
-//! | `geodesy` | WGS84 coordinate conversions, geodetic solvers (Vincenty / Haversine) |
+//! | `geodesy` | WGS84 coordinate conversions, local frames (ENU/NED), WMM-2025 magnetism, geodesic spatial analysis (containment, XTK/ATD, buffers), geodetic solvers |
 //! | `projections` | Cartographic projections (LCC, Stereographic, Web Mercator) |
 //! | `terrain` | DTED elevation parsing, bilinear interpolation, vertical profiles |
 //! | `sld` | OGC Styled Layer Descriptor (SLD) XML parser |
 //! | `symbol_registry` | Pluggable symbology resolver (NATO / ICAO / declarative JSON) |
 //! | `interpolator` | Dead-reckoning target interpolation for sensor fusion |
+//! | `aeronautical` | Aeronautical data ingestion (AIXM 5.1 & GeoJSON-Aviation) |
 
 pub mod geodesy;
 pub mod camera;
@@ -22,3 +23,4 @@ pub mod sld;
 pub mod symbol_registry;
 pub mod terrain;
 pub mod interpolator;
+pub mod aeronautical;

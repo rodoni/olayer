@@ -4,19 +4,58 @@
 
 use std::os::raw::{c_char, c_int};
 use std::sync::Arc;
-use olayer_core::geodesy::LatLon;
+use olayer_core::aeronautical::{
+    export_dataset_to_geojson, parse_aixm_51_str, parse_geojson_aviation_str, AeronauticalDataset,
+    NavaidType,
+};
+use olayer_core::geodesy::{
+    compute_route_deviation, geodesic_intersection, EnuPoint, GeodesicPolygon, LatLon,
+    LocalTangentFrame, MagneticModel,
+};
 use olayer_core::terrain::TerrainEngine;
 use olayer_core::interpolator::{InterpolationEngine, TargetState};
+use crate::tools::{HoldingPatternConfig, IlsConeConfig, RangeRingsConfig, TacticalToolsManager, TurnDirection};
 
 // --- C-COMPATIBLE DATA STRUCTURES ---
 
 /// C representation of geodetic coordinate.
 #[repr(C)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct C_LatLon {
     pub lat: f64,
     pub lon: f64,
     pub height: f64,
+}
+
+/// C representation of topocentric East-North-Up coordinate.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct C_EnuPoint {
+    pub east_m: f64,
+    pub north_m: f64,
+    pub up_m: f64,
+}
+
+/// C representation of magnetic field elements.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct C_MagneticElements {
+    pub declination_rad: f64,
+    pub inclination_rad: f64,
+    pub horizontal_intensity_nt: f64,
+    pub total_intensity_nt: f64,
+    pub x_nt: f64,
+    pub y_nt: f64,
+    pub z_nt: f64,
+}
+
+/// C representation of route deviation metrics (XTK / ATD).
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct C_RouteDeviation {
+    pub cross_track_error_meters: f64,
+    pub along_track_distance_meters: f64,
+    pub nearest_point: C_LatLon,
 }
 
 /// C representation of interpolated target.
@@ -50,6 +89,44 @@ pub struct C_ProfilePoint {
     pub lat: f64,
     pub lon: f64,
     pub height: f64,
+}
+
+/// C representation of Range and Bearing Line (RBL / CRSR) measurement.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct C_RblMeasurement {
+    pub from_lat_deg: f64,
+    pub from_lon_deg: f64,
+    pub to_lat_deg: f64,
+    pub to_lon_deg: f64,
+    pub distance_nm: f64,
+    pub distance_km: f64,
+    pub true_bearing_deg: f64,
+    pub magnetic_bearing_deg: f64,
+    pub reciprocal_true_bearing_deg: f64,
+    pub reciprocal_magnetic_bearing_deg: f64,
+    pub estimated_time_enroute_sec: f64, // -1.0 if speed not provided
+}
+
+/// C representation of a Projected Position Leader (PPL) tick mark.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct C_PplTick {
+    pub time_minutes: f64,
+    pub distance_nm: f64,
+    pub lat_deg: f64,
+    pub lon_deg: f64,
+}
+
+/// C representation of a radio navigation aid summary.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct C_NavaidSummary {
+    pub lat: f64,
+    pub lon: f64,
+    pub elevation_m: f64,
+    pub frequency_mhz: f64,
+    pub navaid_type_code: c_int,
 }
 
 // --- TERRAIN ENGINE C-API ---
@@ -521,6 +598,727 @@ pub unsafe extern "C" fn olayer_interpolator_free(engine: *mut InterpolationEngi
     }
 }
 
+// --- LOCAL TANGENT FRAME C-API ---
+
+/// Creates a new `LocalTangentFrame` at the given geodetic origin.
+#[no_mangle]
+pub extern "C" fn olayer_local_frame_create(origin_lat: f64, origin_lon: f64, origin_height: f64) -> *mut LocalTangentFrame {
+    let origin = LatLon::new(origin_lat, origin_lon, origin_height);
+    Box::into_raw(Box::new(LocalTangentFrame::new(origin)))
+}
+
+/// Converts LLA to local ENU coordinates. Returns 0 on success, negative error.
+#[no_mangle]
+pub unsafe extern "C" fn olayer_local_frame_lla_to_enu(
+    frame: *mut LocalTangentFrame,
+    lat: f64,
+    lon: f64,
+    height: f64,
+    out_enu: *mut C_EnuPoint,
+) -> c_int {
+    if frame.is_null() || out_enu.is_null() {
+        return -1;
+    }
+    let frame_ref = &*frame;
+    let lla = LatLon::new(lat, lon, height);
+    let pt = frame_ref.lla_to_enu(&lla);
+    *out_enu = C_EnuPoint {
+        east_m: pt.east_m,
+        north_m: pt.north_m,
+        up_m: pt.up_m,
+    };
+    0
+}
+
+/// Converts local ENU coordinates to LLA. Returns 0 on success, negative error.
+#[no_mangle]
+pub unsafe extern "C" fn olayer_local_frame_enu_to_lla(
+    frame: *mut LocalTangentFrame,
+    east_m: f64,
+    north_m: f64,
+    up_m: f64,
+    out_lla: *mut C_LatLon,
+) -> c_int {
+    if frame.is_null() || out_lla.is_null() {
+        return -1;
+    }
+    let frame_ref = &*frame;
+    let enu = EnuPoint::new(east_m, north_m, up_m);
+    let lla = frame_ref.enu_to_lla(&enu);
+    *out_lla = C_LatLon {
+        lat: lla.lat,
+        lon: lla.lon,
+        height: lla.height,
+    };
+    0
+}
+
+/// Calculates radar look angles without atmospheric refraction. Returns 0 on success, negative error.
+#[no_mangle]
+pub unsafe extern "C" fn olayer_local_frame_radar_look_angles(
+    frame: *mut LocalTangentFrame,
+    target_lat: f64,
+    target_lon: f64,
+    target_height: f64,
+    out_slant_range: *mut f64,
+    out_azimuth_rad: *mut f64,
+    out_elevation_rad: *mut f64,
+) -> c_int {
+    if frame.is_null() || out_slant_range.is_null() || out_azimuth_rad.is_null() || out_elevation_rad.is_null() {
+        return -1;
+    }
+    let frame_ref = &*frame;
+    let target = LatLon::new(target_lat, target_lon, target_height);
+    let (slant, az, el) = frame_ref.radar_look_angles(&target);
+    *out_slant_range = slant;
+    *out_azimuth_rad = az;
+    *out_elevation_rad = el;
+    0
+}
+
+/// Calculates radar look angles with 4/3 tropospheric refraction. Returns 0 on success, negative error.
+#[no_mangle]
+pub unsafe extern "C" fn olayer_local_frame_radar_look_angles_refracted(
+    frame: *mut LocalTangentFrame,
+    target_lat: f64,
+    target_lon: f64,
+    target_height: f64,
+    k_factor: f64,
+    out_slant_range: *mut f64,
+    out_azimuth_rad: *mut f64,
+    out_elevation_rad: *mut f64,
+) -> c_int {
+    if frame.is_null() || out_slant_range.is_null() || out_azimuth_rad.is_null() || out_elevation_rad.is_null() {
+        return -1;
+    }
+    let frame_ref = &*frame;
+    let target = LatLon::new(target_lat, target_lon, target_height);
+    let (slant, az, el) = frame_ref.radar_look_angles_refracted(&target, k_factor);
+    *out_slant_range = slant;
+    *out_azimuth_rad = az;
+    *out_elevation_rad = el;
+    0
+}
+
+/// Destroys a `LocalTangentFrame` instance.
+#[no_mangle]
+pub unsafe extern "C" fn olayer_local_frame_free(frame: *mut LocalTangentFrame) {
+    if !frame.is_null() {
+        let _ = Box::from_raw(frame);
+    }
+}
+
+// --- MAGNETIC MODEL C-API ---
+
+/// Creates a default `MagneticModel` instance initialized with built-in WMM-2025.
+#[no_mangle]
+pub extern "C" fn olayer_magnetic_model_create_default() -> *mut MagneticModel {
+    Box::into_raw(Box::new(MagneticModel::wmm2025()))
+}
+
+/// Creates a `MagneticModel` from a null-terminated `WMM.COF` string.
+/// Returns null pointer if parsing fails or string is invalid UTF-8.
+#[no_mangle]
+pub unsafe extern "C" fn olayer_magnetic_model_create_from_cof(cof_str: *const c_char) -> *mut MagneticModel {
+    if cof_str.is_null() {
+        return std::ptr::null_mut();
+    }
+    let c_str = match std::ffi::CStr::from_ptr(cof_str).to_str() {
+        Ok(s) => s,
+        Err(_) => return std::ptr::null_mut(),
+    };
+    match MagneticModel::from_cof_str(c_str) {
+        Ok(model) => Box::into_raw(Box::new(model)),
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
+/// Computes magnetic declination using a specific `MagneticModel` instance.
+#[no_mangle]
+pub unsafe extern "C" fn olayer_magnetic_model_get_declination(
+    model: *mut MagneticModel,
+    lat: f64,
+    lon: f64,
+    height: f64,
+    epoch: f64,
+    out_declination_rad: *mut f64,
+) -> c_int {
+    if model.is_null() || out_declination_rad.is_null() {
+        return -1;
+    }
+    let model_ref = &*model;
+    let pt = LatLon::new(lat, lon, height);
+    *out_declination_rad = model_ref.get_declination(&pt, epoch);
+    0
+}
+
+/// Computes magnetic field elements using a specific `MagneticModel` instance.
+#[no_mangle]
+pub unsafe extern "C" fn olayer_magnetic_model_get_elements(
+    model: *mut MagneticModel,
+    lat: f64,
+    lon: f64,
+    height: f64,
+    epoch: f64,
+    out_elements: *mut C_MagneticElements,
+) -> c_int {
+    if model.is_null() || out_elements.is_null() {
+        return -1;
+    }
+    let model_ref = &*model;
+    let pt = LatLon::new(lat, lon, height);
+    let el = model_ref.get_magnetic_elements(&pt, epoch);
+    *out_elements = C_MagneticElements {
+        declination_rad: el.declination_rad,
+        inclination_rad: el.inclination_rad,
+        horizontal_intensity_nt: el.horizontal_intensity_nt,
+        total_intensity_nt: el.total_intensity_nt,
+        x_nt: el.x_nt,
+        y_nt: el.y_nt,
+        z_nt: el.z_nt,
+    };
+    0
+}
+
+/// Converts True bearing to Magnetic bearing using a specific `MagneticModel` instance.
+#[no_mangle]
+pub unsafe extern "C" fn olayer_magnetic_model_true_to_magnetic(
+    model: *mut MagneticModel,
+    true_bearing_rad: f64,
+    lat: f64,
+    lon: f64,
+    height: f64,
+    epoch: f64,
+    out_mag_bearing_rad: *mut f64,
+) -> c_int {
+    if model.is_null() || out_mag_bearing_rad.is_null() {
+        return -1;
+    }
+    let model_ref = &*model;
+    let pt = LatLon::new(lat, lon, height);
+    *out_mag_bearing_rad = model_ref.true_to_magnetic(true_bearing_rad, &pt, epoch);
+    0
+}
+
+/// Converts Magnetic bearing to True bearing using a specific `MagneticModel` instance.
+#[no_mangle]
+pub unsafe extern "C" fn olayer_magnetic_model_magnetic_to_true(
+    model: *mut MagneticModel,
+    mag_bearing_rad: f64,
+    lat: f64,
+    lon: f64,
+    height: f64,
+    epoch: f64,
+    out_true_bearing_rad: *mut f64,
+) -> c_int {
+    if model.is_null() || out_true_bearing_rad.is_null() {
+        return -1;
+    }
+    let model_ref = &*model;
+    let pt = LatLon::new(lat, lon, height);
+    *out_true_bearing_rad = model_ref.magnetic_to_true(mag_bearing_rad, &pt, epoch);
+    0
+}
+
+/// Destroys a `MagneticModel` instance.
+#[no_mangle]
+pub unsafe extern "C" fn olayer_magnetic_model_free(model: *mut MagneticModel) {
+    if !model.is_null() {
+        let _ = Box::from_raw(model);
+    }
+}
+
+/// Computes magnetic declination in radians using default WMM-2025. Returns 0 on success, negative error.
+#[no_mangle]
+pub unsafe extern "C" fn olayer_magnetic_get_declination(
+    lat: f64,
+    lon: f64,
+    height: f64,
+    epoch: f64,
+    out_declination_rad: *mut f64,
+) -> c_int {
+    if out_declination_rad.is_null() {
+        return -1;
+    }
+    let pt = LatLon::new(lat, lon, height);
+    *out_declination_rad = MagneticModel::get_default_declination(&pt, epoch);
+    0
+}
+
+/// Computes all magnetic field elements using default WMM-2025. Returns 0 on success, negative error.
+#[no_mangle]
+pub unsafe extern "C" fn olayer_magnetic_get_elements(
+    lat: f64,
+    lon: f64,
+    height: f64,
+    epoch: f64,
+    out_elements: *mut C_MagneticElements,
+) -> c_int {
+    if out_elements.is_null() {
+        return -1;
+    }
+    let pt = LatLon::new(lat, lon, height);
+    let el = MagneticModel::get_default_elements(&pt, epoch);
+    *out_elements = C_MagneticElements {
+        declination_rad: el.declination_rad,
+        inclination_rad: el.inclination_rad,
+        horizontal_intensity_nt: el.horizontal_intensity_nt,
+        total_intensity_nt: el.total_intensity_nt,
+        x_nt: el.x_nt,
+        y_nt: el.y_nt,
+        z_nt: el.z_nt,
+    };
+    0
+}
+
+/// Converts True bearing to Magnetic bearing using default WMM-2025. Returns 0 on success, negative error.
+#[no_mangle]
+pub unsafe extern "C" fn olayer_magnetic_true_to_magnetic(
+    true_bearing_rad: f64,
+    lat: f64,
+    lon: f64,
+    height: f64,
+    epoch: f64,
+    out_mag_bearing_rad: *mut f64,
+) -> c_int {
+    if out_mag_bearing_rad.is_null() {
+        return -1;
+    }
+    let pt = LatLon::new(lat, lon, height);
+    let model = MagneticModel::wmm2025();
+    *out_mag_bearing_rad = model.true_to_magnetic(true_bearing_rad, &pt, epoch);
+    0
+}
+
+/// Converts Magnetic bearing to True bearing using default WMM-2025. Returns 0 on success, negative error.
+#[no_mangle]
+pub unsafe extern "C" fn olayer_magnetic_magnetic_to_true(
+    mag_bearing_rad: f64,
+    lat: f64,
+    lon: f64,
+    height: f64,
+    epoch: f64,
+    out_true_bearing_rad: *mut f64,
+) -> c_int {
+    if out_true_bearing_rad.is_null() {
+        return -1;
+    }
+    let pt = LatLon::new(lat, lon, height);
+    let model = MagneticModel::wmm2025();
+    *out_true_bearing_rad = model.magnetic_to_true(mag_bearing_rad, &pt, epoch);
+    0
+}
+
+// --- SPATIAL ANALYSIS C-API ---
+
+/// Computes route deviation (XTK and ATD). Returns 0 on success, negative error.
+#[no_mangle]
+pub unsafe extern "C" fn olayer_spatial_compute_route_deviation(
+    start: C_LatLon,
+    end: C_LatLon,
+    pos: C_LatLon,
+    out_deviation: *mut C_RouteDeviation,
+) -> c_int {
+    if out_deviation.is_null() {
+        return -1;
+    }
+    let s = LatLon::new(start.lat, start.lon, start.height);
+    let e = LatLon::new(end.lat, end.lon, end.height);
+    let p = LatLon::new(pos.lat, pos.lon, pos.height);
+    let dev = compute_route_deviation(&s, &e, &p);
+    *out_deviation = C_RouteDeviation {
+        cross_track_error_meters: dev.cross_track_error_meters,
+        along_track_distance_meters: dev.along_track_distance_meters,
+        nearest_point: C_LatLon {
+            lat: dev.nearest_point_on_route.lat,
+            lon: dev.nearest_point_on_route.lon,
+            height: dev.nearest_point_on_route.height,
+        },
+    };
+    0
+}
+
+/// Computes geodesic line-line intersection. Returns 1 if intersects, 0 if disjoint, negative error.
+#[no_mangle]
+pub unsafe extern "C" fn olayer_spatial_geodesic_intersection(
+    p1: C_LatLon,
+    p2: C_LatLon,
+    p3: C_LatLon,
+    p4: C_LatLon,
+    out_intersection: *mut C_LatLon,
+) -> c_int {
+    if out_intersection.is_null() {
+        return -1;
+    }
+    let p1_pt = LatLon::new(p1.lat, p1.lon, p1.height);
+    let p2_pt = LatLon::new(p2.lat, p2.lon, p2.height);
+    let p3_pt = LatLon::new(p3.lat, p3.lon, p3.height);
+    let p4_pt = LatLon::new(p4.lat, p4.lon, p4.height);
+    match geodesic_intersection(&p1_pt, &p2_pt, &p3_pt, &p4_pt) {
+        Some(inter) => {
+            *out_intersection = C_LatLon {
+                lat: inter.lat,
+                lon: inter.lon,
+                height: inter.height,
+            };
+            1
+        }
+        None => 0,
+    }
+}
+
+/// Evaluates spherical polygon point containment. Returns 0 on success, negative error.
+/// `*out_contains` is set to 1 if contained, 0 if not.
+#[no_mangle]
+pub unsafe extern "C" fn olayer_spatial_polygon_contains_point(
+    poly_coords: *const C_LatLon,
+    num_coords: usize,
+    point: C_LatLon,
+    out_contains: *mut c_int,
+) -> c_int {
+    if poly_coords.is_null() || out_contains.is_null() || num_coords < 3 {
+        return -1;
+    }
+    let slice = std::slice::from_raw_parts(poly_coords, num_coords);
+    let vertices: Vec<LatLon> = slice.iter().map(|c| LatLon::new(c.lat, c.lon, c.height)).collect();
+    let poly = GeodesicPolygon::new(vertices);
+    let pt = LatLon::new(point.lat, point.lon, point.height);
+    *out_contains = if poly.contains_point(&pt) { 1 } else { 0 };
+    0
+}
+
+// --- TACTICAL MEASUREMENT TOOLS C-API (GIS-PROP-003) ---
+
+/// Computes Range and Bearing Line (RBL / CRSR) measurement. Returns 0 on success, negative error.
+#[no_mangle]
+pub unsafe extern "C" fn olayer_tools_compute_rbl(
+    from_lat_deg: f64,
+    from_lon_deg: f64,
+    to_lat_deg: f64,
+    to_lon_deg: f64,
+    speed_knots: f64,
+    epoch_year: f64,
+    out_measurement: *mut C_RblMeasurement,
+) -> c_int {
+    if out_measurement.is_null() {
+        return -1;
+    }
+    let manager = TacticalToolsManager::new();
+    let spd = if speed_knots > 0.001 { Some(speed_knots) } else { None };
+    let ep = if epoch_year > 1900.0 { Some(epoch_year) } else { None };
+    let res = manager.compute_rbl(from_lat_deg, from_lon_deg, to_lat_deg, to_lon_deg, spd, ep);
+
+    *out_measurement = C_RblMeasurement {
+        from_lat_deg: res.from_lat_deg,
+        from_lon_deg: res.from_lon_deg,
+        to_lat_deg: res.to_lat_deg,
+        to_lon_deg: res.to_lon_deg,
+        distance_nm: res.distance_nm,
+        distance_km: res.distance_km,
+        true_bearing_deg: res.true_bearing_deg,
+        magnetic_bearing_deg: res.magnetic_bearing_deg,
+        reciprocal_true_bearing_deg: res.reciprocal_true_bearing_deg,
+        reciprocal_magnetic_bearing_deg: res.reciprocal_magnetic_bearing_deg,
+        estimated_time_enroute_sec: res.estimated_time_enroute_sec.unwrap_or(-1.0),
+    };
+    0
+}
+
+/// Generates Projected Position Leader (PPL) vector ticks. Returns 0 on success, negative error.
+#[no_mangle]
+pub unsafe extern "C" fn olayer_tools_generate_ppl(
+    lat_deg: f64,
+    lon_deg: f64,
+    ground_speed_knots: f64,
+    track_deg: f64,
+    intervals_minutes: *const f64,
+    num_intervals: usize,
+    out_ticks: *mut C_PplTick,
+    max_ticks: usize,
+    out_ticks_written: *mut usize,
+) -> c_int {
+    if intervals_minutes.is_null() || out_ticks.is_null() || out_ticks_written.is_null() || num_intervals == 0 {
+        return -1;
+    }
+    let intervals = std::slice::from_raw_parts(intervals_minutes, num_intervals);
+    let manager = TacticalToolsManager::new();
+    let ppl = manager.generate_ppl(lat_deg, lon_deg, ground_speed_knots, track_deg, intervals);
+
+    let to_copy = ppl.ticks.len().min(max_ticks);
+    for (i, tick) in ppl.ticks.iter().take(to_copy).enumerate() {
+        *out_ticks.add(i) = C_PplTick {
+            time_minutes: tick.time_minutes,
+            distance_nm: tick.distance_nm,
+            lat_deg: tick.lat_deg,
+            lon_deg: tick.lon_deg,
+        };
+    }
+    *out_ticks_written = to_copy;
+    0
+}
+
+/// Generates racetrack holding pattern polyline coordinates. Returns 0 on success, negative error.
+#[no_mangle]
+pub unsafe extern "C" fn olayer_tools_generate_holding_pattern(
+    fix_lat_deg: f64,
+    fix_lon_deg: f64,
+    inbound_bearing_deg: f64,
+    is_standard_right_turn: c_int,
+    leg_time_minutes: f64,
+    airspeed_knots: f64,
+    points_per_turn: usize,
+    out_coords: *mut C_LatLon,
+    max_coords: usize,
+    out_coords_written: *mut usize,
+) -> c_int {
+    if out_coords.is_null() || out_coords_written.is_null() || max_coords == 0 {
+        return -1;
+    }
+    let config = HoldingPatternConfig {
+        fix_lat_deg,
+        fix_lon_deg,
+        inbound_bearing_deg,
+        turn_direction: if is_standard_right_turn != 0 {
+            TurnDirection::StandardRight
+        } else {
+            TurnDirection::NonStandardLeft
+        },
+        leg_time_minutes: leg_time_minutes.max(0.1),
+        airspeed_knots: airspeed_knots.max(10.0),
+        points_per_turn: points_per_turn.max(4),
+    };
+    let manager = TacticalToolsManager::new();
+    let poly = manager.generate_holding_pattern(&config);
+
+    let to_copy = poly.len().min(max_coords);
+    for (i, &(lat_d, lon_d)) in poly.iter().take(to_copy).enumerate() {
+        *out_coords.add(i) = C_LatLon {
+            lat: lat_d.to_radians(),
+            lon: lon_d.to_radians(),
+            height: 0.0,
+        };
+    }
+    *out_coords_written = to_copy;
+    0
+}
+
+/// Generates ILS approach funnel polygon coordinates. Returns 0 on success, negative error.
+#[no_mangle]
+pub unsafe extern "C" fn olayer_tools_generate_ils_cone(
+    threshold_lat_deg: f64,
+    threshold_lon_deg: f64,
+    runway_heading_deg: f64,
+    length_nm: f64,
+    fov_deg: f64,
+    arc_steps: usize,
+    out_polygon_coords: *mut C_LatLon,
+    max_polygon_coords: usize,
+    out_polygon_coords_written: *mut usize,
+) -> c_int {
+    if out_polygon_coords.is_null() || out_polygon_coords_written.is_null() || max_polygon_coords == 0 {
+        return -1;
+    }
+    let config = IlsConeConfig {
+        threshold_lat_deg,
+        threshold_lon_deg,
+        runway_heading_deg,
+        length_nm: length_nm.max(0.5),
+        fov_deg: fov_deg.max(1.0),
+        extended_centerline_nm: length_nm * 1.5,
+        arc_steps: arc_steps.max(2),
+    };
+    let manager = TacticalToolsManager::new();
+    let ils = manager.generate_ils_cone(&config);
+
+    let to_copy = ils.cone_polygon.len().min(max_polygon_coords);
+    for (i, &(lat_d, lon_d)) in ils.cone_polygon.iter().take(to_copy).enumerate() {
+        *out_polygon_coords.add(i) = C_LatLon {
+            lat: lat_d.to_radians(),
+            lon: lon_d.to_radians(),
+            height: 0.0,
+        };
+    }
+    *out_polygon_coords_written = to_copy;
+    0
+}
+
+/// Generates concentric range rings coordinates. Returns 0 on success, negative error.
+#[no_mangle]
+pub unsafe extern "C" fn olayer_tools_generate_range_rings(
+    center_lat_deg: f64,
+    center_lon_deg: f64,
+    radius_nm: f64,
+    points_per_ring: usize,
+    out_ring_coords: *mut C_LatLon,
+    max_coords: usize,
+    out_coords_written: *mut usize,
+) -> c_int {
+    if out_ring_coords.is_null() || out_coords_written.is_null() || max_coords == 0 {
+        return -1;
+    }
+    let config = RangeRingsConfig {
+        center_lat_deg,
+        center_lon_deg,
+        radii_nm: vec![radius_nm],
+        points_per_ring: points_per_ring.max(8),
+    };
+    let manager = TacticalToolsManager::new();
+    let rings = manager.generate_range_rings(&config);
+    if rings.is_empty() {
+        *out_coords_written = 0;
+        return 0;
+    }
+    let ring = &rings[0];
+    let to_copy = ring.len().min(max_coords);
+    for (i, &(lat_d, lon_d)) in ring.iter().take(to_copy).enumerate() {
+        *out_ring_coords.add(i) = C_LatLon {
+            lat: lat_d.to_radians(),
+            lon: lon_d.to_radians(),
+            height: 0.0,
+        };
+    }
+    *out_coords_written = to_copy;
+    0
+}
+
+// --- AERONAUTICAL DATASET C-API ---
+
+/// Loads an `AeronauticalDataset` from an AIXM 5.1 XML null-terminated UTF-8 string.
+/// Returns null pointer on error.
+#[no_mangle]
+pub unsafe extern "C" fn olayer_aeronautical_dataset_from_aixm(xml_utf8: *const c_char) -> *mut AeronauticalDataset {
+    if xml_utf8.is_null() {
+        return std::ptr::null_mut();
+    }
+    let c_str = match std::ffi::CStr::from_ptr(xml_utf8).to_str() {
+        Ok(s) => s,
+        Err(_) => return std::ptr::null_mut(),
+    };
+    match parse_aixm_51_str(c_str) {
+        Ok(ds) => Box::into_raw(Box::new(ds)),
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
+/// Loads an `AeronauticalDataset` from a GeoJSON-Aviation null-terminated UTF-8 string.
+/// Returns null pointer on error.
+#[no_mangle]
+pub unsafe extern "C" fn olayer_aeronautical_dataset_from_geojson(json_utf8: *const c_char) -> *mut AeronauticalDataset {
+    if json_utf8.is_null() {
+        return std::ptr::null_mut();
+    }
+    let c_str = match std::ffi::CStr::from_ptr(json_utf8).to_str() {
+        Ok(s) => s,
+        Err(_) => return std::ptr::null_mut(),
+    };
+    match parse_geojson_aviation_str(c_str) {
+        Ok(ds) => Box::into_raw(Box::new(ds)),
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
+/// Returns the counts of airspaces, navaids, airways, and airports in the dataset. Returns 0 on success.
+#[no_mangle]
+pub unsafe extern "C" fn olayer_aeronautical_dataset_counts(
+    ds: *mut AeronauticalDataset,
+    out_airspaces: *mut usize,
+    out_navaids: *mut usize,
+    out_airways: *mut usize,
+    out_airports: *mut usize,
+) -> c_int {
+    if ds.is_null() {
+        return -1;
+    }
+    let ds_ref = &*ds;
+    if !out_airspaces.is_null() {
+        *out_airspaces = ds_ref.airspaces.len();
+    }
+    if !out_navaids.is_null() {
+        *out_navaids = ds_ref.navaids.len();
+    }
+    if !out_airways.is_null() {
+        *out_airways = ds_ref.airways.len();
+    }
+    if !out_airports.is_null() {
+        *out_airports = ds_ref.airports.len();
+    }
+    0
+}
+
+/// Finds a navaid by its identification code. Returns 0 on success, -1 on null pointer, -2 if not found.
+#[no_mangle]
+pub unsafe extern "C" fn olayer_aeronautical_dataset_find_navaid(
+    ds: *mut AeronauticalDataset,
+    ident_utf8: *const c_char,
+    out_navaid: *mut C_NavaidSummary,
+) -> c_int {
+    if ds.is_null() || ident_utf8.is_null() || out_navaid.is_null() {
+        return -1;
+    }
+    let ident = match std::ffi::CStr::from_ptr(ident_utf8).to_str() {
+        Ok(s) => s,
+        Err(_) => return -1,
+    };
+    let ds_ref = &*ds;
+    if let Some(nav) = ds_ref.find_navaid(ident) {
+        let code = match nav.navaid_type {
+            NavaidType::Vor => 0,
+            NavaidType::Dme => 1,
+            NavaidType::VorDme => 2,
+            NavaidType::Tacan => 3,
+            NavaidType::Vortac => 4,
+            NavaidType::Ndb => 5,
+            NavaidType::Fix => 6,
+            NavaidType::Waypoint => 7,
+        };
+        *out_navaid = C_NavaidSummary {
+            lat: nav.coords.lat,
+            lon: nav.coords.lon,
+            elevation_m: nav.elevation_m.unwrap_or(0.0),
+            frequency_mhz: nav.frequency_mhz.unwrap_or(0.0),
+            navaid_type_code: code,
+        };
+        0
+    } else {
+        -2
+    }
+}
+
+/// Serializes the dataset into a standard GeoJSON FeatureCollection string into a C buffer.
+/// Returns 0 on success, -1 on error, or -2 if buffer capacity is insufficient.
+#[no_mangle]
+pub unsafe extern "C" fn olayer_aeronautical_dataset_to_geojson(
+    ds: *mut AeronauticalDataset,
+    out_buf: *mut c_char,
+    out_capacity: usize,
+    out_len: *mut usize,
+) -> c_int {
+    if ds.is_null() || out_len.is_null() {
+        return -1;
+    }
+    let ds_ref = &*ds;
+    let json_str = match export_dataset_to_geojson(ds_ref) {
+        Ok(s) => s,
+        Err(_) => return -1,
+    };
+    let bytes = json_str.as_bytes();
+    *out_len = bytes.len();
+    if out_buf.is_null() || out_capacity < bytes.len() + 1 {
+        return -2;
+    }
+    std::ptr::copy_nonoverlapping(bytes.as_ptr(), out_buf as *mut u8, bytes.len());
+    *out_buf.add(bytes.len()) = 0; // null terminator
+    0
+}
+
+/// Destroys an `AeronauticalDataset` instance.
+#[no_mangle]
+pub unsafe extern "C" fn olayer_aeronautical_dataset_free(ds: *mut AeronauticalDataset) {
+    if !ds.is_null() {
+        let _ = Box::from_raw(ds);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -857,6 +1655,285 @@ mod tests {
             assert_eq!(r, -3, "Should reject invalid UTF-8 ID");
 
             olayer_interpolator_free(engine);
+        }
+    }
+
+    #[test]
+    fn test_c_ffi_local_frame() {
+        unsafe {
+            let frame = olayer_local_frame_create(0.0, 0.0, 0.0);
+            assert!(!frame.is_null());
+
+            let mut out_enu = C_EnuPoint { east_m: 0.0, north_m: 0.0, up_m: 0.0 };
+            let r1 = olayer_local_frame_lla_to_enu(frame, 0.01, 0.01, 100.0, &mut out_enu);
+            assert_eq!(r1, 0);
+            assert!(out_enu.east_m > 1000.0);
+
+            let mut out_lla = C_LatLon { lat: 0.0, lon: 0.0, height: 0.0 };
+            let r2 = olayer_local_frame_enu_to_lla(frame, out_enu.east_m, out_enu.north_m, out_enu.up_m, &mut out_lla);
+            assert_eq!(r2, 0);
+            assert!((out_lla.lat - 0.01).abs() < 1e-6);
+
+            let mut slant = 0.0;
+            let mut az = 0.0;
+            let mut el = 0.0;
+            let r3 = olayer_local_frame_radar_look_angles(frame, 0.01, 0.01, 100.0, &mut slant, &mut az, &mut el);
+            assert_eq!(r3, 0);
+            assert!(slant > 1000.0);
+
+            let r4 = olayer_local_frame_radar_look_angles_refracted(frame, 0.01, 0.01, 100.0, 1.333, &mut slant, &mut az, &mut el);
+            assert_eq!(r4, 0);
+
+            olayer_local_frame_free(frame);
+        }
+    }
+
+    #[test]
+    fn test_c_ffi_magnetic_model() {
+        unsafe {
+            let mut declination = 0.0;
+            let r1 = olayer_magnetic_get_declination(
+                40.64_f64.to_radians(),
+                -73.78_f64.to_radians(),
+                0.0,
+                2025.0,
+                &mut declination,
+            );
+            assert_eq!(r1, 0);
+            let dec_deg = declination.to_degrees();
+            assert!(dec_deg > -15.0 && dec_deg < -10.0);
+
+            let mut elements = C_MagneticElements {
+                declination_rad: 0.0,
+                inclination_rad: 0.0,
+                horizontal_intensity_nt: 0.0,
+                total_intensity_nt: 0.0,
+                x_nt: 0.0,
+                y_nt: 0.0,
+                z_nt: 0.0,
+            };
+            let r2 = olayer_magnetic_get_elements(
+                40.64_f64.to_radians(),
+                -73.78_f64.to_radians(),
+                0.0,
+                2025.0,
+                &mut elements,
+            );
+            assert_eq!(r2, 0);
+            assert_eq!(elements.declination_rad, declination);
+            assert!(elements.total_intensity_nt > 40000.0);
+
+            let mut mag_bearing = 0.0;
+            let r3 = olayer_magnetic_true_to_magnetic(
+                1.0,
+                40.64_f64.to_radians(),
+                -73.78_f64.to_radians(),
+                0.0,
+                2025.0,
+                &mut mag_bearing,
+            );
+            assert_eq!(r3, 0);
+
+            let mut true_bearing = 0.0;
+            let r4 = olayer_magnetic_magnetic_to_true(
+                mag_bearing,
+                40.64_f64.to_radians(),
+                -73.78_f64.to_radians(),
+                0.0,
+                2025.0,
+                &mut true_bearing,
+            );
+            assert_eq!(r4, 0);
+            assert!((true_bearing - 1.0).abs() < 1e-10);
+
+            // Test dynamic MagneticModel instance creation and COF parsing
+            let default_model = olayer_magnetic_model_create_default();
+            assert!(!default_model.is_null());
+            let mut inst_dec = 0.0;
+            let r5 = olayer_magnetic_model_get_declination(
+                default_model,
+                40.64_f64.to_radians(),
+                -73.78_f64.to_radians(),
+                0.0,
+                2025.0,
+                &mut inst_dec,
+            );
+            assert_eq!(r5, 0);
+            assert_eq!(inst_dec, declination);
+            olayer_magnetic_model_free(default_model);
+
+            let mock_cof = std::ffi::CString::new(
+                "2030.0 WMM-2030 11/20/2029\n1 0 -29396.6 0.0 11.6 0.0\n1 1 -1404.9 4589.6 12.3 -23.4",
+            ).unwrap();
+            let custom_model = olayer_magnetic_model_create_from_cof(mock_cof.as_ptr());
+            assert!(!custom_model.is_null());
+            let mut custom_dec = 0.0;
+            let r6 = olayer_magnetic_model_get_declination(
+                custom_model,
+                40.64_f64.to_radians(),
+                -73.78_f64.to_radians(),
+                0.0,
+                2030.0,
+                &mut custom_dec,
+            );
+            assert_eq!(r6, 0);
+            olayer_magnetic_model_free(custom_model);
+        }
+    }
+
+    #[test]
+    fn test_c_ffi_spatial_analysis() {
+        unsafe {
+            let start = C_LatLon { lat: 0.0, lon: 0.0, height: 0.0 };
+            let end = C_LatLon { lat: 0.0, lon: 0.1, height: 0.0 };
+            let pos = C_LatLon { lat: 0.01, lon: 0.05, height: 0.0 };
+            let mut dev = C_RouteDeviation {
+                cross_track_error_meters: 0.0,
+                along_track_distance_meters: 0.0,
+                nearest_point: C_LatLon { lat: 0.0, lon: 0.0, height: 0.0 },
+            };
+            let r1 = olayer_spatial_compute_route_deviation(start, end, pos, &mut dev);
+            assert_eq!(r1, 0);
+            assert!(dev.cross_track_error_meters < 0.0); // North of Eastbound track
+
+            let p1 = C_LatLon { lat: 0.0, lon: -0.1, height: 0.0 };
+            let p2 = C_LatLon { lat: 0.0, lon: 0.1, height: 0.0 };
+            let p3 = C_LatLon { lat: -0.1, lon: 0.0, height: 0.0 };
+            let p4 = C_LatLon { lat: 0.1, lon: 0.0, height: 0.0 };
+            let mut inter = C_LatLon { lat: 0.0, lon: 0.0, height: 0.0 };
+            let r2 = olayer_spatial_geodesic_intersection(p1, p2, p3, p4, &mut inter);
+            assert_eq!(r2, 1);
+            assert!(inter.lat.abs() < 1e-6);
+            assert!(inter.lon.abs() < 1e-6);
+
+            let poly_coords = [
+                C_LatLon { lat: 0.0, lon: 0.0, height: 0.0 },
+                C_LatLon { lat: 0.0, lon: 0.1, height: 0.0 },
+                C_LatLon { lat: 0.1, lon: 0.1, height: 0.0 },
+                C_LatLon { lat: 0.1, lon: 0.0, height: 0.0 },
+            ];
+            let mut contains = 0;
+            let pt_in = C_LatLon { lat: 0.05, lon: 0.05, height: 0.0 };
+            let r3 = olayer_spatial_polygon_contains_point(poly_coords.as_ptr(), poly_coords.len(), pt_in, &mut contains);
+            assert_eq!(r3, 0);
+            assert_eq!(contains, 1);
+
+            let pt_out = C_LatLon { lat: 0.5, lon: 0.5, height: 0.0 };
+            let r4 = olayer_spatial_polygon_contains_point(poly_coords.as_ptr(), poly_coords.len(), pt_out, &mut contains);
+            assert_eq!(r4, 0);
+            assert_eq!(contains, 0);
+        }
+    }
+
+    #[test]
+    fn test_c_ffi_tactical_tools() {
+        unsafe {
+            // RBL
+            let mut rbl = C_RblMeasurement {
+                from_lat_deg: 0.0,
+                from_lon_deg: 0.0,
+                to_lat_deg: 0.0,
+                to_lon_deg: 0.0,
+                distance_nm: 0.0,
+                distance_km: 0.0,
+                true_bearing_deg: 0.0,
+                magnetic_bearing_deg: 0.0,
+                reciprocal_true_bearing_deg: 0.0,
+                reciprocal_magnetic_bearing_deg: 0.0,
+                estimated_time_enroute_sec: 0.0,
+            };
+            let r1 = olayer_tools_compute_rbl(40.64, -73.78, 42.36, -71.01, 450.0, 2025.0, &mut rbl);
+            assert_eq!(r1, 0);
+            assert!(rbl.distance_nm > 150.0 && rbl.distance_nm < 185.0);
+            assert!(rbl.estimated_time_enroute_sec > 1000.0);
+
+            // PPL
+            let intervals = [1.0, 2.0, 5.0];
+            let mut ticks = [C_PplTick { time_minutes: 0.0, distance_nm: 0.0, lat_deg: 0.0, lon_deg: 0.0 }; 3];
+            let mut written = 0;
+            let r2 = olayer_tools_generate_ppl(40.0, -74.0, 480.0, 90.0, intervals.as_ptr(), intervals.len(), ticks.as_mut_ptr(), 3, &mut written);
+            assert_eq!(r2, 0);
+            assert_eq!(written, 3);
+            assert!((ticks[0].distance_nm - 8.0).abs() < 1e-3);
+
+            // Holding Pattern
+            let mut holding_coords = [C_LatLon { lat: 0.0, lon: 0.0, height: 0.0 }; 64];
+            let mut holding_written = 0;
+            let r3 = olayer_tools_generate_holding_pattern(51.5, -0.1, 270.0, 1, 1.0, 210.0, 16, holding_coords.as_mut_ptr(), 64, &mut holding_written);
+            assert_eq!(r3, 0);
+            assert!(holding_written >= 34);
+
+            // ILS Cone
+            let mut ils_coords = [C_LatLon { lat: 0.0, lon: 0.0, height: 0.0 }; 32];
+            let mut ils_written = 0;
+            let r4 = olayer_tools_generate_ils_cone(51.4775, -0.4614, 270.0, 10.0, 5.0, 12, ils_coords.as_mut_ptr(), 32, &mut ils_written);
+            assert_eq!(r4, 0);
+            assert!(ils_written >= 14);
+
+            // Range Rings
+            let mut ring_coords = [C_LatLon { lat: 0.0, lon: 0.0, height: 0.0 }; 64];
+            let mut ring_written = 0;
+            let r5 = olayer_tools_generate_range_rings(0.0, 0.0, 10.0, 36, ring_coords.as_mut_ptr(), 64, &mut ring_written);
+            assert_eq!(r5, 0);
+            assert_eq!(ring_written, 37);
+        }
+    }
+
+    #[test]
+    fn test_c_ffi_aeronautical_dataset() {
+        unsafe {
+            let geojson = std::ffi::CString::new(r#"{
+                "type": "FeatureCollection",
+                "features": [
+                    {
+                        "type": "Feature",
+                        "properties": {
+                            "aero_type": "Navaid",
+                            "ident": "LON",
+                            "name": "LONDON VOR",
+                            "navaid_type": "VOR",
+                            "frequency_mhz": 113.6
+                        },
+                        "geometry": {
+                            "type": "Point",
+                            "coordinates": [-0.46, 51.47, 25.0]
+                        }
+                    }
+                ]
+            }"#).unwrap();
+
+            let ds = olayer_aeronautical_dataset_from_geojson(geojson.as_ptr());
+            assert!(!ds.is_null());
+
+            let mut asp = 0;
+            let mut nav = 0;
+            let mut rtes = 0;
+            let mut apts = 0;
+            let r1 = olayer_aeronautical_dataset_counts(ds, &mut asp, &mut nav, &mut rtes, &mut apts);
+            assert_eq!(r1, 0);
+            assert_eq!(asp, 0);
+            assert_eq!(nav, 1);
+
+            let ident = std::ffi::CString::new("LON").unwrap();
+            let mut nav_summary = C_NavaidSummary {
+                lat: 0.0,
+                lon: 0.0,
+                elevation_m: 0.0,
+                frequency_mhz: 0.0,
+                navaid_type_code: -1,
+            };
+            let r2 = olayer_aeronautical_dataset_find_navaid(ds, ident.as_ptr(), &mut nav_summary);
+            assert_eq!(r2, 0);
+            assert_eq!(nav_summary.navaid_type_code, 0); // VOR = 0
+            assert_eq!(nav_summary.frequency_mhz, 113.6);
+
+            let mut out_buf = vec![0 as c_char; 2048];
+            let mut out_len = 0;
+            let r3 = olayer_aeronautical_dataset_to_geojson(ds, out_buf.as_mut_ptr(), 2048, &mut out_len);
+            assert_eq!(r3, 0);
+            assert!(out_len > 50);
+
+            olayer_aeronautical_dataset_free(ds);
         }
     }
 }

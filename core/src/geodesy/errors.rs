@@ -1,9 +1,10 @@
 use std::fmt;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum GeodesyError {
     LatitudeOutOfRange(f64),
     LongitudeOutOfRange(f64),
+    MagneticModelError(String),
 }
 
 impl fmt::Display for GeodesyError {
@@ -16,6 +17,10 @@ impl fmt::Display for GeodesyError {
             Self::LongitudeOutOfRange(val) => write!(
                 f,
                 "Longitude is out of range [-180, 180] degrees: {val} degrees"
+            ),
+            Self::MagneticModelError(msg) => write!(
+                f,
+                "Magnetic model error: {msg}"
             ),
         }
     }

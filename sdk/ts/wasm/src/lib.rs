@@ -2,7 +2,7 @@
 #![allow(clippy::too_many_arguments)]
 
 use wasm_bindgen::prelude::*;
-use olayer_core::geodesy::LatLon;
+use olayer_core::geodesy::{GeodeticSolver, LatLon};
 use olayer_core::geodesy::ellipsoid::Ellipsoid;
 use olayer_core::terrain::TerrainEngine;
 use std::sync::Arc;
@@ -554,6 +554,636 @@ impl Default for WasmSymbolRegistry {
     }
 }
 
+// ============================================================================
+// GIS-PROP-001 WASM Bindings: Local Tangent Frame & WMM-2025
+// ============================================================================
+
+/// WASM wrapper for an East-North-Up (ENU) topocentric coordinate.
+#[wasm_bindgen]
+pub struct WasmEnuPoint {
+    pub east_m: f64,
+    pub north_m: f64,
+    pub up_m: f64,
+}
+
+#[wasm_bindgen]
+impl WasmEnuPoint {
+    #[wasm_bindgen(constructor)]
+    pub fn new(east_m: f64, north_m: f64, up_m: f64) -> WasmEnuPoint {
+        WasmEnuPoint {
+            east_m,
+            north_m,
+            up_m,
+        }
+    }
+
+    pub fn distance_2d(&self) -> f64 {
+        self.east_m.hypot(self.north_m)
+    }
+
+    pub fn distance_3d(&self) -> f64 {
+        self.east_m.hypot(self.north_m).hypot(self.up_m)
+    }
+}
+
+/// WASM wrapper for a Local Tangent Frame centered at a geodetic origin.
+#[wasm_bindgen]
+pub struct WasmLocalTangentFrame {
+    inner: olayer_core::geodesy::LocalTangentFrame,
+}
+
+#[wasm_bindgen]
+impl WasmLocalTangentFrame {
+    #[wasm_bindgen(constructor)]
+    pub fn new(origin_lat_rad: f64, origin_lon_rad: f64, origin_height_m: f64) -> WasmLocalTangentFrame {
+        let origin = LatLon::new(origin_lat_rad, origin_lon_rad, origin_height_m);
+        WasmLocalTangentFrame {
+            inner: olayer_core::geodesy::LocalTangentFrame::new(origin),
+        }
+    }
+
+    /// Converts geodetic LLA coordinates to local ENU coordinates.
+    pub fn lla_to_enu(&self, lat_rad: f64, lon_rad: f64, height_m: f64) -> WasmEnuPoint {
+        let lla = LatLon::new(lat_rad, lon_rad, height_m);
+        let pt = self.inner.lla_to_enu(&lla);
+        WasmEnuPoint {
+            east_m: pt.east_m,
+            north_m: pt.north_m,
+            up_m: pt.up_m,
+        }
+    }
+
+    /// Converts local ENU coordinates to geodetic LLA coordinates.
+    pub fn enu_to_lla(&self, east_m: f64, north_m: f64, up_m: f64) -> WasmLatLon {
+        let enu = olayer_core::geodesy::EnuPoint::new(east_m, north_m, up_m);
+        let lla = self.inner.enu_to_lla(&enu);
+        WasmLatLon {
+            lat: lla.lat,
+            lon: lla.lon,
+            height: lla.height,
+        }
+    }
+
+    /// Returns `[slant_range_m, azimuth_rad, elevation_rad]` without atmospheric refraction.
+    pub fn radar_look_angles(&self, target_lat_rad: f64, target_lon_rad: f64, target_height_m: f64) -> Vec<f64> {
+        let target = LatLon::new(target_lat_rad, target_lon_rad, target_height_m);
+        let (slant, az, el) = self.inner.radar_look_angles(&target);
+        vec![slant, az, el]
+    }
+
+    /// Returns `[slant_range_m, azimuth_rad, elevation_rad]` with tropospheric refraction (k_factor ~1.333).
+    pub fn radar_look_angles_refracted(&self, target_lat_rad: f64, target_lon_rad: f64, target_height_m: f64, k_factor: f64) -> Vec<f64> {
+        let target = LatLon::new(target_lat_rad, target_lon_rad, target_height_m);
+        let (slant, az, el) = self.inner.radar_look_angles_refracted(&target, k_factor);
+        vec![slant, az, el]
+    }
+}
+
+/// WASM wrapper for World Magnetic Model (WMM) queries.
+#[wasm_bindgen]
+pub struct WasmMagneticModel {
+    inner: olayer_core::geodesy::MagneticModel,
+}
+
+#[wasm_bindgen]
+impl WasmMagneticModel {
+    /// Creates a default magnetic model initialized with built-in WMM-2025.
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> WasmMagneticModel {
+        WasmMagneticModel {
+            inner: olayer_core::geodesy::MagneticModel::wmm2025(),
+        }
+    }
+
+    /// Loads a magnetic model from a `WMM.COF` formatted string.
+    pub fn from_cof(cof_content: &str) -> Result<WasmMagneticModel, JsValue> {
+        let model = olayer_core::geodesy::MagneticModel::from_cof_str(cof_content)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        Ok(WasmMagneticModel { inner: model })
+    }
+
+    /// Returns the model base epoch in decimal years.
+    pub fn epoch(&self) -> f64 {
+        self.inner.epoch()
+    }
+
+    /// Returns the model identifier name.
+    pub fn model_name(&self) -> String {
+        self.inner.model_name().to_string()
+    }
+
+    /// Returns the maximum degree of the spherical harmonic model.
+    pub fn max_degree(&self) -> usize {
+        self.inner.max_degree()
+    }
+
+    /// Computes magnetic declination (variation) in radians for given WGS84 coordinate and epoch.
+    pub fn get_declination(&self, lat_rad: f64, lon_rad: f64, height_m: f64, epoch: f64) -> f64 {
+        let pt = LatLon::new(lat_rad, lon_rad, height_m);
+        self.inner.get_declination(&pt, epoch)
+    }
+
+    /// Converts True North bearing to Magnetic North bearing in radians.
+    pub fn true_to_magnetic(&self, true_bearing_rad: f64, lat_rad: f64, lon_rad: f64, height_m: f64, epoch: f64) -> f64 {
+        let pt = LatLon::new(lat_rad, lon_rad, height_m);
+        self.inner.true_to_magnetic(true_bearing_rad, &pt, epoch)
+    }
+
+    /// Converts Magnetic North bearing to True North bearing in radians.
+    pub fn magnetic_to_true(&self, mag_bearing_rad: f64, lat_rad: f64, lon_rad: f64, height_m: f64, epoch: f64) -> f64 {
+        let pt = LatLon::new(lat_rad, lon_rad, height_m);
+        self.inner.magnetic_to_true(mag_bearing_rad, &pt, epoch)
+    }
+
+    /// Computes all magnetic field elements and returns serialized JSON.
+    pub fn get_magnetic_elements(&self, lat_rad: f64, lon_rad: f64, height_m: f64, epoch: f64) -> Result<JsValue, JsValue> {
+        let pt = LatLon::new(lat_rad, lon_rad, height_m);
+        let elements = self.inner.get_magnetic_elements(&pt, epoch);
+        serde_wasm_bindgen::to_value(&elements)
+            .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+}
+
+impl Default for WasmMagneticModel {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ============================================================================
+// GIS-PROP-002 WASM Bindings: Geodesic Spatial Analysis Engine
+// ============================================================================
+
+/// WASM wrapper for route deviation metrics (XTK / ATD).
+#[wasm_bindgen]
+pub struct WasmRouteDeviation {
+    pub cross_track_error_meters: f64,
+    pub along_track_distance_meters: f64,
+    pub nearest_lat: f64,
+    pub nearest_lon: f64,
+    pub nearest_height: f64,
+}
+
+/// Computes cross-track error (XTK) and along-track distance (ATD) in meters.
+#[wasm_bindgen]
+pub fn compute_route_deviation(
+    start_lat_rad: f64,
+    start_lon_rad: f64,
+    end_lat_rad: f64,
+    end_lon_rad: f64,
+    pos_lat_rad: f64,
+    pos_lon_rad: f64,
+) -> WasmRouteDeviation {
+    let start = LatLon::new(start_lat_rad, start_lon_rad, 0.0);
+    let end = LatLon::new(end_lat_rad, end_lon_rad, 0.0);
+    let pos = LatLon::new(pos_lat_rad, pos_lon_rad, 0.0);
+    let dev = olayer_core::geodesy::compute_route_deviation(&start, &end, &pos);
+    WasmRouteDeviation {
+        cross_track_error_meters: dev.cross_track_error_meters,
+        along_track_distance_meters: dev.along_track_distance_meters,
+        nearest_lat: dev.nearest_point_on_route.lat,
+        nearest_lon: dev.nearest_point_on_route.lon,
+        nearest_height: dev.nearest_point_on_route.height,
+    }
+}
+
+/// Computes the intersection of two geodesic segments on the globe, if one exists.
+#[wasm_bindgen]
+pub fn geodesic_intersection(
+    p1_lat: f64,
+    p1_lon: f64,
+    p2_lat: f64,
+    p2_lon: f64,
+    p3_lat: f64,
+    p3_lon: f64,
+    p4_lat: f64,
+    p4_lon: f64,
+) -> Option<WasmLatLon> {
+    let p1 = LatLon::new(p1_lat, p1_lon, 0.0);
+    let p2 = LatLon::new(p2_lat, p2_lon, 0.0);
+    let p3 = LatLon::new(p3_lat, p3_lon, 0.0);
+    let p4 = LatLon::new(p4_lat, p4_lon, 0.0);
+    olayer_core::geodesy::geodesic_intersection(&p1, &p2, &p3, &p4)
+        .map(|pt| WasmLatLon { lat: pt.lat, lon: pt.lon, height: pt.height })
+}
+
+/// WASM wrapper for a GeodesicPolygon representing airspaces, FIR sectors, or geofences.
+#[wasm_bindgen]
+pub struct WasmGeodesicPolygon {
+    inner: olayer_core::geodesy::GeodesicPolygon,
+}
+
+#[wasm_bindgen]
+impl WasmGeodesicPolygon {
+    /// Creates a new `WasmGeodesicPolygon` from a flat array of coordinates `[lat0, lon0, h0, lat1, lon1, h1, ...]`.
+    #[wasm_bindgen(constructor)]
+    pub fn new(coords: &[f64]) -> WasmGeodesicPolygon {
+        let vertices: Vec<LatLon> = coords.chunks_exact(3)
+            .map(|c| LatLon::new(c[0], c[1], c[2]))
+            .collect();
+        WasmGeodesicPolygon {
+            inner: olayer_core::geodesy::GeodesicPolygon::new(vertices),
+        }
+    }
+
+    /// Evaluates spherical winding number containment for target `(lat_rad, lon_rad)`.
+    pub fn contains_point(&self, lat_rad: f64, lon_rad: f64) -> bool {
+        let pt = LatLon::new(lat_rad, lon_rad, 0.0);
+        self.inner.contains_point(&pt)
+    }
+
+    /// Computes minimum geodesic distance in meters from point to polygon boundary.
+    pub fn distance_to_boundary(&self, lat_rad: f64, lon_rad: f64) -> f64 {
+        let pt = LatLon::new(lat_rad, lon_rad, 0.0);
+        self.inner.distance_to_boundary(&pt)
+    }
+
+    /// Generates a constant-width geodesic buffer polygon around this polygon.
+    pub fn generate_buffer(&self, radius_meters: f64, num_segments: usize) -> WasmGeodesicPolygon {
+        let buffered = self.inner.generate_buffer(radius_meters, num_segments);
+        WasmGeodesicPolygon {
+            inner: buffered,
+        }
+    }
+
+    /// Returns a flat array of vertex coordinates `[lat0, lon0, h0, lat1, lon1, h1, ...]`.
+    pub fn get_vertices(&self) -> Vec<f64> {
+        let mut flat = Vec::with_capacity(self.inner.vertices.len() * 3);
+        for v in &self.inner.vertices {
+            flat.push(v.lat);
+            flat.push(v.lon);
+            flat.push(v.height);
+        }
+        flat
+    }
+}
+
+// ============================================================================
+// GIS-PROP-003 WASM Bindings: Tactical Aeronautical Measurement Tools
+// ============================================================================
+
+/// WASM representation of Range and Bearing Line (RBL / CRSR) measurement.
+#[wasm_bindgen]
+pub struct WasmRblMeasurement {
+    pub from_lat_deg: f64,
+    pub from_lon_deg: f64,
+    pub to_lat_deg: f64,
+    pub to_lon_deg: f64,
+    pub distance_nm: f64,
+    pub distance_km: f64,
+    pub true_bearing_deg: f64,
+    pub magnetic_bearing_deg: f64,
+    pub reciprocal_true_bearing_deg: f64,
+    pub reciprocal_magnetic_bearing_deg: f64,
+    pub estimated_time_enroute_sec: f64,
+}
+
+/// Computes Range and Bearing Line (RBL / CRSR) measurement between coordinates.
+#[wasm_bindgen]
+pub fn compute_tactical_rbl(
+    from_lat_deg: f64,
+    from_lon_deg: f64,
+    to_lat_deg: f64,
+    to_lon_deg: f64,
+    speed_knots: f64,
+    epoch_year: f64,
+) -> WasmRblMeasurement {
+    let ell = olayer_core::geodesy::Ellipsoid::wgs84();
+    let solver = olayer_core::geodesy::VincentySolver;
+    let from_pt = LatLon::from_degrees(from_lat_deg, from_lon_deg, 0.0);
+    let to_pt = LatLon::from_degrees(to_lat_deg, to_lon_deg, 0.0);
+
+    let inv = solver.inverse(&from_pt, &to_pt, &ell).unwrap_or_else(|_| {
+        olayer_core::geodesy::HaversineSolver.inverse(&from_pt, &to_pt, &ell).unwrap()
+    });
+
+    let dist_m = inv.distance;
+    let dist_nm = dist_m / 1852.0;
+    let dist_km = dist_m / 1000.0;
+
+    let true_bearing_rad = olayer_core::geodesy::normalize_bearing(inv.initial_bearing);
+    let true_bearing_deg = true_bearing_rad.to_degrees();
+
+    let epoch = if epoch_year > 1900.0 { epoch_year } else { 2025.0 };
+    let mag_model = olayer_core::geodesy::MagneticModel::wmm2025();
+    let mag_bearing_rad = mag_model.true_to_magnetic(true_bearing_rad, &from_pt, epoch);
+    let mag_bearing_deg = mag_bearing_rad.to_degrees();
+
+    let recip_true_deg = olayer_core::geodesy::normalize_bearing(true_bearing_rad + std::f64::consts::PI).to_degrees();
+    let recip_mag_deg = olayer_core::geodesy::normalize_bearing(mag_bearing_rad + std::f64::consts::PI).to_degrees();
+
+    let ete_sec = if speed_knots > 0.001 {
+        (dist_nm / speed_knots) * 3600.0
+    } else {
+        -1.0
+    };
+
+    WasmRblMeasurement {
+        from_lat_deg,
+        from_lon_deg,
+        to_lat_deg,
+        to_lon_deg,
+        distance_nm: dist_nm,
+        distance_km: dist_km,
+        true_bearing_deg,
+        magnetic_bearing_deg: mag_bearing_deg,
+        reciprocal_true_bearing_deg: recip_true_deg,
+        reciprocal_magnetic_bearing_deg: recip_mag_deg,
+        estimated_time_enroute_sec: ete_sec,
+    }
+}
+
+/// Generates Projected Position Leader (PPL) ticks as a flat array `[time_min, dist_nm, lat_deg, lon_deg, ...]`.
+#[wasm_bindgen]
+pub fn generate_tactical_ppl(
+    lat_deg: f64,
+    lon_deg: f64,
+    ground_speed_knots: f64,
+    track_deg: f64,
+    intervals_minutes: &[f64],
+) -> Vec<f64> {
+    let ell = olayer_core::geodesy::Ellipsoid::wgs84();
+    let solver = olayer_core::geodesy::VincentySolver;
+    let origin = LatLon::from_degrees(lat_deg, lon_deg, 0.0);
+    let track_rad = track_deg.to_radians();
+
+    let mut out = Vec::with_capacity(intervals_minutes.len() * 4);
+    for &t_min in intervals_minutes {
+        let dist_nm = ground_speed_knots * (t_min / 60.0);
+        let dist_m = dist_nm * 1852.0;
+        let projected = solver.direct(&origin, track_rad, dist_m, &ell).unwrap_or(origin);
+        let (p_lat, p_lon, _) = projected.to_degrees();
+        out.push(t_min);
+        out.push(dist_nm);
+        out.push(p_lat);
+        out.push(p_lon);
+    }
+    out
+}
+
+/// Generates standard racetrack holding pattern polyline coordinates as flat array `[lat0, lon0, lat1, lon1, ...]`.
+#[wasm_bindgen]
+pub fn generate_tactical_holding_pattern(
+    fix_lat_deg: f64,
+    fix_lon_deg: f64,
+    inbound_bearing_deg: f64,
+    is_standard_right: bool,
+    leg_time_minutes: f64,
+    airspeed_knots: f64,
+    points_per_turn: usize,
+) -> Vec<f64> {
+    let ell = olayer_core::geodesy::Ellipsoid::wgs84();
+    let solver = olayer_core::geodesy::VincentySolver;
+    let fix = LatLon::from_degrees(fix_lat_deg, fix_lon_deg, 0.0);
+
+    let speed_mps = airspeed_knots * (1852.0 / 3600.0);
+    let omega_rad_s = 3.0_f64.to_radians(); // 3 deg/s
+    let turn_radius_m = speed_mps / omega_rad_s;
+    let leg_dist_m = speed_mps * (leg_time_minutes * 60.0);
+
+    let theta_inbound = inbound_bearing_deg.to_radians();
+    let perp_sign = if is_standard_right { 1.0 } else { -1.0 };
+    let bearing_to_turn1_center = olayer_core::geodesy::normalize_bearing(theta_inbound + perp_sign * (std::f64::consts::PI / 2.0));
+    let turn1_center = solver.direct(&fix, bearing_to_turn1_center, turn_radius_m, &ell).unwrap_or(fix);
+
+    let steps = points_per_turn.max(4);
+    let mut poly = Vec::with_capacity((steps * 2 + 6) * 2);
+
+    // 1. Fix point
+    poly.push(fix_lat_deg);
+    poly.push(fix_lon_deg);
+
+    // 2. Turn 1
+    let start_angle_1 = olayer_core::geodesy::normalize_bearing(bearing_to_turn1_center + std::f64::consts::PI);
+    for i in 1..=steps {
+        let frac = i as f64 / steps as f64;
+        let sweep = if is_standard_right { frac * std::f64::consts::PI } else { -frac * std::f64::consts::PI };
+        let angle = olayer_core::geodesy::normalize_bearing(start_angle_1 + sweep);
+        let pt = solver.direct(&turn1_center, angle, turn_radius_m, &ell).unwrap_or(turn1_center);
+        let (lat_d, lon_d, _) = pt.to_degrees();
+        poly.push(lat_d);
+        poly.push(lon_d);
+    }
+
+    // 3. Outbound leg
+    let outbound_start_lat = poly[poly.len() - 2];
+    let outbound_start_lon = poly[poly.len() - 1];
+    let outbound_start = LatLon::from_degrees(outbound_start_lat, outbound_start_lon, 0.0);
+    let theta_outbound = olayer_core::geodesy::normalize_bearing(theta_inbound + std::f64::consts::PI);
+    let outbound_end = solver.direct(&outbound_start, theta_outbound, leg_dist_m, &ell).unwrap_or(outbound_start);
+    let (ob_lat, ob_lon, _) = outbound_end.to_degrees();
+    poly.push(ob_lat);
+    poly.push(ob_lon);
+
+    // 4. Turn 2
+    let bearing_to_turn2_center = olayer_core::geodesy::normalize_bearing(theta_outbound + perp_sign * (std::f64::consts::PI / 2.0));
+    let turn2_center = solver.direct(&outbound_end, bearing_to_turn2_center, turn_radius_m, &ell).unwrap_or(outbound_end);
+    let start_angle_2 = olayer_core::geodesy::normalize_bearing(bearing_to_turn2_center + std::f64::consts::PI);
+
+    for i in 1..=steps {
+        let frac = i as f64 / steps as f64;
+        let sweep = if is_standard_right { frac * std::f64::consts::PI } else { -frac * std::f64::consts::PI };
+        let angle = olayer_core::geodesy::normalize_bearing(start_angle_2 + sweep);
+        let pt = solver.direct(&turn2_center, angle, turn_radius_m, &ell).unwrap_or(turn2_center);
+        let (lat_d, lon_d, _) = pt.to_degrees();
+        poly.push(lat_d);
+        poly.push(lon_d);
+    }
+
+    // 5. Close to Fix
+    poly.push(fix_lat_deg);
+    poly.push(fix_lon_deg);
+
+    poly
+}
+
+/// Generates ILS approach funnel polygon coordinates as flat array `[lat0, lon0, lat1, lon1, ...]`.
+#[wasm_bindgen]
+pub fn generate_tactical_ils_cone(
+    threshold_lat_deg: f64,
+    threshold_lon_deg: f64,
+    runway_heading_deg: f64,
+    length_nm: f64,
+    fov_deg: f64,
+    arc_steps: usize,
+) -> Vec<f64> {
+    let ell = olayer_core::geodesy::Ellipsoid::wgs84();
+    let solver = olayer_core::geodesy::VincentySolver;
+    let threshold = LatLon::from_degrees(threshold_lat_deg, threshold_lon_deg, 0.0);
+
+    let rwy_heading_rad = runway_heading_deg.to_radians();
+    let approach_back_rad = olayer_core::geodesy::normalize_bearing(rwy_heading_rad + std::f64::consts::PI);
+    let half_fov_rad = (fov_deg / 2.0).to_radians();
+    let cone_dist_m = length_nm * 1852.0;
+
+    let mut poly = Vec::new();
+    poly.push(threshold_lat_deg);
+    poly.push(threshold_lon_deg);
+
+    let left_bearing = olayer_core::geodesy::normalize_bearing(approach_back_rad - half_fov_rad);
+    let right_bearing = olayer_core::geodesy::normalize_bearing(approach_back_rad + half_fov_rad);
+
+    let left_pt = solver.direct(&threshold, left_bearing, cone_dist_m, &ell).unwrap_or(threshold);
+    let (left_lat, left_lon, _) = left_pt.to_degrees();
+    poly.push(left_lat);
+    poly.push(left_lon);
+
+    let steps = arc_steps.max(2);
+    for i in 1..steps {
+        let frac = i as f64 / steps as f64;
+        let angle = olayer_core::geodesy::normalize_bearing(left_bearing + frac * (fov_deg.to_radians()));
+        let arc_pt = solver.direct(&threshold, angle, cone_dist_m, &ell).unwrap_or(threshold);
+        let (a_lat, a_lon, _) = arc_pt.to_degrees();
+        poly.push(a_lat);
+        poly.push(a_lon);
+    }
+
+    let right_pt = solver.direct(&threshold, right_bearing, cone_dist_m, &ell).unwrap_or(threshold);
+    let (right_lat, right_lon, _) = right_pt.to_degrees();
+    poly.push(right_lat);
+    poly.push(right_lon);
+
+    // Close to threshold
+    poly.push(threshold_lat_deg);
+    poly.push(threshold_lon_deg);
+
+    poly
+}
+
+/// Generates concentric range ring coordinates as a flat array of closed ring segments.
+#[wasm_bindgen]
+pub fn generate_tactical_range_rings(
+    center_lat_deg: f64,
+    center_lon_deg: f64,
+    radii_nm: &[f64],
+    points_per_ring: usize,
+) -> Vec<f64> {
+    let ell = olayer_core::geodesy::Ellipsoid::wgs84();
+    let solver = olayer_core::geodesy::VincentySolver;
+    let center = LatLon::from_degrees(center_lat_deg, center_lon_deg, 0.0);
+    let steps = points_per_ring.max(12);
+
+    let mut out = Vec::new();
+    for &r_nm in radii_nm {
+        let r_m = r_nm * 1852.0;
+        for i in 0..=steps {
+            let angle = (i as f64 / steps as f64) * 2.0 * std::f64::consts::PI;
+            let pt = solver.direct(&center, angle, r_m, &ell).unwrap_or(center);
+            let (lat_d, lon_d, _) = pt.to_degrees();
+            out.push(lat_d);
+            out.push(lon_d);
+        }
+    }
+    out
+}
+
+// ============================================================================
+// GIS-PROP-004 WASM Bindings: Aeronautical Data Ingestion (AIXM 5.1 & GeoJSON)
+// ============================================================================
+
+/// WASM wrapper for an in-memory repository of aeronautical information.
+#[wasm_bindgen]
+pub struct WasmAeronauticalDataset {
+    inner: olayer_core::aeronautical::AeronauticalDataset,
+}
+
+#[wasm_bindgen]
+impl WasmAeronauticalDataset {
+    /// Creates a new empty aeronautical dataset.
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> WasmAeronauticalDataset {
+        WasmAeronauticalDataset {
+            inner: olayer_core::aeronautical::AeronauticalDataset::new(),
+        }
+    }
+
+    /// Parses an AIXM 5.1 formatted XML string.
+    pub fn from_aixm_51(xml_content: &str) -> Result<WasmAeronauticalDataset, JsValue> {
+        let ds = olayer_core::aeronautical::parse_aixm_51_str(xml_content)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        Ok(WasmAeronauticalDataset { inner: ds })
+    }
+
+    /// Parses a GeoJSON-Aviation formatted JSON string.
+    pub fn from_geojson(json_content: &str) -> Result<WasmAeronauticalDataset, JsValue> {
+        let ds = olayer_core::aeronautical::parse_geojson_aviation_str(json_content)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        Ok(WasmAeronauticalDataset { inner: ds })
+    }
+
+    /// Serializes the dataset into a standard GeoJSON FeatureCollection string.
+    pub fn to_geojson(&self) -> Result<String, JsValue> {
+        olayer_core::aeronautical::export_dataset_to_geojson(&self.inner)
+            .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    /// Number of airspaces in the dataset.
+    pub fn airspace_count(&self) -> usize {
+        self.inner.airspaces.len()
+    }
+
+    /// Number of radio navaids and fixes in the dataset.
+    pub fn navaid_count(&self) -> usize {
+        self.inner.navaids.len()
+    }
+
+    /// Number of airway routes in the dataset.
+    pub fn airway_count(&self) -> usize {
+        self.inner.airways.len()
+    }
+
+    /// Number of aerodromes in the dataset.
+    pub fn airport_count(&self) -> usize {
+        self.inner.airports.len()
+    }
+
+    /// Total count of all aeronautical features.
+    pub fn total_feature_count(&self) -> usize {
+        self.inner.total_feature_count()
+    }
+
+    /// Finds a navaid by its identification code, returned as a JSON object.
+    pub fn find_navaid(&self, ident: &str) -> Result<JsValue, JsValue> {
+        let navaid = self.inner.find_navaid(ident);
+        serde_wasm_bindgen::to_value(&navaid)
+            .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    /// Finds navaids within a radius in meters around a geodetic point (lat/lon in radians).
+    pub fn find_navaids_within_radius(&self, lat_rad: f64, lon_rad: f64, radius_meters: f64) -> Result<JsValue, JsValue> {
+        let center = LatLon::new(lat_rad, lon_rad, 0.0);
+        let navaids = self.inner.find_navaids_within_radius(&center, radius_meters);
+        serde_wasm_bindgen::to_value(&navaids)
+            .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    /// Finds airspaces containing the given coordinate (lat/lon in radians).
+    pub fn find_airspaces_containing_point(&self, lat_rad: f64, lon_rad: f64) -> Result<JsValue, JsValue> {
+        let pt = LatLon::new(lat_rad, lon_rad, 0.0);
+        let airspaces = self.inner.find_airspaces_containing_point(&pt);
+        serde_wasm_bindgen::to_value(&airspaces)
+            .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+}
+
+impl Default for WasmAeronauticalDataset {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Parses an AIXM 5.1 XML string into a [`WasmAeronauticalDataset`].
+#[wasm_bindgen]
+pub fn parse_aixm_51(xml_content: &str) -> Result<WasmAeronauticalDataset, JsValue> {
+    WasmAeronauticalDataset::from_aixm_51(xml_content)
+}
+
+/// Parses a GeoJSON-Aviation string into a [`WasmAeronauticalDataset`].
+#[wasm_bindgen]
+pub fn parse_geojson_aviation(json_content: &str) -> Result<WasmAeronauticalDataset, JsValue> {
+    WasmAeronauticalDataset::from_geojson(json_content)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1066,5 +1696,144 @@ mod unit_tests {
         assert!((lla.lat - lat).abs() < 1e-6);
         assert!((lla.lon - lon).abs() < 1e-6);
         assert!((lla.height - height).abs() < 1e-3);
+    }
+
+    #[test]
+    fn test_wasm_local_tangent_frame_pure() {
+        let frame = WasmLocalTangentFrame::new(0.0, 0.0, 0.0);
+        let enu = frame.lla_to_enu(0.01, 0.01, 100.0);
+        assert!(enu.distance_2d() > 1000.0);
+        let lla = frame.enu_to_lla(enu.east_m, enu.north_m, enu.up_m);
+        assert!((lla.lat - 0.01).abs() < 1e-6);
+        assert!((lla.lon - 0.01).abs() < 1e-6);
+
+        let angles = frame.radar_look_angles(0.01, 0.01, 100.0);
+        assert_eq!(angles.len(), 3);
+        assert!(angles[0] > 1000.0); // slant range
+    }
+
+    #[test]
+    fn test_wasm_magnetic_model_pure() {
+        let model = WasmMagneticModel::new();
+        assert_eq!(model.epoch(), 2025.0);
+        assert_eq!(model.model_name(), "WMM-2025");
+        let dec = model.get_declination(
+            40.64_f64.to_radians(),
+            -73.78_f64.to_radians(),
+            0.0,
+            2025.0,
+        );
+        let dec_deg = dec.to_degrees();
+        assert!(dec_deg > -15.0 && dec_deg < -10.0);
+
+        // Test dynamic from_cof
+        let cof_str = "2030.0 WMM-2030 11/20/2029\n1 0 -29396.6 0.0 11.6 0.0\n1 1 -1404.9 4589.6 12.3 -23.4";
+        let custom_model = WasmMagneticModel::from_cof(cof_str).unwrap();
+        assert_eq!(custom_model.epoch(), 2030.0);
+        assert_eq!(custom_model.model_name(), "WMM-2030");
+    }
+
+    #[test]
+    fn test_wasm_spatial_deviation_and_polygon_pure() {
+        let dev = compute_route_deviation(0.0, 0.0, 0.0, 0.1, 0.01, 0.05);
+        assert!(dev.cross_track_error_meters < 0.0); // North of Eastbound track -> negative XTK
+        assert!(dev.along_track_distance_meters > 0.0);
+
+        let coords = [
+            0.0, 0.0, 0.0,
+            0.0, 0.1, 0.0,
+            0.1, 0.1, 0.0,
+            0.1, 0.0, 0.0,
+        ];
+        let poly = WasmGeodesicPolygon::new(&coords);
+        assert!(poly.contains_point(0.05, 0.05));
+        assert!(!poly.contains_point(0.2, 0.2));
+
+        let inter = geodesic_intersection(
+            0.0, -0.1, 0.0, 0.1,
+            -0.1, 0.0, 0.1, 0.0,
+        );
+        assert!(inter.is_some());
+        let pt = inter.unwrap();
+        assert!(pt.lat.abs() < 1e-6);
+        assert!(pt.lon.abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_wasm_tactical_tools_pure() {
+        // RBL
+        let rbl = compute_tactical_rbl(40.64, -73.78, 42.36, -71.01, 450.0, 2025.0);
+        assert!(rbl.distance_nm > 150.0 && rbl.distance_nm < 185.0);
+        assert!(rbl.estimated_time_enroute_sec > 1000.0);
+
+        // PPL
+        let ppl = generate_tactical_ppl(40.0, -74.0, 480.0, 90.0, &[1.0, 2.0, 5.0]);
+        assert_eq!(ppl.len(), 12); // 3 ticks * 4 values
+        assert!((ppl[1] - 8.0).abs() < 1e-3); // dist_nm = 8.0
+
+        // Holding Pattern
+        let holding = generate_tactical_holding_pattern(51.5, -0.1, 270.0, true, 1.0, 210.0, 16);
+        assert!(holding.len() >= 68); // 34+ points * 2
+
+        // ILS Cone
+        let ils = generate_tactical_ils_cone(51.4775, -0.4614, 270.0, 10.0, 5.0, 12);
+        assert!(ils.len() >= 28); // 14+ points * 2
+
+        // Range Rings
+        let rings = generate_tactical_range_rings(0.0, 0.0, &[10.0], 36);
+        assert_eq!(rings.len(), 74); // 37 points * 2
+    }
+
+    #[test]
+    fn test_wasm_aeronautical_dataset_pure() {
+        let geojson = r#"{
+            "type": "FeatureCollection",
+            "features": [
+                {
+                    "type": "Feature",
+                    "properties": {
+                        "aero_type": "Airspace",
+                        "uid": "TEST_TMA",
+                        "name": "TEST TMA",
+                        "airspace_type": "TMA",
+                        "lower_limit_m": 500.0,
+                        "upper_limit_fl": 150
+                    },
+                    "geometry": {
+                        "type": "Polygon",
+                        "coordinates": [[
+                            [0.0, 50.0, 0.0],
+                            [1.0, 50.0, 0.0],
+                            [1.0, 51.0, 0.0],
+                            [0.0, 51.0, 0.0],
+                            [0.0, 50.0, 0.0]
+                        ]]
+                    }
+                },
+                {
+                    "type": "Feature",
+                    "properties": {
+                        "aero_type": "Navaid",
+                        "ident": "TST",
+                        "name": "TEST VOR",
+                        "navaid_type": "VOR",
+                        "frequency_mhz": 114.5
+                    },
+                    "geometry": {
+                        "type": "Point",
+                        "coordinates": [0.5, 50.5, 100.0]
+                    }
+                }
+            ]
+        }"#;
+
+        let ds = WasmAeronauticalDataset::from_geojson(geojson).expect("Parse GeoJSON in WASM failed");
+        assert_eq!(ds.airspace_count(), 1);
+        assert_eq!(ds.navaid_count(), 1);
+        assert_eq!(ds.total_feature_count(), 2);
+
+        let exported = ds.to_geojson().expect("To GeoJSON in WASM failed");
+        assert!(exported.contains("TEST_TMA"));
+        assert!(exported.contains("TST"));
     }
 }

@@ -24,6 +24,7 @@ graph TB
         controller["🎮 TS Controller<br>[Component]<br>Manages the animation loop, camera events, and FPS control."]:::jsComponent
         layer_manager["🥞 Layer Manager<br>[Component]<br>Manages the layer stack (Layer Stack) and segregates repainting."]:::jsComponent
         map_data_stack["📥 TS Map Data Stack<br>[Component]<br>Manages map data infrastructure, data sources, and caches."]:::jsComponent
+        tactical_tools["🛠️ TS Tactical Tools<br>[Component]<br>Aeronautical measurement tools (RBL, PPL, Holding, ILS, Snail Trails)."]:::jsComponent
         
         %% Graphics Pipeline
         gpu_pipeline["🎨 GPU Render Pipeline<br>[Component]<br>Rendering of terrain meshes and static maps (WebGL2)."]:::jsComponent
@@ -39,8 +40,10 @@ graph TB
     %% Input and Output Flows
     host -->|1. Configures and interacts| controller
     host -->|2. Sends radar pings| controller
+    host -->|3. Queries tactical tools| tactical_tools
     controller -->|Registers targets| wasm_bridge
-    map_data_stack -->|3. Injects map and relief binaries| wasm_bridge
+    tactical_tools -->|Computes geodesy & geometry| wasm_bridge
+    map_data_stack -->|4. Injects map and relief binaries| wasm_bridge
 
     %% Internal SDK Flows
     controller -->|Cycle coordinator| layer_manager
@@ -56,7 +59,7 @@ graph TB
     cpu_pipeline -->|Draws on buffer| canvas_2d
     atlas_manager -->|Generates and updates texture| webgl_ctx
 
-    linkStyle 0,1,2,3,4,5,6,7,8,9,10,11,12 stroke:#555,stroke-width:1.5px;
+    linkStyle 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14 stroke:#555,stroke-width:1.5px;
 ```
 
 ---
@@ -77,6 +80,11 @@ Coordinator of the layer stack (Layer Stack), responsible for ordering and rende
 Module responsible for on-demand loading, paging, and intelligent caching (with LRU policy) of cartographic data (MVT, WMTS) and terrain (DTED).
 * Complete technical detail: [arch.md](providers/arch.md)
 
-### 🎨 2.4 Render Pipelines & Texture Atlas
+### 🛠️ 2.4 Tactical Tools
+Aviation controller tactical measurement tools and procedural geometry generators: Range and Bearing Line (RBL / CRSR), Projected Position Leader (PPL) vectors with time ticks, racetrack holding patterns, ILS approach funnels, concentric range rings, compass rose, and radar snail trails with opacity decay.
+* Complete technical detail: [arch.md](tools/arch.md)
+
+### 🎨 2.5 Render Pipelines & Texture Atlas
 Graphic drawing engines. Contains the GPU rendering pipeline (WebGL2), the CPU radar pipeline (with anti-overlap algorithm/anti-cluttering), and the Texture Atlas Manager.
 * Complete technical detail: [arch.md](renderer/arch.md)
+

@@ -124,7 +124,7 @@ graph TB
 
 ## 3. Level 3: Component Diagram (Internals of Core and SDK)
 
-This diagram focuses on the internal modular organization of the **Olayer Core** and **Olayer TS SDK**, illustrating how components cooperate to perform cartographic projections and real-time rendering.
+This diagram focuses on the internal modular organization of the **Olayer Core**, **Olayer TS SDK**, and **Olayer Native SDK**, illustrating how components cooperate to perform cartographic projections, tactical aeronautical calculations, and real-time rendering.
 
 ```mermaid
 graph TB
@@ -137,6 +137,7 @@ graph TB
         ts_controller["🎮 TS Controller<br>Loop (15/60 FPS) & Events"]:::component
         ts_layer_manager["🥞 TS Layer Manager<br>Composition and layer control"]:::component
         ts_map_data_stack["📥 TS Map Data Stack<br>Sources & Cache Manager (MVT/WMTS/DTED)"]:::component
+        ts_tools["🛠️ TS Tactical Tools<br>RBL, PPL, Holding, ILS, Range Rings, Snail Trails"]:::component
         ts_gpu_pipe["🎨 WebGL/WebGPU Pipe<br>Static base map drawing"]:::component
         ts_cpu_pipe["🎯 WebGL/Canvas 2D Pipe<br>Symbols (Atlas) & Anti-clutter"]:::component
     end
@@ -149,6 +150,7 @@ graph TB
         native_controller["🎮 Native Controller<br>Native loop & Window (winit)"]:::nativeComponent
         native_layer_manager["🥞 Native Layer Manager<br>Native layer composition and control"]:::nativeComponent
         native_map_data_stack["📥 Native Map Data Stack<br>Native Sources & Cache Manager"]:::nativeComponent
+        native_tools["🛠️ Native Tactical Tools<br>RBL, PPL, Holding, ILS, Range Rings, Snail Trails"]:::nativeComponent
         native_gpu_pipe["🎨 wgpu Pipe (Matrix)<br>Terrain/background rendering (Vulkan/Metal/DX)"]:::nativeComponent
         native_cpu_pipe["🎯 wgpu Pipe (Vertex)<br>Symbols (Atlas) & Native anti-clutter"]:::nativeComponent
     end
@@ -173,6 +175,7 @@ graph TB
     ts_layer_manager --> ts_cpu_pipe
     ts_map_data_stack --> ts_controller
     ts_map_data_stack --> wasm_bridge
+    ts_tools --> wasm_bridge
     ts_gpu_pipe --> wasm_bridge
     ts_cpu_pipe --> wasm_bridge
 
@@ -181,69 +184,55 @@ graph TB
     native_layer_manager --> native_gpu_pipe
     native_layer_manager --> native_cpu_pipe
     native_map_data_stack --> native_controller
-    native_map_data_stack --> ffi_bridge
-    native_gpu_pipe --> ffi_bridge
-    native_cpu_pipe --> ffi_bridge
-    
-    %% Internal WASM Bridge to Core
+    native_tools --> geodesy
+    ffi_bridge --> native_tools
+
+    %% Core Connections
+    wasm_bridge --> geodesy
     wasm_bridge --> camera
+    wasm_bridge --> projections
     wasm_bridge --> terrain
     wasm_bridge --> sld_parser
     wasm_bridge --> symbol_registry
     wasm_bridge --> interpolator
-
-    %% Internal FFI Bridge to Core
-    ffi_bridge --> camera
-    ffi_bridge --> terrain
-    ffi_bridge --> sld_parser
-    ffi_bridge --> symbol_registry
-    ffi_bridge --> interpolator
     
-    %% Direct Rust-to-Rust (Native SDK to Core)
-    native_gpu_pipe --> camera
-    native_gpu_pipe --> terrain
-    native_cpu_pipe --> symbol_registry
-    native_cpu_pipe --> interpolator
+    ffi_bridge --> geodesy
+    ffi_bridge --> terrain
+    ffi_bridge --> interpolator
 
-    %% Internal Rust Core Dependencies
-    camera --> geodesy
-    camera --> projections
-    projections --> geodesy
-    terrain --> geodesy
-    interpolator --> geodesy
-    symbol_registry --> sld_parser
-
-    linkStyle 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33 stroke:#333,stroke-dasharray: 2 2;
+    linkStyle 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20 stroke:#555,stroke-width:1.5px;
 ```
 
 ### Component Details
 
 #### 1. Rust Core Modules
-* **[Geodesy Module](../core/src/geodesy):** Provides the mathematical functions based on the WGS84 reference ellipsoid. Performs bidirectional transformations between geographic coordinates $(\phi, \lambda, h)$ and Cartesian ECEF $(X, Y, Z)$.
+* **[Geodesy Module](../core/src/geodesy):** Provides the mathematical functions based on the WGS84 reference ellipsoid, Vincenty/Haversine solvers, Local Tangent Frames (ENU/NED), World Magnetic Model (WMM-2025/WMMHR), and spherical spatial analysis (XTK/ATD, geodesic polygon containment, buffering, intersection).
 * **[Camera Module](../core/src/camera):** Manages the three-dimensional geographic navigation state and camera attitude (center, zoom, bearing/yaw, pitch, roll) and calculates the View-Projection matrices for 2D, 2.5D, and 3D in a unified and performant manner.
 * **[Projections Module](../core/src/projections):** Contains the mathematical formulas to project three-dimensional or geodetic points onto 2D planes. Implements the equations for Stereographic, LCC, and Mercator projections.
 * **[Terrain Engine (DTED)](../core/src/terrain):** Manages DTED files in memory. Builds a simplified 2D spatial index (Grid) where each cell points to the loaded elevation bytes. Allows altitude queries at arbitrary coordinates to run in constant time $O(1)$.
 * **[SLD Parser](../core/src/sld):** Syntactic parser (Parser) of XML that converts the OGC SLD (Styled Layer Descriptor) standard into structured style metadata.
-* **[Symbol Registry](../core/src/symbol_registry):** Unified and agnostic symbology registry that resolves symbol codes (such as VOR or fighter jets) using simplified vector primitives generated from consolidated JSON library files. These JSON symbol files are pre-compiled from SVG files using the CLI tool `tools/symbol-compiler`. Rasterized symbols (PNG/JPG) are injected directly into the client SDK in the Texture Atlas, keeping the core lightweight and free of raster decoders.
+* **[Symbol Registry](../core/src/symbol_registry):** Unified and agnostic symbology registry that resolves symbol codes (such as VOR or fighter jets) using simplified vector primitives generated from consolidated JSON library files.
 * **[Target Interpolator](../core/src/interpolator):** Maintains the state table of dynamic targets in 3D geodetic space. For each target, records the last known state vector. Computes interpolated positions via 3D Dead Reckoning based on system time (WGS84 LatLon and heading), completely decoupled from screen projection.
 
 #### 2. TypeScript SDK Components (Web Client)
 * **TS Controller:** Controls the screen animation loop in the browser using `requestAnimationFrame` and manages dynamic FPS modulation (15 FPS idle / 60 FPS active).
 * **TS Layer Manager:** Coordinates the layer stack (Layer Stack) on the Web, managing the optimized paint cycle with isolation of static and dynamic layers.
-   * **TS Map Data Stack:** Manages the web map data infrastructure. Implements the `MapDataSource` abstractions and manages sub-providers such as `VectorTileSource` (for MVT/GeoServer), `RasterTileSource` (WMTS/OpenStreetMap), and `TerrainTileSource` (dynamic terrain paging). Controls bounded LRU caches, request deduplication, abort-aware retries, cache statistics, and resource disposal.
+* **TS Map Data Stack:** Manages the web map data infrastructure. Implements the `MapDataSource` abstractions and manages sub-providers such as `VectorTileSource` (for MVT/GeoServer), `RasterTileSource` (WMTS/OpenStreetMap), and `TerrainTileSource` (dynamic terrain paging).
+* **TS Tactical Tools:** Aviation controller measurement tools and procedural geometry generators: Range and Bearing Line (RBL / CRSR), Projected Position Leader (PPL) vectors with time ticks, racetrack holding patterns, ILS approach funnel cones, concentric range rings, and radar snail trails.
 * **WebGL/WebGPU GPU Pipeline:** Binds static vertex buffers and renders on the GPU from $4 \times 4$ matrices sent by the WASM bridge.
 * **WebGL/Canvas 2D CPU Pipeline:** Renders dynamic targets by resolving sprites in the GPU *Texture Atlas* and calculating label anti-overlapping.
 
 #### 3. Native SDK Components (Desktop Client)
 * **Native Controller:** Controls the native frame loop and manages local desktop window creation (using the `winit` crate or the host application's message loop).
 * **Native Layer Manager:** Manages the native layer stack for visibility, blending, and repainting at the native level.
-   * **Native Map Data Stack:** Desktop equivalent of data infrastructure. Manages background WMTS fetching, bounded decoded-pixel caching, worker shutdown, tactical format decoding, and efficient local disk I/O for DTED files.
+* **Native Map Data Stack:** Desktop equivalent of data infrastructure. Manages background WMTS fetching, bounded decoded-pixel caching, worker shutdown, tactical format decoding, and efficient local disk I/O for DTED files.
+* **Native Tactical Tools:** Native Rust implementation of tactical measurement tools and procedural geometry generation (`olayer_native::tools`) with C-FFI interoperability.
 * **wgpu GPU Pipeline:** Compiles pipelines and renders on the GPU (Vulkan, Metal, or DirectX 12) through the Rust `wgpu` library to draw 3D terrain and vector background maps.
 * **wgpu CPU/Vertex Pipeline:** Renders dynamic targets on the desktop using instanced calls and *billboards* from a local texture atlas.
 
 #### 4. Interoperability Layers (Bridges)
-* **WASM Bridge (wasm-bindgen):** Memory transition and FFI bridge that exports Core Rust functions to the TypeScript/JavaScript format in the browser, using direct memory references.
-* **C-FFI Bridge (cbindgen):** C-API export bridge (`libolayer_native.h`) generated by `cbindgen`, exposing interfaces compatible with direct binding for hosts in C, C++, or other compiled languages.
+* **WASM Bridge (wasm-bindgen):** Memory transition and FFI bridge that exports Core and Tools functions to the TypeScript/JavaScript format in the browser.
+* **C-FFI Bridge (cbindgen):** C-API export bridge (`libolayer_native.h`) exposing interfaces compatible with direct binding for hosts in C, C++, or other compiled languages.
 
 ---
 
@@ -317,8 +306,8 @@ sequenceDiagram
     Host->>SDK: checkAltimetry(aircraftId)
     SDK->>Core: get_terrain_elevation(lat, lon)
     Core->>Core: O(1) access in active Grid Index cache
-     Core-->>SDK: ClearanceResult (Safe / Warning / Unknown)
-     SDK-->>Host: Returns MSAW status and optional clearance
+    Core-->>SDK: ClearanceResult (Safe / Warning / Unknown)
+    SDK-->>Host: Returns MSAW status and optional clearance
 
     Note over Host, Core: Phase 3: Vertical Profile Generation (2.5D View)
     Host->>SDK: getFlightVerticalProfile(routePoints, samplingStep)
@@ -386,7 +375,7 @@ olayer/
 ├── core/                         # [C4 Component: Olayer Core Engine]
 │   ├── Cargo.toml
 │   └── src/
-│       ├── geodesy/              # Geodetic Formulas and ECEF Module (WGS84)
+│       ├── geodesy/              # Geodetic Formulas, WMM-2025, and Spatial Analysis
 │       ├── camera/               # CameraState management and View-Proj matrices
 │       ├── projections/          # Stereographic, LCC, and Web Mercator Implementations
 │       ├── terrain/              # DTED File Parsing and O(1) Altitude Index
@@ -401,6 +390,7 @@ sdk/
 │   │   ├── controller/       # Loop Management, FPS Throttler, and Events
 │   │   ├── layers/           # Web Layer Stack Composition (Tile, Vector)
 │   │   ├── providers/        # WMTS, MVT, SLD network calls, and DTED injection
+│   │   ├── tools/            # Tactical Tools (RBL, PPL, Holding, ILS, Range Rings, Snail Trails)
 │   │   ├── renderer/         # WebGL Renderer (GPU) and Canvas (CPU)
 │   │   └── index.ts          # Public TypeScript SDK API
 │   ├── tsconfig.json
@@ -420,6 +410,7 @@ sdk/
     │   ├── native_controller/# Native facade / loop & FPS throttler
     │   ├── native_layer_manager/ # Native layer composition and control
     │   ├── native_map_data_stack/ # Native data sources & cache manager
+    │   ├── tools/            # [C4 Component: Native Tactical Tools]
     │   ├── wgpu_gpu_pipeline/# WGPU grid & raster tile rendering pipeline
     │   └── wgpu_cpu_vertex_pipeline/ # CPU-side projection & targets drawing pipeline
     │

@@ -5,6 +5,8 @@ architecture and implementation. Items remain here after completion so their
 acceptance criteria and implementation history stay traceable. Priorities
 reflect operational risk and the amount of shared infrastructure affected.
 
+For future GIS, ATC safety net, and 4D trajectory component proposals, see [GIS Enhancement Proposals](file:///c:/Users/rafae/projects/rust/olayer/docs/gis_enhancement_proposals.md).
+
 ## Priorities
 
 - **P0:** Required before production use of the affected path.

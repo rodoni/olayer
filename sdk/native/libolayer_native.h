@@ -11,6 +11,16 @@ typedef struct TerrainEngine TerrainEngine;
 typedef struct InterpolationEngine InterpolationEngine;
 
 /**
+ * Conversion constant: 1 Nautical Mile in meters (exact standard).
+ */
+#define METERS_PER_NAUTICAL_MILE 1852.0
+
+/**
+ * Standard Rate-One turn rate in degrees per second ($3^\circ/\text{s}$, $180^\circ$ in 1 minute).
+ */
+#define STANDARD_RATE_ONE_TURN_DPS 3.0
+
+/**
  * C representation of vertical profile point.
  */
 struct C_ProfilePoint {
@@ -31,6 +41,84 @@ struct C_InterpolatedTarget {
   double height;
   double heading_rad;
   int quality;
+};
+
+/**
+ * C representation of topocentric East-North-Up coordinate.
+ */
+struct C_EnuPoint {
+  double east_m;
+  double north_m;
+  double up_m;
+};
+
+/**
+ * C representation of geodetic coordinate.
+ */
+struct C_LatLon {
+  double lat;
+  double lon;
+  double height;
+};
+
+/**
+ * C representation of magnetic field elements.
+ */
+struct C_MagneticElements {
+  double declination_rad;
+  double inclination_rad;
+  double horizontal_intensity_nt;
+  double total_intensity_nt;
+  double x_nt;
+  double y_nt;
+  double z_nt;
+};
+
+/**
+ * C representation of route deviation metrics (XTK / ATD).
+ */
+struct C_RouteDeviation {
+  double cross_track_error_meters;
+  double along_track_distance_meters;
+  struct C_LatLon nearest_point;
+};
+
+/**
+ * C representation of Range and Bearing Line (RBL / CRSR) measurement.
+ */
+struct C_RblMeasurement {
+  double from_lat_deg;
+  double from_lon_deg;
+  double to_lat_deg;
+  double to_lon_deg;
+  double distance_nm;
+  double distance_km;
+  double true_bearing_deg;
+  double magnetic_bearing_deg;
+  double reciprocal_true_bearing_deg;
+  double reciprocal_magnetic_bearing_deg;
+  double estimated_time_enroute_sec;
+};
+
+/**
+ * C representation of a Projected Position Leader (PPL) tick mark.
+ */
+struct C_PplTick {
+  double time_minutes;
+  double distance_nm;
+  double lat_deg;
+  double lon_deg;
+};
+
+/**
+ * C representation of a radio navigation aid summary.
+ */
+struct C_NavaidSummary {
+  double lat;
+  double lon;
+  double elevation_m;
+  double frequency_mhz;
+  int navaid_type_code;
 };
 
 /**
@@ -173,5 +261,284 @@ void olayer_interpolated_targets_free(struct C_InterpolatedTarget *targets, uint
  * Destroys an InterpolationEngine instance.
  */
 void olayer_interpolator_free(InterpolationEngine *engine);
+
+/**
+ * Creates a new `LocalTangentFrame` at the given geodetic origin.
+ */
+LocalTangentFrame *olayer_local_frame_create(double origin_lat,
+                                             double origin_lon,
+                                             double origin_height);
+
+/**
+ * Converts LLA to local ENU coordinates. Returns 0 on success, negative error.
+ */
+int olayer_local_frame_lla_to_enu(LocalTangentFrame *frame,
+                                  double lat,
+                                  double lon,
+                                  double height,
+                                  struct C_EnuPoint *out_enu);
+
+/**
+ * Converts local ENU coordinates to LLA. Returns 0 on success, negative error.
+ */
+int olayer_local_frame_enu_to_lla(LocalTangentFrame *frame,
+                                  double east_m,
+                                  double north_m,
+                                  double up_m,
+                                  struct C_LatLon *out_lla);
+
+/**
+ * Calculates radar look angles without atmospheric refraction. Returns 0 on success, negative error.
+ */
+int olayer_local_frame_radar_look_angles(LocalTangentFrame *frame,
+                                         double target_lat,
+                                         double target_lon,
+                                         double target_height,
+                                         double *out_slant_range,
+                                         double *out_azimuth_rad,
+                                         double *out_elevation_rad);
+
+/**
+ * Calculates radar look angles with 4/3 tropospheric refraction. Returns 0 on success, negative error.
+ */
+int olayer_local_frame_radar_look_angles_refracted(LocalTangentFrame *frame,
+                                                   double target_lat,
+                                                   double target_lon,
+                                                   double target_height,
+                                                   double k_factor,
+                                                   double *out_slant_range,
+                                                   double *out_azimuth_rad,
+                                                   double *out_elevation_rad);
+
+/**
+ * Destroys a `LocalTangentFrame` instance.
+ */
+void olayer_local_frame_free(LocalTangentFrame *frame);
+
+/**
+ * Creates a default `MagneticModel` instance initialized with built-in WMM-2025.
+ */
+MagneticModel *olayer_magnetic_model_create_default(void);
+
+/**
+ * Creates a `MagneticModel` from a null-terminated `WMM.COF` string.
+ * Returns null pointer if parsing fails or string is invalid UTF-8.
+ */
+MagneticModel *olayer_magnetic_model_create_from_cof(const char *cof_str);
+
+/**
+ * Computes magnetic declination using a specific `MagneticModel` instance.
+ */
+int olayer_magnetic_model_get_declination(MagneticModel *model,
+                                          double lat,
+                                          double lon,
+                                          double height,
+                                          double epoch,
+                                          double *out_declination_rad);
+
+/**
+ * Computes magnetic field elements using a specific `MagneticModel` instance.
+ */
+int olayer_magnetic_model_get_elements(MagneticModel *model,
+                                       double lat,
+                                       double lon,
+                                       double height,
+                                       double epoch,
+                                       struct C_MagneticElements *out_elements);
+
+/**
+ * Converts True bearing to Magnetic bearing using a specific `MagneticModel` instance.
+ */
+int olayer_magnetic_model_true_to_magnetic(MagneticModel *model,
+                                           double true_bearing_rad,
+                                           double lat,
+                                           double lon,
+                                           double height,
+                                           double epoch,
+                                           double *out_mag_bearing_rad);
+
+/**
+ * Converts Magnetic bearing to True bearing using a specific `MagneticModel` instance.
+ */
+int olayer_magnetic_model_magnetic_to_true(MagneticModel *model,
+                                           double mag_bearing_rad,
+                                           double lat,
+                                           double lon,
+                                           double height,
+                                           double epoch,
+                                           double *out_true_bearing_rad);
+
+/**
+ * Destroys a `MagneticModel` instance.
+ */
+void olayer_magnetic_model_free(MagneticModel *model);
+
+/**
+ * Computes magnetic declination in radians using default WMM-2025. Returns 0 on success, negative error.
+ */
+int olayer_magnetic_get_declination(double lat,
+                                    double lon,
+                                    double height,
+                                    double epoch,
+                                    double *out_declination_rad);
+
+/**
+ * Computes all magnetic field elements using default WMM-2025. Returns 0 on success, negative error.
+ */
+int olayer_magnetic_get_elements(double lat,
+                                 double lon,
+                                 double height,
+                                 double epoch,
+                                 struct C_MagneticElements *out_elements);
+
+/**
+ * Converts True bearing to Magnetic bearing using default WMM-2025. Returns 0 on success, negative error.
+ */
+int olayer_magnetic_true_to_magnetic(double true_bearing_rad,
+                                     double lat,
+                                     double lon,
+                                     double height,
+                                     double epoch,
+                                     double *out_mag_bearing_rad);
+
+/**
+ * Converts Magnetic bearing to True bearing using default WMM-2025. Returns 0 on success, negative error.
+ */
+int olayer_magnetic_magnetic_to_true(double mag_bearing_rad,
+                                     double lat,
+                                     double lon,
+                                     double height,
+                                     double epoch,
+                                     double *out_true_bearing_rad);
+
+/**
+ * Computes route deviation (XTK and ATD). Returns 0 on success, negative error.
+ */
+int olayer_spatial_compute_route_deviation(struct C_LatLon start,
+                                           struct C_LatLon end,
+                                           struct C_LatLon pos,
+                                           struct C_RouteDeviation *out_deviation);
+
+/**
+ * Computes geodesic line-line intersection. Returns 1 if intersects, 0 if disjoint, negative error.
+ */
+int olayer_spatial_geodesic_intersection(struct C_LatLon p1,
+                                         struct C_LatLon p2,
+                                         struct C_LatLon p3,
+                                         struct C_LatLon p4,
+                                         struct C_LatLon *out_intersection);
+
+/**
+ * Evaluates spherical polygon point containment. Returns 0 on success, negative error.
+ * `*out_contains` is set to 1 if contained, 0 if not.
+ */
+int olayer_spatial_polygon_contains_point(const struct C_LatLon *poly_coords,
+                                          uintptr_t num_coords,
+                                          struct C_LatLon point,
+                                          int *out_contains);
+
+/**
+ * Computes Range and Bearing Line (RBL / CRSR) measurement. Returns 0 on success, negative error.
+ */
+int olayer_tools_compute_rbl(double from_lat_deg,
+                             double from_lon_deg,
+                             double to_lat_deg,
+                             double to_lon_deg,
+                             double speed_knots,
+                             double epoch_year,
+                             struct C_RblMeasurement *out_measurement);
+
+/**
+ * Generates Projected Position Leader (PPL) vector ticks. Returns 0 on success, negative error.
+ */
+int olayer_tools_generate_ppl(double lat_deg,
+                              double lon_deg,
+                              double ground_speed_knots,
+                              double track_deg,
+                              const double *intervals_minutes,
+                              uintptr_t num_intervals,
+                              struct C_PplTick *out_ticks,
+                              uintptr_t max_ticks,
+                              uintptr_t *out_ticks_written);
+
+/**
+ * Generates racetrack holding pattern polyline coordinates. Returns 0 on success, negative error.
+ */
+int olayer_tools_generate_holding_pattern(double fix_lat_deg,
+                                          double fix_lon_deg,
+                                          double inbound_bearing_deg,
+                                          int is_standard_right_turn,
+                                          double leg_time_minutes,
+                                          double airspeed_knots,
+                                          uintptr_t points_per_turn,
+                                          struct C_LatLon *out_coords,
+                                          uintptr_t max_coords,
+                                          uintptr_t *out_coords_written);
+
+/**
+ * Generates ILS approach funnel polygon coordinates. Returns 0 on success, negative error.
+ */
+int olayer_tools_generate_ils_cone(double threshold_lat_deg,
+                                   double threshold_lon_deg,
+                                   double runway_heading_deg,
+                                   double length_nm,
+                                   double fov_deg,
+                                   uintptr_t arc_steps,
+                                   struct C_LatLon *out_polygon_coords,
+                                   uintptr_t max_polygon_coords,
+                                   uintptr_t *out_polygon_coords_written);
+
+/**
+ * Generates concentric range rings coordinates. Returns 0 on success, negative error.
+ */
+int olayer_tools_generate_range_rings(double center_lat_deg,
+                                      double center_lon_deg,
+                                      double radius_nm,
+                                      uintptr_t points_per_ring,
+                                      struct C_LatLon *out_ring_coords,
+                                      uintptr_t max_coords,
+                                      uintptr_t *out_coords_written);
+
+/**
+ * Loads an `AeronauticalDataset` from an AIXM 5.1 XML null-terminated UTF-8 string.
+ * Returns null pointer on error.
+ */
+AeronauticalDataset *olayer_aeronautical_dataset_from_aixm(const char *xml_utf8);
+
+/**
+ * Loads an `AeronauticalDataset` from a GeoJSON-Aviation null-terminated UTF-8 string.
+ * Returns null pointer on error.
+ */
+AeronauticalDataset *olayer_aeronautical_dataset_from_geojson(const char *json_utf8);
+
+/**
+ * Returns the counts of airspaces, navaids, airways, and airports in the dataset. Returns 0 on success.
+ */
+int olayer_aeronautical_dataset_counts(AeronauticalDataset *ds,
+                                       uintptr_t *out_airspaces,
+                                       uintptr_t *out_navaids,
+                                       uintptr_t *out_airways,
+                                       uintptr_t *out_airports);
+
+/**
+ * Finds a navaid by its identification code. Returns 0 on success, -1 on null pointer, -2 if not found.
+ */
+int olayer_aeronautical_dataset_find_navaid(AeronauticalDataset *ds,
+                                            const char *ident_utf8,
+                                            struct C_NavaidSummary *out_navaid);
+
+/**
+ * Serializes the dataset into a standard GeoJSON FeatureCollection string into a C buffer.
+ * Returns 0 on success, -1 on error, or -2 if buffer capacity is insufficient.
+ */
+int olayer_aeronautical_dataset_to_geojson(AeronauticalDataset *ds,
+                                           char *out_buf,
+                                           uintptr_t out_capacity,
+                                           uintptr_t *out_len);
+
+/**
+ * Destroys an `AeronauticalDataset` instance.
+ */
+void olayer_aeronautical_dataset_free(AeronauticalDataset *ds);
 
 #endif /* OLAYER_NATIVE_H */

@@ -15,6 +15,7 @@ intentionally module-level; signatures remain in `docs/api_reference.md`.
 | `interpolator` prediction status | Exposed as JSON batch | Exposed as quality integer | Quality values are documented in `docs/conformance.md` |
 | `sld` parser and styles | Exposed through `WasmStyleRegistry` | Intentionally unavailable | Native hosts may parse styles independently |
 | `symbol_registry` | Exposed through `WasmSymbolRegistry` | Intentionally unavailable | Native rendering uses native registry paths |
+| `aeronautical` data ingestion | Exposed through `WasmAeronauticalDataset` | Exposed through `olayer_aeronautical_*` | AIXM 5.1 XML and GeoJSON-Aviation parsing, spatial queries, and GeoJSON export |
 
 Changes to a public core module must update this table and the generated/API
 reference checks before merging.

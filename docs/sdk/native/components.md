@@ -12,6 +12,7 @@ This document details technically the components of the **Olayer** Native SDK, a
 4. [wgpu GPU Pipeline](#4-wgpu-gpu-pipeline)
 5. [wgpu CPU/Vertex Pipeline](#5-wgpu-cpuvertex-pipeline)
 6. [C-FFI Bridge (cbindgen)](#6-c-ffi-bridge-cbindgen)
+7. [Native Tactical Tools](#7-native-tactical-tools)
 
 ---
 
@@ -80,17 +81,15 @@ The `Native Map Data Stack` manages the ingestion and local caching of static an
 * `MapDataSource` trait (defined in [mod.rs](../../../sdk/native/src/native_map_data_stack/mod.rs)):
   * `id(&self) -> &str` — Unique identifier for the data source.
   * `clear_cache(&mut self)` — Clears the local provider cache.
-   * `cache_size(&self) -> usize` — Returns the number of cached items.
-   * `GeoserverWmtsSource` uses a bounded decoded-pixel LRU cache and shuts down
-     its background worker when dropped.
+  * `cache_size(&self) -> usize` — Returns the number of cached items.
+  * `GeoserverWmtsSource` uses a bounded decoded-pixel LRU cache and shuts down its background worker when dropped.
 * `NativeMapDataStack`:
   * `sources: HashMap<String, Box<dyn MapDataSource>>` — Registry of registered data sources.
   * `register_source(source: Box<dyn MapDataSource>) -> Result<(), String>` — Registers a new data source. Returns `Err` if the ID already exists.
   * `get_source(id: &str) -> Option<&dyn MapDataSource>` — Retrieves a registered source by ID.
   * `clear_cache()` — Clears the caches of all registered sources.
-   * `get_cache_size() -> usize` — Returns the aggregate cache size across all sources.
-   * Native cache byte/request metrics remain a planned observability extension.
-  * `load_dted_file(path: &str, terrain: &mut TerrainEngine) -> Result<(), String>` — Loads a DTED tile from a file path into the given terrain engine (backward-compatible helper).
+  * `get_cache_size() -> usize` — Returns the aggregate cache size across all sources.
+  * `load_dted_file(path: &str, terrain: &mut TerrainEngine) -> Result<(), String>` — Loads a DTED tile from a file path into the given terrain engine.
   * `load_dted_buffer(buffer: &[u8], terrain: &mut TerrainEngine) -> Result<(), String>` — Loads a DTED tile from a raw buffer into the given terrain engine.
 * `TerrainDataSource` (concrete `MapDataSource` implementation):
   * Wraps a `TerrainEngine` and tracks loaded tiles so it can implement `clear_cache` and `cache_size`.
@@ -98,10 +97,6 @@ The `Native Map Data Stack` manages the ingestion and local caching of static an
   * `load_buffer(buffer: &[u8]) -> Result<(), String>` — Loads a DTED tile from a raw buffer.
   * `unload_tile(lat_deg: i32, lon_deg: i32) -> bool` — Unloads a specific tile by its coordinate degrees.
   * `get_elevation(lat_deg: f64, lon_deg: f64) -> Result<f64, String>` — Queries elevation at the given coordinate degrees.
-
-### Data Integration
-* **Local Disk I/O:** Loads binary DTED tiles mapped on the geographic grid directly into the [TerrainEngine](../../../core/src/terrain) struct using `load_tile`.
-* **Sensor Flow:** Receives external radar feeds at ~1 Hz rates and supplies the native [InterpolationEngine](../../../core/src/interpolator) via the `update_target` method.
 
 ---
 
@@ -120,12 +115,12 @@ The `wgpu GPU Pipeline` is the hardware-accelerated rendering engine for native 
 ## 5. wgpu CPU/Vertex Pipeline
 
 ### Responsibility
-The `wgpu CPU/Vertex Pipeline` handles the projection and plotting of dynamic targets (aircraft) and their respective metadata (text labels, velocity vectors, and heading) that cannot suffer 3D spatial distortions ( **Billboard** effect). The coordinate transformation calculation from geodetic (latitude, longitude, altitude) to flat screen pixel coordinates $(X, Y)$ is done on the CPU by the Core, and the SDK performs the rendering of geometric primitives (circles, rectangles, vectors) and text on the graphical interface.
+The `wgpu CPU/Vertex Pipeline` handles the projection and plotting of dynamic targets (aircraft) and their respective metadata (text labels, velocity vectors, and heading) that cannot suffer 3D spatial distortions (**Billboard** effect). The coordinate transformation calculation from geodetic (latitude, longitude, altitude) to flat screen pixel coordinates $(X, Y)$ is done on the CPU by the Core, and the SDK performs the rendering of geometric primitives (circles, rectangles, vectors) and text on the graphical interface.
 
 ### Dynamic Projection Logic
 In the file [mod.rs](../../../sdk/native/src/wgpu_cpu_vertex_pipeline/mod.rs):
 * `project_lla_to_screen`: Translates geodetic coordinates based on the active projection and visualization matrix.
-  * **In 3D mode:** Converts LLA coordinates to 3D ECEF rectangular coordinates using the WGS84 ellipsoid, applies horizon occlusion culling (horizon occlusion culling), and multiplies by the 3D view matrix.
+  * **In 3D mode:** Converts LLA coordinates to 3D ECEF rectangular coordinates using the WGS84 ellipsoid, applies horizon occlusion culling, and multiplies by the 3D view matrix.
   * **In 2.5D mode:** Projects the aircraft base two-dimensionally using the active planar projection and adds altitude as the Z axis, then projects with the 2.5D perspective camera matrix.
   * **In 2D mode:** Projects two-dimensionally using the active cartographic projection (Stereographic, LCC, Mercator) and translates/rotates according to the camera bearing/zoom.
 * **Target Rendering with Egui Painter:** The SDK draws aircraft as filled circles, surrounded by rectangles on selected targets, with lines representing the planned heading vector for 1 minute ahead and text blocks containing the callsign, Altitude (Flight Level), and Speed (knots).
@@ -139,12 +134,32 @@ The `C-FFI Bridge` provides a binary interface compatible with the C language (`
 
 ### FFI Interoperability Architecture
 The FFI bridge is located in the subproject [c_ffi_bridge](../../../sdk/native/src/c_ffi_bridge) and implements:
-* **FFI-compatible Data Structures (`#[repr(C]`):**
+* **FFI-compatible Data Structures (`#[repr(C)]`):**
   * `C_LatLon` - Pair of geodetic coordinates.
   * `C_InterpolatedTarget` - Interpolated target records with C-compatible strings (`*mut c_char`).
   * `C_ProfilePoint` - Point in the vertical profile graph.
-* **Opaque Pointer Management:** Instantiates `TerrainEngine` and `InterpolationEngine` instances on the Rust heap and exposes opaque pointers (`*mut TerrainEngine`) for host control.
-* **Panic Unwind Prevention (`catch_unwind`):** Ensures that panics occurring within the Rust crates do not cross the FFI boundary to the host application (which would result in undefined behavior / crash), returning structured negative error codes.
+  * `C_RblMeasurement` - Tactical Range & Bearing Line calculation results.
+  * `C_PplTick` - Projected Position Leader tick mark coordinates.
+* **Opaque Pointer Management:** Instantiates `TerrainEngine`, `InterpolationEngine`, and `TacticalToolsManager` instances on the Rust heap and exposes opaque pointers for host control.
+* **Panic Unwind Prevention (`catch_unwind`):** Ensures that panics occurring within the Rust crates do not cross the FFI boundary to the host application, returning structured negative error codes.
+
+---
+
+## 7. Native Tactical Tools
+
+### Responsibility
+The `Native Tactical Tools` component (`olayer_native::tools`) implements high-precision aeronautical measurement and dynamic ATC overlay generation natively in Rust. It exposes pure Rust APIs, integration wrappers for desktop rendering pipelines, and C-FFI export endpoints.
+
+### Key Data Structures and Functions
+* `RblMeasurement` / `compute_rbl`: Range and Bearing Line measuring distance in NM and km, true & magnetic bearings, reciprocal bearings, and estimated time en route (ETE).
+* `PplLeader` / `generate_ppl`: Projected Position Leader vector with customizable time tick marks (e.g. 1m, 2m, 5m).
+* `HoldingPatternConfig` / `generate_holding_pattern`: Standard racetrack holding pattern geometry generator with standard rate-one ($3^\circ/\text{s}$) turns.
+* `IlsConeConfig` / `generate_ils_cone`: Instrument Landing System approach corridor funnel polygon, extended centerline, and distance crossbars.
+* `RangeRingsConfig` / `generate_range_rings`: Concentric distance rings and radial azimuth spokes.
+* `SnailTrailManager` / `HistoryDot`: Tactical radar track history hit buffer with age/count pruning and opacity decay.
+* `TacticalToolsManager`: Unified coordinator struct.
+
+* Complete technical detail: [arch.md](tools/arch.md)
 
 ---
 
@@ -157,6 +172,7 @@ sequenceDiagram
     autonumber
     participant Host as Host C++/Rust Application
     participant Ctrl as Native Controller
+    participant Tools as Tactical Tools
     participant DS as Map Data Stack
     participant GPU as wgpu GPU Pipeline (Grid/Map)
     participant CPU as wgpu CPU/Vertex Pipeline (Targets)
@@ -164,6 +180,7 @@ sequenceDiagram
     %% Ingestion
     Host->>DS: Inject new radar pings (target_update)
     DS->>Ctrl: Update data in InterpolationEngine
+    Host->>Tools: Query tactical tools (RBL, PPL, Holding, ILS)
     
     %% Rendering Loop
     rect rgb(240, 248, 255)
