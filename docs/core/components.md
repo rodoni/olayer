@@ -154,11 +154,13 @@ Component responsible for managing the geographic navigation state and camera at
 * **Dependencies:** `Geodesy Engine` and `Projections Engine`.
 
 ### ⛰️ 2.4 Terrain Engine (`core::terrain`)
-High-performance indexer for Digital Terrain Elevation Data (DTED - Digital Terrain Elevation Data).
+High-performance indexer for Digital Terrain Elevation Data (DTED), Civil RGB Tiles (Mapbox / Terrarium), and Cloud-Optimized GeoTIFFs (COG).
 * **Responsibilities:**
   * Read and analyze binary buffers corresponding to DTED files (Levels 0, 1, or 2) passively injected.
-  * Build and update a flat spatial indexer (*Grid Index*) containing the active tiles in memory.
-  * Query the exact ground altitude for a geographic coordinate $(\phi, \lambda)$ in constant time $O(1)$ using bilinear interpolation between the loaded grid cells.
+  * Vectorized decoding of Web Mercator RGB elevation tiles (Mapbox Terrain-RGB and Mapzen/Nextzen Terrarium).
+  * Pure-Rust parsing of Float32/Float64/Int16 GeoTIFF / COG raster buffers with `ModelPixelScaleTag` and `ModelTiepointTag` mapping.
+  * Build and update in-memory spatial indexes containing active DTED tiles, Slippy RGB tiles, and GeoTIFF grids.
+  * Query the exact ground altitude for a geographic coordinate $(\phi, \lambda)$ in constant time $O(1)$ using tiered fallback (**DTED $\rightarrow$ RGB Tile $\rightarrow$ GeoTIFF**).
   * Generate the vertical terrain cut profile along a sequence of route points (vector of interpolated altitudes).
 * **Interfaces and Data Structures:**
   ```rust
@@ -167,40 +169,60 @@ High-performance indexer for Digital Terrain Elevation Data (DTED - Digital Terr
       pub lon_deg: i32,
   }
 
+  pub struct SlippyTileKey {
+      pub z: u32,
+      pub x: u32,
+      pub y: u32,
+  }
+
+  pub enum RgbElevationEncoding {
+      MapboxRgb,
+      Terrarium,
+      Custom { scale: f64, offset: f64 },
+  }
+
   pub struct DtedTile {
       pub origin_lat: i32,
       pub origin_lon: i32,
       pub num_rows: usize,
       pub num_cols: usize,
-      pub lat_spacing_arcsec: u32,
-      pub lon_spacing_arcsec: u32,
       pub elevations: Vec<i16>, // Altitudes in meters
   }
 
-  pub struct ProfilePoint {
-      pub distance_meters: f64,
-      pub ground_elevation: f64,
-      pub coords: LatLon,
+  pub struct RgbElevationTile {
+      pub key: SlippyTileKey,
+      pub width: usize,
+      pub height: usize,
+      pub elevations: Vec<f32>,
+  }
+
+  pub struct GeoTiffTile {
+      pub width: usize,
+      pub height: usize,
+      pub bounds_rad: (f64, f64, f64, f64),
+      pub elevations: Vec<Option<f32>>,
   }
 
   pub struct TerrainEngine {
       tiles: RefCell<LruCache<TileKey, DtedTile>>,
+      rgb_tiles: RefCell<LruCache<SlippyTileKey, RgbElevationTile>>,
+      geotiff_tiles: RefCell<Vec<GeoTiffTile>>,
   }
 
   impl TerrainEngine {
       pub fn new() -> Self;
       pub fn with_capacity(capacity: usize) -> Self;
       pub fn set_cache_capacity(&self, capacity: usize);
-      pub fn cache_size(&self) -> usize;
-      pub fn clear_cache(&self);
       pub fn load_tile(&mut self, data: &[u8]) -> Result<TileKey, TerrainError>;
-      pub fn unload_tile(&mut self, key: &TileKey) -> bool;
+      pub fn load_rgb_tile(&self, z: u32, x: u32, y: u32, width: usize, height: usize, rgba_buffer: &[u8], encoding: RgbElevationEncoding) -> Result<SlippyTileKey, TerrainError>;
+      pub fn load_geotiff_tile(&self, data: &[u8]) -> Result<(f64, f64, f64, f64), TerrainError>;
       pub fn get_elevation(&self, lat_deg: f64, lon_deg: f64) -> Result<f64, TerrainError>;
       pub fn get_elevation_rad(&self, lat_rad: f64, lon_rad: f64) -> Result<f64, TerrainError>;
       pub fn get_elevation_status(&self, lat_rad: f64, lon_rad: f64) -> Result<ElevationSample, TerrainError>;
       pub fn get_elevation_with_policy(&self, lat_rad: f64, lon_rad: f64, policy: UnknownTerrainPolicy) -> Result<Option<f64>, TerrainError>;
       pub fn get_vertical_profile(&self, route: &[LatLon], step_meters: f64) -> Result<Vec<ProfilePoint>, TerrainError>;
       pub fn calculate_clearance(&self, ...) -> Result<ClearanceResult, TerrainError>;
+      pub fn clear_all(&self);
   }
   ```
 * **Dependencies:** `Geodesy Engine` (to interpolate metric distances and convert angular resolutions).

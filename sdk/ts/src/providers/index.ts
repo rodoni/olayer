@@ -215,3 +215,6 @@ export { RasterTileSource } from "./raster";
 export { VectorTileSource } from "./vector";
 export type { VectorFeature, VectorGeometryType, VectorCoordinates, VectorTileSourceOptions } from "./vector";
 export { MapDataStack } from "./stack";
+export { RgbTerrainSource } from "./rgb_terrain";
+export type { RgbTerrainEncoding, RgbTerrainSourceOptions } from "./rgb_terrain";
+export { CogTerrainSource } from "./cog_terrain";

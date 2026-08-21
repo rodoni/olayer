@@ -175,14 +175,81 @@ impl WasmTerrainEngine {
         Ok(())
     }
 
-    /// Returns the current number of cached tiles.
+    /// Returns the current number of cached DTED tiles.
     pub fn cache_size(&self) -> usize {
         self.inner.cache_size()
     }
 
-    /// Clears all cached tiles.
+    /// Clears all cached DTED tiles.
     pub fn clear_cache(&self) {
         self.inner.clear_cache();
+    }
+
+    /// Loads a Web Mercator $(Z, X, Y)$ RGB elevation tile.
+    /// `encoding` must be `"Mapbox"` or `"Terrarium"`.
+    pub fn load_rgb_tile(
+        &self,
+        z: u32,
+        x: u32,
+        y: u32,
+        encoding: &str,
+        rgba_bytes: &[u8],
+        width: usize,
+        height: usize,
+    ) -> Result<(), JsValue> {
+        let enc = olayer_core::terrain::RgbElevationEncoding::from_str_name(encoding)
+            .ok_or_else(|| JsValue::from_str(&format!("Unknown RGB encoding: {encoding}")))?;
+        self.inner
+            .load_rgb_tile(z, x, y, width, height, rgba_bytes, enc)
+            .map(|_| ())
+            .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    /// Unloads an RGB elevation tile by its $(Z, X, Y)$ key.
+    pub fn unload_rgb_tile(&self, z: u32, x: u32, y: u32) -> bool {
+        let key = olayer_core::terrain::SlippyTileKey::new(z, x, y);
+        self.inner.unload_rgb_tile(&key)
+    }
+
+    /// Clears all cached RGB elevation tiles.
+    pub fn clear_rgb_cache(&self) {
+        self.inner.clear_rgb_cache();
+    }
+
+    /// Returns the current number of cached RGB elevation tiles.
+    pub fn rgb_cache_size(&self) -> usize {
+        self.inner.rgb_cache_size()
+    }
+
+    /// Loads a GeoTIFF / Cloud-Optimized GeoTIFF raster.
+    /// Returns the geographic bounding box `[min_lat_deg, min_lon_deg, max_lat_deg, max_lon_deg]`.
+    pub fn load_geotiff_tile(&self, data: &[u8]) -> Result<JsValue, JsValue> {
+        let bounds_rad = self
+            .inner
+            .load_geotiff_tile(data)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        let bounds_deg = [
+            bounds_rad.0.to_degrees(),
+            bounds_rad.1.to_degrees(),
+            bounds_rad.2.to_degrees(),
+            bounds_rad.3.to_degrees(),
+        ];
+        serde_wasm_bindgen::to_value(&bounds_deg).map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    /// Clears all loaded GeoTIFF rasters.
+    pub fn clear_geotiff_cache(&self) {
+        self.inner.clear_geotiff_cache();
+    }
+
+    /// Returns the number of loaded GeoTIFF rasters.
+    pub fn geotiff_cache_size(&self) -> usize {
+        self.inner.geotiff_cache_size()
+    }
+
+    /// Clears all loaded terrain sources (DTED, RGB tiles, GeoTIFFs).
+    pub fn clear_all_terrain(&self) {
+        self.inner.clear_all();
     }
 }
 
@@ -190,6 +257,26 @@ impl Default for WasmTerrainEngine {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Decodes Mapbox Terrain-RGB pixel value to elevation in meters.
+#[wasm_bindgen]
+pub fn decode_mapbox_rgb(r: u8, g: u8, b: u8) -> f64 {
+    olayer_core::terrain::decode_mapbox_rgb(r, g, b)
+}
+
+/// Decodes Mapzen / Nextzen Terrarium RGB pixel value to elevation in meters.
+#[wasm_bindgen]
+pub fn decode_terrarium_rgb(r: u8, g: u8, b: u8) -> f64 {
+    olayer_core::terrain::decode_terrarium_rgb(r, g, b)
+}
+
+/// Decodes an RGB pixel value to elevation in meters using the specified encoding ("Mapbox" or "Terrarium").
+#[wasm_bindgen]
+pub fn decode_rgb_elevation(r: u8, g: u8, b: u8, encoding: &str) -> Result<f64, JsValue> {
+    let enc = olayer_core::terrain::RgbElevationEncoding::from_str_name(encoding)
+        .ok_or_else(|| JsValue::from_str(&format!("Unknown RGB encoding: {encoding}")))?;
+    Ok(olayer_core::terrain::decode_rgb_elevation(r, g, b, enc))
 }
 
 /// WASM wrapper for InterpolationEngine.
@@ -1835,5 +1922,27 @@ mod unit_tests {
         let exported = ds.to_geojson().expect("To GeoJSON in WASM failed");
         assert!(exported.contains("TEST_TMA"));
         assert!(exported.contains("TST"));
+    }
+
+    #[test]
+    fn test_wasm_civil_terrain_pure() {
+        assert_eq!(decode_mapbox_rgb(0, 0, 0), -10000.0);
+        assert_eq!(decode_terrarium_rgb(128, 0, 0), 0.0);
+        assert_eq!(decode_rgb_elevation(128, 0, 0, "terrarium").unwrap(), 0.0);
+
+        let engine = WasmTerrainEngine::new();
+        let mut rgba_buf = Vec::new();
+        for _ in 0..4 {
+            // 500m in Mapbox RGB: [1, 154, 40, 255]
+            rgba_buf.extend_from_slice(&[1, 154, 40, 255]);
+        }
+        engine.load_rgb_tile(10, 512, 512, "mapbox", &rgba_buf, 2, 2).unwrap();
+        assert_eq!(engine.rgb_cache_size(), 1);
+
+        let elev = engine.get_elevation(-0.05, 0.05).unwrap();
+        assert!((elev - 500.0).abs() < 0.2);
+
+        assert!(engine.unload_rgb_tile(10, 512, 512));
+        assert_eq!(engine.rgb_cache_size(), 0);
     }
 }

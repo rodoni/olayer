@@ -258,16 +258,30 @@ pub fn get_cell_elevation(&self, row: usize, col: usize) -> i16
 pub fn new() -> Self
 pub fn with_capacity(capacity: usize) -> Self
 
-// Cache management
+// DTED Cache management
 pub fn set_cache_capacity(&self, capacity: usize)  // returns () directly; capacity == 0 panics
 pub fn cache_size(&self) -> usize
 pub fn clear_cache(&self)
 
-// Tile loading
+// DTED Tile loading
 pub fn load_tile(&mut self, data: &[u8]) -> Result<TileKey, TerrainError>
 pub fn unload_tile(&mut self, key: &TileKey) -> bool
 
-// Elevation queries (O(1) bilinear interpolation)
+// Civil RGB Elevation Tile loading (Mapbox RGB & Terrarium)
+pub fn load_rgb_tile(&self, z: u32, x: u32, y: u32, width: usize, height: usize, rgba_buffer: &[u8], encoding: RgbElevationEncoding) -> Result<SlippyTileKey, TerrainError>
+pub fn unload_rgb_tile(&self, key: &SlippyTileKey) -> bool
+pub fn clear_rgb_cache(&self)
+pub fn rgb_cache_size(&self) -> usize
+
+// Cloud-Optimized GeoTIFF raster loading
+pub fn load_geotiff_tile(&self, data: &[u8]) -> Result<(f64, f64, f64, f64), TerrainError> // returns bounds (min_lat, min_lon, max_lat, max_lon)
+pub fn clear_geotiff_cache(&self)
+pub fn geotiff_cache_size(&self) -> usize
+
+// Clear all sources (DTED, RGB, GeoTIFF)
+pub fn clear_all(&self)
+
+// Multi-Source Elevation queries (DTED -> RGB Tile -> GeoTIFF tiered fallback)
 pub fn get_elevation(&self, lat_deg: f64, lon_deg: f64) -> Result<f64, TerrainError>
 pub fn get_elevation_rad(&self, lat_rad: f64, lon_rad: f64) -> Result<f64, TerrainError>
 pub fn get_elevation_status(&self, lat_rad: f64, lon_rad: f64) -> Result<ElevationSample, TerrainError>
@@ -281,6 +295,15 @@ pub fn get_vertical_profile(&self, route: &[LatLon], step_meters: f64) -> Result
 
 `impl Default`.
 
+#### Free Functions (RGB Decoders)
+
+```rust
+pub fn decode_mapbox_rgb(r: u8, g: u8, b: u8) -> f64
+pub fn decode_terrarium_rgb(r: u8, g: u8, b: u8) -> f64
+pub fn decode_rgb_elevation(r: u8, g: u8, b: u8, encoding: RgbElevationEncoding) -> f64
+pub fn decode_rgba_buffer(rgba: &[u8], encoding: RgbElevationEncoding) -> Result<Vec<f32>, TerrainError>
+```
+
 #### Error
 
 ```rust
@@ -288,6 +311,8 @@ pub enum TerrainError {
     InvalidHeader(String),
     MalformedData(String),
     TileNotLoaded(i32, i32),  // (lat_deg, lon_deg)
+    RgbDecodeError(String),
+    GeoTiffError(String),
 }
 ```
 
@@ -515,9 +540,29 @@ All `#[wasm_bindgen]` structs. Errors returned as `JsValue` strings.
 ### 2.2 `WasmTerrainEngine`
 
 ```typescript
-// Coordinates are in decimal degrees for elevation queries
+// DTED Tile Operations
 load_tile(data: Uint8Array): WasmTileKey
 unload_tile(lat_deg: i32, lon_deg: i32): boolean
+set_cache_capacity(capacity: usize): void                 // throws if capacity == 0
+cache_size(): usize
+clear_cache(): void
+
+// RGB Tile Operations (Mapbox Terrain-RGB & Terrarium)
+load_rgb_tile(z: number, x: number, y: number, encoding: "Mapbox" | "Terrarium", rgba_bytes: Uint8Array, width: number, height: number): void
+unload_rgb_tile(z: number, x: number, y: number): boolean
+clear_rgb_cache(): void
+rgb_cache_size(): number
+
+// GeoTIFF Operations
+load_geotiff_tile(data: Uint8Array): [number, number, number, number] // [min_lat_deg, min_lon_deg, max_lat_deg, max_lon_deg]
+clear_geotiff_cache(): void
+geotiff_cache_size(): number
+
+// Global cleanup
+clear_all_terrain(): void
+free(): void                                              // MUST call to release WASM heap
+
+// Multi-Source Elevation Queries
 get_elevation(lat_deg: f64, lon_deg: f64): f64            // throws JsValue on error
 get_elevation_rad(lat_rad: f64, lon_rad: f64): f64        // throws JsValue on error
 get_elevation_status(lat_rad: f64, lon_rad: f64): JsValue // { elevation_meters: number | null }
@@ -526,10 +571,14 @@ calculate_clearance(lat_rad: f64, lon_rad: f64, aircraft_height_meters: f64, min
 get_vertical_profile(route_coords: Float64Array, step_meters: f64): Float64Array
   // Input: flat [lat0, lon0, h0, lat1, lon1, h1, ...] in degrees
   // Output: flat [dist0, elev0, lat0, lon0, h0, ...] — 5 values per point
-set_cache_capacity(capacity: usize): void                 // throws if capacity == 0
-cache_size(): usize
-clear_cache(): void
-free(): void                                              // MUST call to release WASM heap
+```
+
+#### WASM Free Functions (RGB Decoders)
+
+```typescript
+decode_mapbox_rgb(r: number, g: number, b: number): number
+decode_terrarium_rgb(r: number, g: number, b: number): number
+decode_rgb_elevation(r: number, g: number, b: number, encoding: string): number
 ```
 
 ### 2.3 `WasmInterpolationEngine`
@@ -689,6 +738,38 @@ class TerrainTileSource implements MapDataSource {
   getCacheStats?(): TileCacheStats
 }
 // Alias: export { TerrainTileSource as DataManager }
+
+type RgbTerrainEncoding = "Mapbox" | "Terrarium"
+interface RgbTerrainSourceOptions {
+  encoding?: RgbTerrainEncoding
+  tileSize?: number
+  maxTiles?: number
+  maxRetries?: number
+}
+
+class RgbTerrainSource implements MapDataSource {
+  id: string
+  readonly encoding: RgbTerrainEncoding
+  readonly tileSize: number
+  constructor(id: string, engine: WasmTerrainEngine, urlTemplate: string | ((z: number, x: number, y: number) => string), options?: RgbTerrainSourceOptions)
+  loadTile(x: number, y: number, z?: number, options?: TileRequestOptions): Promise<void>
+  unloadTile(x: number, y: number, z?: number): void
+  injectRgbaTile(z: number, x: number, y: number, rgbaBytes: Uint8Array, width?: number, height?: number): void
+  clearCache(): void
+  getElevationAt(latDeg: number, lonDeg: number): number | null
+  getCacheStats(): TileCacheStats
+}
+
+class CogTerrainSource implements MapDataSource {
+  id: string
+  constructor(id: string, engine: WasmTerrainEngine, url?: string)
+  loadTile(x?: number, y?: number, z?: number, options?: TileRequestOptions): Promise<void>
+  injectGeoTiff(data: Uint8Array): number[] // returns bounding box [minLat, minLon, maxLat, maxLon]
+  unloadTile(x?: number, y?: number, z?: number): void
+  clearCache(): void
+  getElevationAt(latDeg: number, lonDeg: number): number | null
+  getCacheStats(): TileCacheStats
+}
 
 class RasterTileSource implements MapDataSource {
   id: "wmts_raster"
@@ -1041,6 +1122,19 @@ int olayer_terrain_engine_load_tile(
     int32_t* out_lat_deg, int32_t* out_lon_deg);
 
 int olayer_terrain_engine_unload_tile(TerrainEngine* engine, int32_t lat_deg, int32_t lon_deg);
+
+int olayer_terrain_engine_load_rgb_tile(
+    TerrainEngine* engine, uint32_t z, uint32_t x, uint32_t y,
+    int encoding_code, const uint8_t* rgba_data, size_t rgba_len,
+    size_t width, size_t height); // encoding_code: 0 = MapboxRgb, 1 = Terrarium
+
+int olayer_terrain_engine_load_geotiff(
+    TerrainEngine* engine, const uint8_t* data, size_t length,
+    double* out_min_lat_deg, double* out_min_lon_deg,
+    double* out_max_lat_deg, double* out_max_lon_deg);
+
+int olayer_terrain_decode_mapbox_rgb(uint8_t r, uint8_t g, uint8_t b, double* out_elevation);
+int olayer_terrain_decode_terrarium_rgb(uint8_t r, uint8_t g, uint8_t b, double* out_elevation);
 
 int olayer_terrain_engine_get_elevation(
     TerrainEngine* engine, double lat_deg, double lon_deg, double* out_elevation);

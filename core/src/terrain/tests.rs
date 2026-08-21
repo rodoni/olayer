@@ -372,4 +372,235 @@ fn test_terrain_error_display() {
         TerrainError::TileNotLoaded(-23, -48).to_string(),
         "DTED tile not loaded for coordinate (-23, -48)"
     );
+    assert_eq!(
+        TerrainError::RgbDecodeError("fail".to_string()).to_string(),
+        "RGB terrain decode error: fail"
+    );
+    assert_eq!(
+        TerrainError::GeoTiffError("bad tiff".to_string()).to_string(),
+        "GeoTIFF terrain error: bad tiff"
+    );
+}
+
+#[test]
+fn test_mapbox_rgb_decoding() {
+    use crate::terrain::rgb_decoder::{decode_mapbox_rgb, decode_rgb_elevation, RgbElevationEncoding};
+
+    // Sea level: height = 0m -> -10000 + (R*65536 + G*256 + B)*0.1 = 0
+    // (R*65536 + G*256 + B) = 100,000 -> R = 1, G = 134, B = 160
+    let elev_0 = decode_mapbox_rgb(1, 134, 160);
+    assert!((elev_0 - 0.0).abs() < 0.1);
+
+    // Everest peak (~8848.8m) -> 18848.8 * 10 = 188488 -> R = 2, G = 224, B = 72
+    let elev_everest = decode_mapbox_rgb(2, 224, 72);
+    assert!((elev_everest - 8848.8).abs() < 0.2);
+
+    // Marianna Trench (-10000m) -> R = 0, G = 0, B = 0
+    let elev_trench = decode_mapbox_rgb(0, 0, 0);
+    assert!((elev_trench - (-10000.0)).abs() < 1e-6);
+
+    let elev_via_enum = decode_rgb_elevation(1, 134, 160, RgbElevationEncoding::MapboxRgb);
+    assert!((elev_via_enum - 0.0).abs() < 0.1);
+}
+
+#[test]
+fn test_terrarium_rgb_decoding() {
+    use crate::terrain::rgb_decoder::{decode_terrarium_rgb, decode_rgb_elevation, RgbElevationEncoding};
+
+    // Sea level (0m) in Terrarium: (R*256 + G + B/256) = 32768 -> R = 128, G = 0, B = 0
+    let elev_0 = decode_terrarium_rgb(128, 0, 0);
+    assert!((elev_0 - 0.0).abs() < 1e-6);
+
+    // +1000m: 33768 -> R = 131, G = 232, B = 0
+    let elev_1000 = decode_terrarium_rgb(131, 232, 0);
+    assert!((elev_1000 - 1000.0).abs() < 1e-3);
+
+    let elev_via_enum = decode_rgb_elevation(128, 0, 0, RgbElevationEncoding::Terrarium);
+    assert!((elev_via_enum - 0.0).abs() < 1e-6);
+}
+
+#[test]
+fn test_rgb_tile_bounds_and_elevation() {
+    use crate::terrain::rgb_decoder::RgbElevationEncoding;
+    use crate::terrain::rgb_tile::{RgbElevationTile, SlippyTileKey};
+
+    // Tile at z=10, x=512, y=512 (Center of world around equator and prime meridian)
+    let key = SlippyTileKey::new(10, 512, 512);
+    let (min_lat, min_lon, max_lat, max_lon) = key.bounds_rad();
+
+    assert!(max_lat > min_lat);
+    assert!(max_lon > min_lon);
+    assert!(min_lon.abs() < 0.01);
+
+    // Create a 2x2 RGBA buffer with constant 500m elevation
+    // 500m Mapbox RGB: 10500 * 10 = 105000 -> R = 1, G = 154, B = 40
+    let mut rgba_buf = Vec::new();
+    for _ in 0..4 {
+        rgba_buf.extend_from_slice(&[1, 154, 40, 255]);
+    }
+
+    let tile = RgbElevationTile::from_rgba(key, 2, 2, &rgba_buf, RgbElevationEncoding::MapboxRgb).unwrap();
+    assert_eq!(tile.width, 2);
+    assert_eq!(tile.height, 2);
+
+    let mid_lat = (min_lat + max_lat) / 2.0;
+    let mid_lon = (min_lon + max_lon) / 2.0;
+
+    let elev = tile.get_elevation_rad(mid_lat, mid_lon);
+    assert!(elev.is_some());
+    assert!((elev.unwrap() - 500.0).abs() < 0.2);
+
+    // Outside the tile should return None
+    assert!(tile.get_elevation_rad(1.0, 1.0).is_none());
+}
+
+fn create_mock_geotiff_float32(width: u32, height: u32, min_lon_deg: f64, max_lat_deg: f64, pixel_scale_deg: f64, elevation_val: f32) -> Vec<u8> {
+    let mut bytes = Vec::new();
+
+    // TIFF Header (8 bytes)
+    bytes.extend_from_slice(b"II"); // Little-endian
+    bytes.extend_from_slice(&42u16.to_le_bytes());
+    bytes.extend_from_slice(&8u32.to_le_bytes()); // First IFD at byte 8
+
+    // IFD: 7 entries (2 + 7 * 12 + 4 = 90 bytes -> ends at 98)
+    bytes.extend_from_slice(&7u16.to_le_bytes());
+
+    let scale_offset = 120u32;
+    let tiepoint_offset = scale_offset + 24; // 144
+    let raster_offset = tiepoint_offset + 48; // 192
+
+    // Tag 256: ImageWidth (LONG)
+    bytes.extend_from_slice(&256u16.to_le_bytes());
+    bytes.extend_from_slice(&4u16.to_le_bytes());
+    bytes.extend_from_slice(&1u32.to_le_bytes());
+    bytes.extend_from_slice(&width.to_le_bytes());
+
+    // Tag 257: ImageLength (LONG)
+    bytes.extend_from_slice(&257u16.to_le_bytes());
+    bytes.extend_from_slice(&4u16.to_le_bytes());
+    bytes.extend_from_slice(&1u32.to_le_bytes());
+    bytes.extend_from_slice(&height.to_le_bytes());
+
+    // Tag 258: BitsPerSample (SHORT)
+    bytes.extend_from_slice(&258u16.to_le_bytes());
+    bytes.extend_from_slice(&3u16.to_le_bytes());
+    bytes.extend_from_slice(&1u32.to_le_bytes());
+    bytes.extend_from_slice(&32u16.to_le_bytes());
+    bytes.extend_from_slice(&0u16.to_le_bytes());
+
+    // Tag 273: StripOffsets (LONG)
+    bytes.extend_from_slice(&273u16.to_le_bytes());
+    bytes.extend_from_slice(&4u16.to_le_bytes());
+    bytes.extend_from_slice(&1u32.to_le_bytes());
+    bytes.extend_from_slice(&raster_offset.to_le_bytes());
+
+    // Tag 339: SampleFormat (SHORT: 3 = IEEE float)
+    bytes.extend_from_slice(&339u16.to_le_bytes());
+    bytes.extend_from_slice(&3u16.to_le_bytes());
+    bytes.extend_from_slice(&1u32.to_le_bytes());
+    bytes.extend_from_slice(&3u16.to_le_bytes());
+    bytes.extend_from_slice(&0u16.to_le_bytes());
+
+    // Tag 33550: ModelPixelScaleTag (DOUBLE: 3 doubles)
+    bytes.extend_from_slice(&33550u16.to_le_bytes());
+    bytes.extend_from_slice(&12u16.to_le_bytes());
+    bytes.extend_from_slice(&3u32.to_le_bytes());
+    bytes.extend_from_slice(&scale_offset.to_le_bytes());
+
+    // Tag 33922: ModelTiepointTag (DOUBLE: 6 doubles)
+    bytes.extend_from_slice(&33922u16.to_le_bytes());
+    bytes.extend_from_slice(&12u16.to_le_bytes());
+    bytes.extend_from_slice(&6u32.to_le_bytes());
+    bytes.extend_from_slice(&tiepoint_offset.to_le_bytes());
+
+    // Next IFD = 0
+    bytes.extend_from_slice(&0u32.to_le_bytes());
+
+    // Pad up to scale_offset (120)
+    while bytes.len() < scale_offset as usize {
+        bytes.push(0);
+    }
+
+    // Scale data: [pixel_scale, pixel_scale, 0.0]
+    bytes.extend_from_slice(&pixel_scale_deg.to_le_bytes());
+    bytes.extend_from_slice(&pixel_scale_deg.to_le_bytes());
+    bytes.extend_from_slice(&0.0_f64.to_le_bytes());
+
+    // Pad up to tiepoint_offset (144)
+    while bytes.len() < tiepoint_offset as usize {
+        bytes.push(0);
+    }
+
+    // Tiepoint data: [0.0, 0.0, 0.0, min_lon, max_lat, 0.0]
+    bytes.extend_from_slice(&0.0_f64.to_le_bytes());
+    bytes.extend_from_slice(&0.0_f64.to_le_bytes());
+    bytes.extend_from_slice(&0.0_f64.to_le_bytes());
+    bytes.extend_from_slice(&min_lon_deg.to_le_bytes());
+    bytes.extend_from_slice(&max_lat_deg.to_le_bytes());
+    bytes.extend_from_slice(&0.0_f64.to_le_bytes());
+
+    // Pad up to raster_offset (192)
+    while bytes.len() < raster_offset as usize {
+        bytes.push(0);
+    }
+
+    // Raster data
+    for _ in 0..(width * height) {
+        bytes.extend_from_slice(&elevation_val.to_le_bytes());
+    }
+
+    bytes
+}
+
+#[test]
+fn test_geotiff_parsing_and_elevation() {
+    use crate::terrain::geotiff::GeoTiffTile;
+
+    let geotiff_bytes = create_mock_geotiff_float32(4, 4, 10.0, 50.0, 0.25, 750.5);
+    let tile = GeoTiffTile::from_bytes(&geotiff_bytes).expect("GeoTIFF parse failed");
+
+    assert_eq!(tile.width, 4);
+    assert_eq!(tile.height, 4);
+
+    let (min_lat, min_lon, max_lat, max_lon) = tile.bounds_rad;
+    assert!((min_lon.to_degrees() - 10.0).abs() < 1e-6);
+    assert!((max_lon.to_degrees() - 11.0).abs() < 1e-6);
+    assert!((max_lat.to_degrees() - 50.0).abs() < 1e-6);
+    assert!((min_lat.to_degrees() - 49.0).abs() < 1e-6);
+
+    let elev = tile.get_elevation_rad(49.5_f64.to_radians(), 10.5_f64.to_radians());
+    assert!(elev.is_some());
+    assert!((elev.unwrap() - 750.5).abs() < 1e-3);
+}
+
+#[test]
+fn test_multi_source_terrain_engine() {
+    use crate::terrain::rgb_decoder::RgbElevationEncoding;
+
+    let engine = TerrainEngine::new();
+
+    // 1. Load an RGB tile covering z=10, x=512, y=512 (lat ~0.0, lon ~0.0)
+    let mut rgba_buf = Vec::new();
+    for _ in 0..4 {
+        // Mapbox RGB 1200m: 11200 * 10 = 112000 -> R = 1, G = 181, B = 128
+        rgba_buf.extend_from_slice(&[1, 181, 128, 255]);
+    }
+    engine.load_rgb_tile(10, 512, 512, 2, 2, &rgba_buf, RgbElevationEncoding::MapboxRgb).unwrap();
+    assert_eq!(engine.rgb_cache_size(), 1);
+
+    // 2. Load a GeoTIFF covering lat 49..50, lon 10..11 with 820m elevation
+    let geotiff_bytes = create_mock_geotiff_float32(2, 2, 10.0, 50.0, 0.5, 820.0);
+    engine.load_geotiff_tile(&geotiff_bytes).unwrap();
+    assert_eq!(engine.geotiff_cache_size(), 1);
+
+    // Query RGB tile coverage at -0.05 lat, 0.05 lon (within tile bounds)
+    let elev_rgb = engine.get_elevation(-0.05, 0.05).unwrap();
+    assert!((elev_rgb - 1200.0).abs() < 0.5);
+
+    // Query GeoTIFF coverage at 49.5 lat, 10.5 lon
+    let elev_gt = engine.get_elevation(49.5, 10.5).unwrap();
+    assert!((elev_gt - 820.0).abs() < 0.5);
+
+    // Query unloaded area
+    assert!(engine.get_elevation(80.0, 80.0).is_err());
 }

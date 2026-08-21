@@ -142,6 +142,43 @@ int olayer_terrain_engine_load_tile(TerrainEngine *engine,
 int olayer_terrain_engine_unload_tile(TerrainEngine *engine, int32_t lat_deg, int32_t lon_deg);
 
 /**
+ * Loads and registers a Web Mercator (Z, X, Y) RGB elevation tile.
+ * encoding_code: 0 = MapboxRgb, 1 = Terrarium.
+ * Returns 0 on success, or a negative code on error.
+ */
+int olayer_terrain_engine_load_rgb_tile(TerrainEngine *engine,
+                                        uint32_t z,
+                                        uint32_t x,
+                                        uint32_t y,
+                                        int encoding_code,
+                                        const uint8_t *rgba_data,
+                                        uintptr_t rgba_len,
+                                        uintptr_t width,
+                                        uintptr_t height);
+
+/**
+ * Loads a GeoTIFF / Cloud-Optimized GeoTIFF raster.
+ * Returns 0 on success, or negative error.
+ */
+int olayer_terrain_engine_load_geotiff(TerrainEngine *engine,
+                                       const uint8_t *data,
+                                       uintptr_t length,
+                                       double *out_min_lat_deg,
+                                       double *out_min_lon_deg,
+                                       double *out_max_lat_deg,
+                                       double *out_max_lon_deg);
+
+/**
+ * Decodes Mapbox Terrain-RGB pixel value to elevation in meters.
+ */
+int olayer_terrain_decode_mapbox_rgb(uint8_t r, uint8_t g, uint8_t b, double *out_elevation);
+
+/**
+ * Decodes Mapzen / Nextzen Terrarium RGB pixel value to elevation in meters.
+ */
+int olayer_terrain_decode_terrarium_rgb(uint8_t r, uint8_t g, uint8_t b, double *out_elevation);
+
+/**
  * Resolves elevation at coordinate degrees. Returns 0 on success, negative error.
  */
 int olayer_terrain_engine_get_elevation(TerrainEngine *engine,

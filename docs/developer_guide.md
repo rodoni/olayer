@@ -245,33 +245,33 @@ require the active projection; 3D operates directly in ECEF.
 ### 3.4 Terrain Engine (`core::terrain`)
 
 ```rust
-use olayer_core::terrain::{TerrainEngine, TileKey, ProfilePoint};
+use olayer_core::terrain::{TerrainEngine, TileKey, ProfilePoint, RgbElevationEncoding, SlippyTileKey};
 
-let mut engine = TerrainEngine::new();
-// or: let mut engine = TerrainEngine::with_capacity(128); // custom cache
+let engine = TerrainEngine::new();
+// or: let engine = TerrainEngine::with_capacity(128); // custom cache
 
-// Cache management
+// 1. DTED Cache & Loading (Level 0/1/2)
 engine.set_cache_capacity(128);   // resize LRU cache
 let cached: usize = engine.cache_size();
-engine.clear_cache();
-
-// Load a DTED buffer (Level 0/1/2)
 let tile_key: TileKey = engine.load_tile(&dted_bytes)?;
-//   tile_key.lat_deg: i32, tile_key.lon_deg: i32
-
-// O(1) elevation lookup (bilinear interpolation)
-let elevation: f64 = engine.get_elevation(lat_deg, lon_deg)?;     // degrees
-let elevation: f64 = engine.get_elevation_rad(lat_rad, lon_rad)?; // radians
-
-// Unload a tile
 engine.unload_tile(&tile_key);
 
-// Vertical profile along a route
-let profile: Vec<ProfilePoint> = engine.get_vertical_profile(&route_points, step_meters)?;
-//   ProfilePoint { distance_meters, ground_elevation, coords: LatLon }
+// 2. Civil RGB Elevation Tile Loading (Mapbox Terrain-RGB or Nextzen Terrarium)
+// Takes Web Mercator (z, x, y), raster dimensions, and RGBA pixel buffer
+let slippy_key: SlippyTileKey = engine.load_rgb_tile(
+    10, 512, 512, 256, 256, &rgba_bytes, RgbElevationEncoding::MapboxRgb
+)?;
+engine.unload_rgb_tile(&slippy_key);
+let rgb_cached: usize = engine.rgb_cache_size();
 
-// TileKey is re-exported at terrain module level
-use olayer_core::terrain::TileKey;
+// 3. Cloud-Optimized GeoTIFF / GeoTIFF Loading
+// Parses ModelPixelScaleTag, ModelTiepointTag, Float32/Float64 rasters, and GDAL_NODATA
+let bounds_rad = engine.load_geotiff_tile(&geotiff_bytes)?; // (min_lat, min_lon, max_lat, max_lon)
+let geotiff_count: usize = engine.geotiff_cache_size();
+
+// 4. Multi-Source Tiered Elevation Queries (DTED -> RGB Tile -> GeoTIFF)
+let elevation: f64 = engine.get_elevation(lat_deg, lon_deg)?;     // degrees
+let elevation: f64 = engine.get_elevation_rad(lat_rad, lon_rad)?; // radians
 
 // Operational status and MSAW policy
 use olayer_core::terrain::UnknownTerrainPolicy;
@@ -283,17 +283,22 @@ let clearance = engine.calculate_clearance(
     minimum_clearance_meters,
     UnknownTerrainPolicy::Propagate,
 )?;
-// clearance.state: Safe, Warning, or Unknown
+
+// Vertical profile along a route
+let profile: Vec<ProfilePoint> = engine.get_vertical_profile(&route_points, step_meters)?;
+//   ProfilePoint { distance_meters, ground_elevation, coords: LatLon }
+
+// Clear caches
+engine.clear_all(); // clears DTED, RGB, and GeoTIFFs
 ```
 
-**TerrainError variants**: `InvalidHeader`, `MalformedData`, `TileNotLoaded(lat_deg, lon_deg)`.
+**TerrainError variants**: `InvalidHeader`, `MalformedData`, `TileNotLoaded(lat_deg, lon_deg)`, `RgbDecodeError(String)`, `GeoTiffError(String)`.
 
-The DTED parser supports:
-- Levels 0, 1, 2 (121, 1201, 3601 samples per column)
-- Both DMS (`230000S`) and decimal-degree (`23.500S`) UHL origin formats
-- Null sentinel `-32767` is `None` in status-aware APIs; legacy elevation methods retain `0.0 m` compatibility behavior
-- Column-major internal storage with block sentinel (`0xAA`) verification
-- Floating-point boundary snap via `tile_key_floor` (1e-12 tolerance)
+The engine supports:
+- Military DTED Levels 0, 1, 2 (121, 1201, 3601 samples per column)
+- Civil Mapbox Terrain-RGB ($0.1\text{m}$ resolution) and Mapzen/Nextzen Terrarium ($1.0\text{m}$ resolution)
+- Cloud-Optimized GeoTIFF (COG) and standard GeoTIFF rasters (Float32, Float64, Int16)
+- Transparent tiered fallback: DTED $\rightarrow$ Web Mercator RGB tiles $\rightarrow$ GeoTIFF grids
 
 ### 3.5 Symbol Registry (`core::symbol_registry`)
 
@@ -607,12 +612,29 @@ controller.layerManager.reorderLayer("osm-base", 0);
 ```typescript
 const stack = new MapDataStack();
 
-// Terrain — urlResolver receives (lat, lon) in degrees
+// 1. Military DTED Terrain — urlResolver receives (lat, lon) in degrees
 const terrainSource = new TerrainTileSource(
   controller.terrainEngine,
   (lat, lon) => `/api/dted/${lat}/${lon}.dt1`
 );
 stack.registerSource(terrainSource);
+
+// 2. Civil Mapbox Terrain-RGB or Terrarium Tiles
+const rgbTerrainSource = new RgbTerrainSource(
+  "rgb-terrain",
+  controller.terrainEngine,
+  (z, x, y) => `https://api.mapbox.com/v4/mapbox.terrain-rgb/${z}/${x}/${y}.pngraw?access_token=...`,
+  { encoding: "Mapbox", tileSize: 256 }
+);
+stack.registerSource(rgbTerrainSource);
+
+// 3. Cloud-Optimized GeoTIFF (COG) Elevation Source
+const cogTerrainSource = new CogTerrainSource(
+  "cog-terrain",
+  controller.terrainEngine,
+  "https://example.com/rasters/elevation_dsm.tif"
+);
+stack.registerSource(cogTerrainSource);
 
 // Raster (WMTS/OSM)
 const rasterSource = new RasterTileSource(gl);

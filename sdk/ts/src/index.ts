@@ -15,6 +15,9 @@ export {
   WasmAeronauticalDataset,
   parse_aixm_51,
   parse_geojson_aviation,
+  decode_mapbox_rgb,
+  decode_terrarium_rgb,
+  decode_rgb_elevation,
 } from "olayer-wasm";
 
 // Export SDK Controller
@@ -26,7 +29,8 @@ export { Layer, LayerManager, TileLayer, VectorTileLayer, AeronauticalLayer } fr
 export type { AeronauticalLayerOptions } from "./layers";
 
 // Export Data Managers and Providers
-export { DataManager, TerrainTileSource } from "./providers";
+export { DataManager, TerrainTileSource, RgbTerrainSource, CogTerrainSource } from "./providers";
+export type { RgbTerrainEncoding, RgbTerrainSourceOptions } from "./providers";
 export { RasterTileSource } from "./providers/raster";
 export { VectorTileSource } from "./providers/vector";
 export type { VectorFeature, VectorGeometryType, VectorCoordinates, VectorTileSourceOptions } from "./providers/vector";

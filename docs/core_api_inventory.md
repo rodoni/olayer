@@ -9,7 +9,7 @@ intentionally module-level; signatures remain in `docs/api_reference.md`.
 | `geodesy` solvers | Exposed through core operations | Exposed through profile/interpolation operations | No standalone solver object at either boundary |
 | `camera` | Exposed through `WasmCameraState` and projection matrices | Exposed through native controller APIs | Shared camera fixtures remain a follow-up |
 | `projections` | Exposed through `WasmProjection` | Exposed through native controller APIs | All angles are radians |
-| `terrain` tile/cache/elevation | Exposed through `WasmTerrainEngine` | Exposed through terrain functions | Status and MSAW APIs are exposed |
+| `terrain` tile/cache/elevation | Exposed through `WasmTerrainEngine` | Exposed through terrain functions | DTED, Mapbox/Terrarium RGB tiles, and COG/GeoTIFF ingestion, Status and MSAW APIs |
 | `terrain` profiles | Exposed as flat arrays/status JSON | Exposed through allocated `C_ProfilePoint` arrays | Matching free functions are required |
 | `interpolator` target state | Exposed through `WasmInterpolationEngine` | Exposed through update/remove functions | IDs are copied into boundary-owned allocations |
 | `interpolator` prediction status | Exposed as JSON batch | Exposed as quality integer | Quality values are documented in `docs/conformance.md` |

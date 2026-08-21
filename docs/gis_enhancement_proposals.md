@@ -396,7 +396,7 @@ Olayer needs an **8-Octant Multi-Leader Resolver with Force-Directed Relaxation*
 | **GIS-PROP-003** | `sdk::tools` | Tactical Aeronautical Measurement Tools (RBL, CRSR, PPL, Holding) | ✅ **Completed** (WASM & TS SDK) | **P1** | Phase 9 |
 | **GIS-PROP-008** | `sdk::renderer` | 8-Octant Force-Directed Label Anti-Cluttering Engine | 🟡 **Partially Foundational** (4-quadrant greedy in `cpu.ts`) | **P1** | Phase 9 |
 | **GIS-PROP-004** | `core::aeronautical` | Aeronautical Data Ingestion (AIXM 5.1 & GeoJSON-Aviation) | ✅ **Completed** (Core, WASM, C-FFI, TS SDK) | **P1** | Phase 9 |
-| **GIS-PROP-005** | `core::terrain` | Civil Cloud Terrain Ingestion (COG & Mapbox RGB Elevation) | ⏳ **Pending** | **P2** | Phase 10 |
+| **GIS-PROP-005** | `core::terrain` | Civil Cloud Terrain Ingestion (COG & Mapbox RGB Elevation) | ✅ **Completed** (Core, WASM, C-FFI, TS SDK) | **P2** | Phase 10 |
 | **GIS-PROP-007** | `sdk::renderer` | 3D Volumetric Airspace & Trajectory Ribbon GPU Shaders | ⏳ **Pending** | **P2** | Phase 10 |
 | **GIS-PROP-006** | `sdk::layers` | Meteorological Overlays (Radar dBZ, Wind Barbs & Isolines) | ⏳ **Pending** | **P2** | Phase 11 |
 

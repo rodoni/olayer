@@ -198,6 +198,104 @@ pub unsafe extern "C" fn olayer_terrain_engine_unload_tile(
     }
 }
 
+/// Loads and registers a Web Mercator (Z, X, Y) RGB elevation tile.
+/// encoding_code: 0 = MapboxRgb, 1 = Terrarium.
+/// Returns 0 on success, or a negative code on error.
+#[no_mangle]
+pub unsafe extern "C" fn olayer_terrain_engine_load_rgb_tile(
+    engine: *mut TerrainEngine,
+    z: u32,
+    x: u32,
+    y: u32,
+    encoding_code: c_int,
+    rgba_data: *const u8,
+    rgba_len: usize,
+    width: usize,
+    height: usize,
+) -> c_int {
+    if engine.is_null() || rgba_data.is_null() {
+        return -1;
+    }
+    let encoding = match encoding_code {
+        0 => olayer_core::terrain::RgbElevationEncoding::MapboxRgb,
+        1 => olayer_core::terrain::RgbElevationEncoding::Terrarium,
+        _ => return -1,
+    };
+    let data_slice = std::slice::from_raw_parts(rgba_data, rgba_len);
+    let engine_ref = &*engine;
+    match engine_ref.load_rgb_tile(z, x, y, width, height, data_slice, encoding) {
+        Ok(_) => 0,
+        Err(_) => -2,
+    }
+}
+
+/// Loads a GeoTIFF / Cloud-Optimized GeoTIFF raster.
+/// Returns 0 on success, or negative error.
+#[no_mangle]
+pub unsafe extern "C" fn olayer_terrain_engine_load_geotiff(
+    engine: *mut TerrainEngine,
+    data: *const u8,
+    length: usize,
+    out_min_lat_deg: *mut f64,
+    out_min_lon_deg: *mut f64,
+    out_max_lat_deg: *mut f64,
+    out_max_lon_deg: *mut f64,
+) -> c_int {
+    if engine.is_null() || data.is_null() {
+        return -1;
+    }
+    let data_slice = std::slice::from_raw_parts(data, length);
+    let engine_ref = &*engine;
+    match engine_ref.load_geotiff_tile(data_slice) {
+        Ok(bounds_rad) => {
+            if !out_min_lat_deg.is_null() {
+                *out_min_lat_deg = bounds_rad.0.to_degrees();
+            }
+            if !out_min_lon_deg.is_null() {
+                *out_min_lon_deg = bounds_rad.1.to_degrees();
+            }
+            if !out_max_lat_deg.is_null() {
+                *out_max_lat_deg = bounds_rad.2.to_degrees();
+            }
+            if !out_max_lon_deg.is_null() {
+                *out_max_lon_deg = bounds_rad.3.to_degrees();
+            }
+            0
+        }
+        Err(_) => -2,
+    }
+}
+
+/// Decodes Mapbox Terrain-RGB pixel value to elevation in meters.
+#[no_mangle]
+pub unsafe extern "C" fn olayer_terrain_decode_mapbox_rgb(
+    r: u8,
+    g: u8,
+    b: u8,
+    out_elevation: *mut f64,
+) -> c_int {
+    if out_elevation.is_null() {
+        return -1;
+    }
+    *out_elevation = olayer_core::terrain::decode_mapbox_rgb(r, g, b);
+    0
+}
+
+/// Decodes Mapzen / Nextzen Terrarium RGB pixel value to elevation in meters.
+#[no_mangle]
+pub unsafe extern "C" fn olayer_terrain_decode_terrarium_rgb(
+    r: u8,
+    g: u8,
+    b: u8,
+    out_elevation: *mut f64,
+) -> c_int {
+    if out_elevation.is_null() {
+        return -1;
+    }
+    *out_elevation = olayer_core::terrain::decode_terrarium_rgb(r, g, b);
+    0
+}
+
 /// Resolves elevation at coordinate degrees. Returns 0 on success, negative error.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_terrain_engine_get_elevation(
@@ -1934,6 +2032,50 @@ mod tests {
             assert!(out_len > 50);
 
             olayer_aeronautical_dataset_free(ds);
+        }
+    }
+
+    #[test]
+    fn test_c_ffi_civil_terrain() {
+        unsafe {
+            let mut elev_mb = 0.0;
+            let r1 = olayer_terrain_decode_mapbox_rgb(1, 134, 160, &mut elev_mb);
+            assert_eq!(r1, 0);
+            assert!((elev_mb - 0.0).abs() < 0.1);
+
+            let mut elev_terr = 0.0;
+            let r2 = olayer_terrain_decode_terrarium_rgb(128, 0, 0, &mut elev_terr);
+            assert_eq!(r2, 0);
+            assert!((elev_terr - 0.0).abs() < 1e-6);
+
+            let engine = olayer_terrain_engine_create();
+            assert!(!engine.is_null());
+
+            let mut rgba_buf = Vec::new();
+            for _ in 0..4 {
+                // 500m in Mapbox RGB: [1, 154, 40, 255]
+                rgba_buf.extend_from_slice(&[1, 154, 40, 255]);
+            }
+
+            let r3 = olayer_terrain_engine_load_rgb_tile(
+                engine,
+                10,
+                512,
+                512,
+                0, // 0 = MapboxRgb
+                rgba_buf.as_ptr(),
+                rgba_buf.len(),
+                2,
+                2,
+            );
+            assert_eq!(r3, 0);
+
+            let mut out_elev = 0.0;
+            let r4 = olayer_terrain_engine_get_elevation(engine, -0.05, 0.05, &mut out_elev);
+            assert_eq!(r4, 0);
+            assert!((out_elev - 500.0).abs() < 0.2);
+
+            olayer_terrain_engine_free(engine);
         }
     }
 }

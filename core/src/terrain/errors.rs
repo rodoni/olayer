@@ -9,6 +9,10 @@ pub enum TerrainError {
     MalformedData(String),
     /// The requested tile has not been loaded into the engine.
     TileNotLoaded(i32, i32),
+    /// An error occurred decoding an RGB/Terrarium elevation tile.
+    RgbDecodeError(String),
+    /// An error occurred parsing a GeoTIFF / Cloud-Optimized GeoTIFF raster.
+    GeoTiffError(String),
 }
 
 impl fmt::Display for TerrainError {
@@ -19,6 +23,8 @@ impl fmt::Display for TerrainError {
             TerrainError::TileNotLoaded(lat, lon) => {
                 write!(f, "DTED tile not loaded for coordinate ({lat}, {lon})")
             }
+            TerrainError::RgbDecodeError(err) => write!(f, "RGB terrain decode error: {err}"),
+            TerrainError::GeoTiffError(err) => write!(f, "GeoTIFF terrain error: {err}"),
         }
     }
 }

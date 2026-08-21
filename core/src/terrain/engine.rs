@@ -6,9 +6,12 @@ use crate::geodesy::coords::LatLon;
 use crate::geodesy::ellipsoid::Ellipsoid;
 use crate::geodesy::solvers::{GeodeticSolver, VincentySolver};
 use crate::terrain::errors::TerrainError;
+use crate::terrain::geotiff::GeoTiffTile;
+use crate::terrain::rgb_decoder::RgbElevationEncoding;
+use crate::terrain::rgb_tile::{RgbElevationTile, SlippyTileKey};
 use crate::terrain::tile::DtedTile;
 
-/// Default maximum number of DTED tiles kept in memory.
+/// Default maximum number of DTED and RGB tiles kept in memory.
 const DEFAULT_TILE_CAPACITY: usize = 64;
 
 /// Tile lookup key based on integer degrees.
@@ -58,10 +61,12 @@ pub struct ClearanceResult {
     pub state: MsawState,
 }
 
-/// DTED terrain engine supporting O(1) elevation lookups and
-/// vertical profile generation.
+/// Multi-source terrain elevation engine supporting DTED, Mapbox/Terrarium RGB tiles,
+/// and Cloud-Optimized GeoTIFFs (COG) with sub-grid bilinear interpolation.
 pub struct TerrainEngine {
     tiles: RefCell<LruCache<TileKey, DtedTile>>,
+    rgb_tiles: RefCell<LruCache<SlippyTileKey, RgbElevationTile>>,
+    geotiff_tiles: RefCell<Vec<GeoTiffTile>>,
 }
 
 impl TerrainEngine {
@@ -82,6 +87,8 @@ impl TerrainEngine {
             .expect("terrain tile cache capacity must be non-zero");
         Self {
             tiles: RefCell::new(LruCache::new(cap)),
+            rgb_tiles: RefCell::new(LruCache::new(cap)),
+            geotiff_tiles: RefCell::new(Vec::new()),
         }
     }
 
@@ -95,18 +102,51 @@ impl TerrainEngine {
         let cap = NonZeroUsize::new(capacity)
             .expect("terrain tile cache capacity must be non-zero");
         self.tiles.borrow_mut().resize(cap);
+        self.rgb_tiles.borrow_mut().resize(cap);
     }
 
-    /// Returns the current number of cached tiles.
+    /// Returns the current number of cached DTED tiles.
     #[inline]
     pub fn cache_size(&self) -> usize {
         self.tiles.borrow().len()
     }
 
-    /// Clears all cached tiles.
+    /// Returns the current number of cached RGB elevation tiles.
+    #[inline]
+    pub fn rgb_cache_size(&self) -> usize {
+        self.rgb_tiles.borrow().len()
+    }
+
+    /// Returns the current number of registered GeoTIFF rasters.
+    #[inline]
+    pub fn geotiff_cache_size(&self) -> usize {
+        self.geotiff_tiles.borrow().len()
+    }
+
+    /// Clears all cached DTED tiles.
     #[inline]
     pub fn clear_cache(&self) {
         self.tiles.borrow_mut().clear();
+    }
+
+    /// Clears all cached RGB elevation tiles.
+    #[inline]
+    pub fn clear_rgb_cache(&self) {
+        self.rgb_tiles.borrow_mut().clear();
+    }
+
+    /// Clears all registered GeoTIFF rasters.
+    #[inline]
+    pub fn clear_geotiff_cache(&self) {
+        self.geotiff_tiles.borrow_mut().clear();
+    }
+
+    /// Clears all terrain sources (DTED, RGB tiles, GeoTIFFs).
+    #[inline]
+    pub fn clear_all(&self) {
+        self.clear_cache();
+        self.clear_rgb_cache();
+        self.clear_geotiff_cache();
     }
 
     /// Parses a raw DTED buffer and registers the resulting tile.
@@ -119,6 +159,39 @@ impl TerrainEngine {
         };
         self.tiles.borrow_mut().put(key, tile);
         Ok(key)
+    }
+
+    /// Loads and registers a Web Mercator $(Z, X, Y)$ RGB elevation tile.
+    #[allow(clippy::too_many_arguments)]
+    pub fn load_rgb_tile(
+        &self,
+        z: u32,
+        x: u32,
+        y: u32,
+        width: usize,
+        height: usize,
+        rgba_buffer: &[u8],
+        encoding: RgbElevationEncoding,
+    ) -> Result<SlippyTileKey, TerrainError> {
+        let key = SlippyTileKey::new(z, x, y);
+        let tile = RgbElevationTile::from_rgba(key, width, height, rgba_buffer, encoding)?;
+        self.rgb_tiles.borrow_mut().put(key, tile);
+        Ok(key)
+    }
+
+    /// Loads and registers a GeoTIFF / Cloud-Optimized GeoTIFF elevation raster.
+    /// Returns the geographic bounding box `(min_lat_rad, min_lon_rad, max_lat_rad, max_lon_rad)`.
+    pub fn load_geotiff_tile(&self, data: &[u8]) -> Result<(f64, f64, f64, f64), TerrainError> {
+        let tile = GeoTiffTile::from_bytes(data)?;
+        let bounds = tile.bounds_rad;
+        self.geotiff_tiles.borrow_mut().push(tile);
+        Ok(bounds)
+    }
+
+    /// Removes an RGB tile by its $(Z, X, Y)$ key. Returns `true` if the tile existed.
+    #[inline]
+    pub fn unload_rgb_tile(&self, key: &SlippyTileKey) -> bool {
+        self.rgb_tiles.borrow_mut().pop(key).is_some()
     }
 
     /// Removes a tile from the engine.  Returns `true` if the tile existed.
@@ -145,6 +218,7 @@ impl TerrainEngine {
     }
 
     /// Returns elevation quality without converting missing DTED samples to zero.
+    /// Queries DTED cache first, followed by Web Mercator RGB elevation tiles, and GeoTIFF rasters.
     #[inline]
     pub fn get_elevation_status(&self, lat_rad: f64, lon_rad: f64) -> Result<ElevationSample, TerrainError> {
         let lat_deg = lat_rad.to_degrees();
@@ -157,47 +231,76 @@ impl TerrainEngine {
             lon_deg: lon_floor,
         };
 
+        // 1. Try DTED cache
         let mut tiles = self.tiles.borrow_mut();
-        let tile = tiles.get(&key).ok_or(TerrainError::TileNotLoaded(
+        if let Some(tile) = tiles.get(&key) {
+            // Fraction within the tile
+            let delta_lat = (lat_deg - lat_floor as f64).clamp(0.0, 1.0);
+            let delta_lon = (lon_deg - lon_floor as f64).clamp(0.0, 1.0);
+
+            let row_f = delta_lat * (tile.num_rows - 1) as f64;
+            let col_f = delta_lon * (tile.num_cols - 1) as f64;
+
+            let row0 = (row_f.floor() as usize).min(tile.num_rows - 1);
+            let row1 = (row0 + 1).min(tile.num_rows - 1);
+
+            let col0 = (col_f.floor() as usize).min(tile.num_cols - 1);
+            let col1 = (col0 + 1).min(tile.num_cols - 1);
+
+            let tx = (col_f - col0 as f64).clamp(0.0, 1.0);
+            let ty = (row_f - row0 as f64).clamp(0.0, 1.0);
+
+            // A bilinear result is unknown if any contributing DTED sample is null.
+            let z00 = get_elevation_val(tile.get_cell_elevation(row0, col0));
+            let z01 = get_elevation_val(tile.get_cell_elevation(row0, col1));
+            let z10 = get_elevation_val(tile.get_cell_elevation(row1, col0));
+            let z11 = get_elevation_val(tile.get_cell_elevation(row1, col1));
+            if [z00, z01, z10, z11].iter().any(Option::is_none) {
+                return Ok(ElevationSample { elevation_meters: None });
+            }
+            let z00 = z00.unwrap();
+            let z01 = z01.unwrap();
+            let z10 = z10.unwrap();
+            let z11 = z11.unwrap();
+
+            // Bilinear interpolation
+            let z_left = z00 * (1.0 - ty) + z10 * ty;
+            let z_right = z01 * (1.0 - ty) + z11 * ty;
+            let z_final = z_left * (1.0 - tx) + z_right * tx;
+
+            return Ok(ElevationSample { elevation_meters: Some(z_final) });
+        }
+        drop(tiles);
+
+        // 2. Try RGB elevation tile cache (prefer highest zoom level covering the coordinate)
+        let rgb_tiles = self.rgb_tiles.borrow();
+        let mut best_rgb_sample: Option<(u32, f64)> = None;
+        for (k, tile) in rgb_tiles.iter() {
+            if let Some(elev) = tile.get_elevation_rad(lat_rad, lon_rad) {
+                if best_rgb_sample.is_none() || k.z > best_rgb_sample.unwrap().0 {
+                    best_rgb_sample = Some((k.z, elev));
+                }
+            }
+        }
+        if let Some((_, elev)) = best_rgb_sample {
+            return Ok(ElevationSample { elevation_meters: Some(elev) });
+        }
+        drop(rgb_tiles);
+
+        // 3. Try GeoTIFF rasters
+        let geotiffs = self.geotiff_tiles.borrow();
+        for gt in geotiffs.iter() {
+            if let Some(elev) = gt.get_elevation_rad(lat_rad, lon_rad) {
+                return Ok(ElevationSample { elevation_meters: Some(elev) });
+            }
+        }
+        drop(geotiffs);
+
+        // 4. Not found in any loaded terrain source
+        Err(TerrainError::TileNotLoaded(
             lat_floor,
             lon_floor,
-        ))?;
-
-        // Fraction within the tile
-        let delta_lat = (lat_deg - lat_floor as f64).clamp(0.0, 1.0);
-        let delta_lon = (lon_deg - lon_floor as f64).clamp(0.0, 1.0);
-
-        let row_f = delta_lat * (tile.num_rows - 1) as f64;
-        let col_f = delta_lon * (tile.num_cols - 1) as f64;
-
-        let row0 = (row_f.floor() as usize).min(tile.num_rows - 1);
-        let row1 = (row0 + 1).min(tile.num_rows - 1);
-
-        let col0 = (col_f.floor() as usize).min(tile.num_cols - 1);
-        let col1 = (col0 + 1).min(tile.num_cols - 1);
-
-        let tx = (col_f - col0 as f64).clamp(0.0, 1.0);
-        let ty = (row_f - row0 as f64).clamp(0.0, 1.0);
-
-        // A bilinear result is unknown if any contributing DTED sample is null.
-        let z00 = get_elevation_val(tile.get_cell_elevation(row0, col0));
-        let z01 = get_elevation_val(tile.get_cell_elevation(row0, col1));
-        let z10 = get_elevation_val(tile.get_cell_elevation(row1, col0));
-        let z11 = get_elevation_val(tile.get_cell_elevation(row1, col1));
-        if [z00, z01, z10, z11].iter().any(Option::is_none) {
-            return Ok(ElevationSample { elevation_meters: None });
-        }
-        let z00 = z00.unwrap();
-        let z01 = z01.unwrap();
-        let z10 = z10.unwrap();
-        let z11 = z11.unwrap();
-
-        // Bilinear interpolation
-        let z_left = z00 * (1.0 - ty) + z10 * ty;
-        let z_right = z01 * (1.0 - ty) + z11 * ty;
-        let z_final = z_left * (1.0 - tx) + z_right * tx;
-
-        Ok(ElevationSample { elevation_meters: Some(z_final) })
+        ))
     }
 
     /// Applies an explicit policy to unknown terrain samples.
