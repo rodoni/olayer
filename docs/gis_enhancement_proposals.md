@@ -55,14 +55,14 @@ The following proposals are **strictly within the GIS domain**, expanding Olayer
 ================================================================================
 GIS COMPONENT PROPOSALS INDEX
 --------------------------------------------------------------------------------
-GIS-PROP-001 : Local Tangent Plane (ENU/NED) & World Magnetic Model (WMM)
-GIS-PROP-002 : Geodesic Spatial Analysis Engine (Containment, Buffers, XTK/ATD)
-GIS-PROP-003 : Tactical Aeronautical Measurement Tools & Dynamic Overlays
-GIS-PROP-004 : Aeronautical Data Ingestion (AIXM 5.1 & GeoJSON-Aviation)
-GIS-PROP-005 : Civil Cloud Terrain Ingestion (COG & Mapbox RGB Elevation)
-GIS-PROP-006 : Meteorological GIS Overlays (Radar dBZ, Wind Barbs & Isolines)
-GIS-PROP-007 : 3D Volumetric Airspaces & Trajectory Ribbon GPU Shaders
-GIS-PROP-008 : Advanced Multi-Octant Force-Directed Label Anti-Cluttering
+GIS-PROP-001 : Local Tangent Plane (ENU/NED) & World Magnetic Model (WMM) [IMPLEMENTED]
+GIS-PROP-002 : Geodesic Spatial Analysis Engine (Containment, Buffers, XTK/ATD) [IMPLEMENTED]
+GIS-PROP-003 : Tactical Aeronautical Measurement Tools & Dynamic Overlays [IMPLEMENTED]
+GIS-PROP-004 : Aeronautical Data Ingestion (AIXM 5.1 & GeoJSON-Aviation) [IMPLEMENTED]
+GIS-PROP-005 : Civil Cloud Terrain Ingestion (COG & Mapbox RGB Elevation) [IMPLEMENTED]
+GIS-PROP-006 : Meteorological GIS Overlays (Radar dBZ, Wind Barbs & Isolines) [IMPLEMENTED]
+GIS-PROP-007 : 3D Volumetric Airspaces & Trajectory Ribbon GPU Shaders [IMPLEMENTED]
+GIS-PROP-008 : Advanced Multi-Octant Force-Directed Label Anti-Cluttering [PROPOSED]
 ================================================================================
 ```
 
@@ -292,14 +292,14 @@ export class RgbTerrainSource extends MapDataSource {
 
 ---
 
-### 2.6 `GIS-PROP-006`: Meteorological GIS Overlays (Radar dBZ, Wind Barbs & Isolines)
+### 2.6 `GIS-PROP-006`: Meteorological GIS Overlays (Radar dBZ, Wind Barbs & Isolines) *(STATUS: IMPLEMENTED)*
 
 #### Domain Context & GIS Need
 Weather is a primary factor in aviation safety. A tactical GIS must render:
 1. **Precipitation Radar Reflectivity (dBZ):** NEXRAD / RIDGE II / WMS-T weather radar raster grids (20 to 70 dBZ) with smooth GPU color-mapping (Light Green $\rightarrow$ Yellow $\rightarrow$ Red $\rightarrow$ Magenta).
-2. **Winds Aloft (GRIB2 Gridded Vectors):** Gridded wind speed and direction fields rendered as standard aviation **Wind Barbs** or animated flow streamlines.
-3. **Hazard Polygons:** SIGMET, AIRMET, and Convective Storm cell polygons with pulsating alert borders.
-4. **Dynamic Terrain / Pressure Isolines (Contours):** Generating smooth iso-altitude or isobar contour curves directly on the GPU.
+2. **Winds Aloft (GRIB2 Gridded Vectors):** Gridded wind speed and direction fields rendered as standard aviation **Wind Barbs** (50kt pennant, 10kt barb, 5kt half-barb, calm circle) or animated flow streamlines.
+3. **Hazard Polygons:** SIGMET, AIRMET, and Convective Storm cell polygons with pulsating alert borders, altitude bounds, and point containment queries.
+4. **Dynamic Terrain / Pressure Isolines (Contours):** Generating smooth iso-altitude or isobar contour curves directly using Marching Squares.
 
 ```
        Wind Barb Symbology (Aviation Standard):
@@ -310,18 +310,32 @@ Weather is a primary factor in aviation safety. A tactical GIS must render:
              + (Origin Point)
 ```
 
-#### Proposed SDK Meteorological Layer (`sdk/ts/src/layers/weather.ts`)
+#### Implemented Core & SDK Meteorological Architecture
+
+* **Rust Core Engine:** `core::weather` (`radar_palette`, `wind_barb`, `isoline`, `sigmet`)
+* **WASM Bridge:** `WasmSigmetDataset`, `colorize_dbz_grid`, `generate_wind_barb_geometry`, `generate_isolines`, `dbz_to_rgba`
+* **C-FFI Bridge:** `olayer_weather_dbz_to_rgba`, `olayer_weather_generate_wind_barb`, `olayer_weather_generate_isolines`, `olayer_sigmet_dataset_*`
+* **TypeScript SDK Layers:** `WeatherRadarLayer`, `WindBarbsLayer`, `SigmetLayer` (`sdk/ts/src/layers/`)
 
 ```typescript
 export class WeatherRadarLayer extends Layer {
-  constructor(id: string, tileSource: RasterTileSource);
-  public setDbzThreshold(minDbz: number): void;
-  public setColorPalette(palette: "ICAO_STANDARD" | "NEXRAD_DEFAULT" | "HIGH_CONTRAST"): void;
+  constructor(id: string, options?: WeatherRadarLayerOptions);
+  public setDbzGrid(grid: Float64Array | number[], width: number, height: number, boundsDeg: [number, number, number, number]): void;
+  public setPalette(palette: "nexrad" | "icao" | "high_contrast"): void;
+  public generateContourIsolines(isovalues: number[]): number[];
 }
 
 export class WindBarbsLayer extends Layer {
-  constructor(id: string, windDataSource: Grib2WindSource);
-  public setFlightLevel(flightLevelMeters: number): void;
+  constructor(id: string, options?: WindBarbsLayerOptions);
+  public setStations(stations: WindStation[]): void;
+  public addStation(station: WindStation): void;
+  public getStationGeometry(id: string): number[] | undefined;
+}
+
+export class SigmetLayer extends Layer {
+  constructor(id: string, options?: SigmetLayerOptions);
+  public loadGeoJson(jsonContent: string): void;
+  public findHazardsAt(latDeg: number, lonDeg: number, altM?: number): any[];
 }
 ```
 
@@ -397,8 +411,8 @@ Olayer needs an **8-Octant Multi-Leader Resolver with Force-Directed Relaxation*
 | **GIS-PROP-008** | `sdk::renderer` | 8-Octant Force-Directed Label Anti-Cluttering Engine | 🟡 **Partially Foundational** (4-quadrant greedy in `cpu.ts`) | **P1** | Phase 9 |
 | **GIS-PROP-004** | `core::aeronautical` | Aeronautical Data Ingestion (AIXM 5.1 & GeoJSON-Aviation) | ✅ **Completed** (Core, WASM, C-FFI, TS SDK) | **P1** | Phase 9 |
 | **GIS-PROP-005** | `core::terrain` | Civil Cloud Terrain Ingestion (COG & Mapbox RGB Elevation) | ✅ **Completed** (Core, WASM, C-FFI, TS SDK) | **P2** | Phase 10 |
+| **GIS-PROP-006** | `sdk::layers` | Meteorological Overlays (Radar dBZ, Wind Barbs & Isolines) | ✅ **Completed** (Core, WASM, C-FFI, TS SDK) | **P2** | Phase 11 |
 | **GIS-PROP-007** | `sdk::renderer` | 3D Volumetric Airspace & Trajectory Ribbon GPU Shaders | ⏳ **Pending** | **P2** | Phase 10 |
-| **GIS-PROP-006** | `sdk::layers` | Meteorological Overlays (Radar dBZ, Wind Barbs & Isolines) | ⏳ **Pending** | **P2** | Phase 11 |
 
 ---
 

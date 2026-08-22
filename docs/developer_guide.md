@@ -33,10 +33,13 @@ graph TB
         Geodesy["📐 Geodesy"]:::core
         Camera["📷 Camera"]:::core
         Projections["🗺️ Projections"]:::core
-        Terrain["⛰️ Terrain (DTED)"]:::core
+        Terrain["⛰️ Terrain (DTED, RGB, COG)"]:::core
         SLD["📄 SLD Parser"]:::core
         Symbols["🎖️ Symbol Registry"]:::core
         Interp["⏱️ Interpolator"]:::core
+        Aero["🛫 Aeronautical"]:::core
+        Weather["⛈️ Weather"]:::core
+        Volumetric["📦 Volumetric (3D Airspace & Ribbon)"]:::core
     end
 
     HostWeb --> TSSDK
@@ -48,14 +51,20 @@ graph TB
     WASMBridge --> SLD
     WASMBridge --> Symbols
     WASMBridge --> Interp
+    WASMBridge --> Aero
+    WASMBridge --> Weather
+    WASMBridge --> Volumetric
 
     HostDesktop --> NativeSDK
     NativeSDK --> Geodesy
     NativeSDK --> Camera
     NativeSDK --> Projections
     NativeSDK --> Terrain
+    NativeSDK --> Volumetric
     NativeSDK --> Symbols
     NativeSDK --> Interp
+    NativeSDK --> Aero
+    NativeSDK --> Weather
 
     HostDesktop --> FFIBridge
     FFIBridge --> Geodesy
@@ -63,6 +72,8 @@ graph TB
     FFIBridge --> Terrain
     FFIBridge --> Symbols
     FFIBridge --> Interp
+    FFIBridge --> Aero
+    FFIBridge --> Weather
 ```
 
 The Core has **no filesystem or network I/O**. It only processes memory structures
@@ -1355,6 +1366,36 @@ const controller = new OlayerController({
 
 controller.destroy();
 controller.destroy(); // safe no-op
+```
+
+### 16.4 3D Volumetric Airspaces and Trajectory Ribbons
+
+Use `VolumetricAirspaceLayer` and `TrajectoryRibbonLayer` to display 3D extruded airspace sectors and continuous flight ribbons with altitude/speed color gradients:
+
+```typescript
+import { VolumetricAirspaceLayer, TrajectoryRibbonLayer } from "olayer-sdk";
+
+// 1. 3D Volumetric Airspace Layer
+const airspaceLayer = new VolumetricAirspaceLayer("controlled-airspaces", {
+  baseColor: "rgba(0, 229, 255, 0.25)",
+  edgeColor: "#00e5ff",
+  fresnelIntensity: 0.5,
+});
+
+// Add TMA sector: polygon [lat0, lon0, ...], floor 1000m, ceiling 6000m
+airspaceLayer.addAirspace("EGLL_TMA", [51.0, -0.5, 51.0, 0.5, 51.5, 0.5, 51.5, -0.5], 1000, 6000);
+controller.layerManager.addLayer(airspaceLayer);
+
+// 2. 3D Flight Trajectory Ribbon Layer
+const ribbonLayer = new TrajectoryRibbonLayer("flight-ribbons", {
+  defaultRibbonWidthMeters: 300,
+  colorLow: "#00e5ff", // Low altitude cyan
+  colorHigh: "#ff1744", // High altitude red
+});
+
+// Add aircraft track: waypoints [lat0, lon0, alt0, lat1, lon1, alt1, ...]
+ribbonLayer.addTrajectory("AFR123", [40.0, -74.0, 1000, 40.5, -73.5, 5000, 41.0, -73.0, 10000]);
+controller.layerManager.addLayer(ribbonLayer);
 ```
 
 See [`conformance.md`](conformance.md), [`core_api_inventory.md`](core_api_inventory.md),

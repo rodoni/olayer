@@ -517,6 +517,112 @@ pub enum InterpolatorError {
 
 ---
 
+### 1.8 `aeronautical` — Aeronautical Data Ingestion (AIXM 5.1 & GeoJSON-Aviation)
+
+Sub-modules: `aixm_parser`, `geojson_aviation`, `dataset`, `errors`.
+
+```rust
+pub struct AeronauticalAirspace {
+    pub uid: String, pub name: String, pub airspace_type: String,
+    pub lower_limit_m: f64, pub upper_limit_m: f64, pub boundary: Vec<LatLon>,
+}
+
+pub struct AeronauticalNavaid {
+    pub ident: String, pub name: String, pub navaid_type: String,
+    pub position: LatLon, pub frequency_mhz: Option<f64>,
+}
+
+pub struct AeronauticalDataset {
+    pub airspaces: Vec<AeronauticalAirspace>,
+    pub navaids: Vec<AeronauticalNavaid>,
+}
+
+impl AeronauticalDataset {
+    pub fn new() -> Self
+    pub fn from_aixm_51(xml: &str) -> Result<Self, AeronauticalError>
+    pub fn from_geojson(json: &str) -> Result<Self, AeronauticalError>
+    pub fn to_geojson(&self) -> Result<String, AeronauticalError>
+}
+```
+
+---
+
+### 1.9 `weather` — Meteorological GIS Overlays (Radar dBZ, Wind Barbs & Isolines)
+
+Sub-modules: `radar_palette`, `wind_barb`, `isoline`, `sigmet`, `errors`.
+
+```rust
+pub enum RadarColorPalette { Nexrad, Icao, HighContrast }
+
+pub fn dbz_to_rgba(dbz: f64, palette: RadarColorPalette) -> [u8; 4]
+pub fn colorize_dbz_grid(grid: &[f64], width: usize, height: usize, palette: RadarColorPalette) -> Result<Vec<u8>, WeatherError>
+
+pub struct WindBarbGeometry {
+    pub origin: LatLon,
+    pub staff: (LatLon, LatLon),
+    pub barbs: Vec<(LatLon, LatLon)>,
+    pub pennants: Vec<[LatLon; 3]>,
+    pub calm_circle_radius_m: Option<f64>,
+}
+
+pub fn generate_wind_barb(origin: &LatLon, speed_knots: f64, direction_rad: f64, staff_length_meters: f64, is_southern_hemisphere: bool) -> Result<WindBarbGeometry, WeatherError>
+pub fn wind_barb_to_flat_lines_deg(geom: &WindBarbGeometry) -> Vec<f64>
+
+pub struct IsolineSegment { pub isovalue: f64, pub start: LatLon, pub end: LatLon }
+pub fn generate_isolines_rad(grid: &[f64], width: usize, height: usize, bounds_rad: (f64, f64, f64, f64), isovalues: &[f64]) -> Result<Vec<IsolineSegment>, WeatherError>
+pub fn isolines_to_flat_array_deg(segments: &[IsolineSegment]) -> Vec<f64>
+
+pub struct SigmetFeature {
+    pub id: String, pub name: String,
+    pub hazard_type: SigmetHazardType, pub severity: SigmetSeverity,
+    pub polygon: Vec<LatLon>,
+    pub floor_m: Option<f64>, pub ceiling_m: Option<f64>,
+}
+
+pub struct SigmetDataset {
+    pub features: Vec<SigmetFeature>,
+}
+```
+
+---
+
+### 1.10 `volumetric` — 3D Volumetric Airspaces & Trajectory Ribbon Mesh Generation
+
+Sub-modules: `airspace_mesh`, `ribbon_mesh`, `triangulation`, `types`, `errors`.
+
+```rust
+pub struct VolumetricVertex {
+    pub position_ecef: [f64; 3],
+    pub normal: [f32; 3],
+    pub height_ratio: f32,
+    pub is_edge: f32,
+}
+
+pub struct VolumetricMesh {
+    pub vertices: Vec<VolumetricVertex>,
+    pub indices: Vec<u32>,
+}
+
+pub struct RibbonVertex {
+    pub position_ecef: [f64; 3],
+    pub normal: [f32; 3],
+    pub uv: [f32; 2],
+    pub scalar: f32,
+}
+
+pub struct RibbonMesh {
+    pub vertices: Vec<RibbonVertex>,
+    pub indices: Vec<u32>,
+}
+
+pub fn generate_airspace_volume_mesh(polygon: &[LatLon], floor_m: f64, ceiling_m: f64) -> Result<VolumetricMesh, VolumetricError>
+pub fn generate_trajectory_ribbon_mesh(waypoints: &[LatLon], ribbon_width_m: f64, scalar_values: Option<&[f64]>) -> Result<RibbonMesh, VolumetricError>
+pub fn triangulate_polygon_2d(points: &[[f64; 2]]) -> Result<Vec<[usize; 3]>, VolumetricError>
+pub fn signed_area_2d(points: &[[f64; 2]]) -> f64
+```
+
+---
+
 ## 2. WASM Bridge (`olayer-wasm`)
 
 All `#[wasm_bindgen]` structs. Errors returned as `JsValue` strings.
@@ -534,6 +640,10 @@ All `#[wasm_bindgen]` structs. Errors returned as `JsValue` strings.
 | `WasmProjectionType` | Enum: `Lcc`, `Stereographic`, `WebMercator` |
 | `WasmStyleRegistry` | `parse(xml: &str)` |
 | `WasmSymbolRegistry` | `new()` |
+| `WasmAeronauticalDataset` | AIXM 5.1 & GeoJSON-Aviation dataset container |
+| `WasmSigmetDataset` | SIGMET weather warning dataset container |
+| `WasmVolumetricMesh` | Extruded 3D airspace mesh (`vertices()`, `indices()`, `vertex_count()`, `index_count()`) |
+| `WasmRibbonMesh` | Continuous 3D flight trajectory ribbon (`vertices()`, `indices()`, `vertex_count()`, `index_count()`) |
 
 `version(): number` is exposed on `WasmProjection` for cache invalidation but is rarely needed by SDK consumers.
 

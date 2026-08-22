@@ -5,6 +5,7 @@ pub mod native_map_data_stack;
 pub mod tools;
 pub mod wgpu_cpu_vertex_pipeline;
 pub mod wgpu_gpu_pipeline;
+pub mod wgpu_volumetric_pipeline;
 
 pub use native_controller::NativeController;
 pub use native_layer_manager::{Layer, NativeLayerManager};
@@ -16,3 +17,5 @@ pub use tools::{
 };
 pub use wgpu_gpu_pipeline::{RasterTileUpload, WgpuGpuPipeline};
 pub use wgpu_cpu_vertex_pipeline::{WgpuCpuVertexPipeline, project_lla_to_screen, rasterize_svg};
+pub use wgpu_volumetric_pipeline::{GpuRibbonVertex, GpuVolumetricVertex, VolumetricGpuMesh, WgpuVolumetricPipeline};
+

@@ -1417,6 +1417,259 @@ pub unsafe extern "C" fn olayer_aeronautical_dataset_free(ds: *mut AeronauticalD
     }
 }
 
+// ============================================================================
+// METEOROLOGICAL GIS OVERLAYS (GIS-PROP-006)
+// ============================================================================
+
+/// Opaque pointer type for SIGMET dataset in C ABI.
+pub type SigmetDataset = olayer_core::weather::SigmetDataset;
+
+/// Maps a radar reflectivity value (dBZ) to 4-byte RGBA array.
+/// palette_code: 0 = Nexrad, 1 = Icao, 2 = HighContrast.
+#[no_mangle]
+pub unsafe extern "C" fn olayer_weather_dbz_to_rgba(
+    dbz: f64,
+    palette_code: c_int,
+    out_rgba: *mut u8,
+) -> c_int {
+    if out_rgba.is_null() {
+        return -1;
+    }
+    let palette = match palette_code {
+        0 => olayer_core::weather::RadarColorPalette::Nexrad,
+        1 => olayer_core::weather::RadarColorPalette::Icao,
+        2 => olayer_core::weather::RadarColorPalette::HighContrast,
+        _ => return -2,
+    };
+    let rgba = olayer_core::weather::dbz_to_rgba(dbz, palette);
+    std::ptr::copy_nonoverlapping(rgba.as_ptr(), out_rgba, 4);
+    0
+}
+
+/// Generates aviation-standard wind barb line coordinates in degrees.
+/// Writes flat lines `[start_lat, start_lon, end_lat, end_lon, ...]` into `out_lines`.
+#[no_mangle]
+pub unsafe extern "C" fn olayer_weather_generate_wind_barb(
+    origin_lat_deg: f64,
+    origin_lon_deg: f64,
+    speed_knots: f64,
+    direction_deg: f64,
+    staff_length_meters: f64,
+    is_southern_hemisphere: bool,
+    out_lines: *mut f64,
+    max_floats: usize,
+    out_count: *mut usize,
+) -> c_int {
+    if out_lines.is_null() || out_count.is_null() {
+        return -1;
+    }
+    let origin = LatLon::from_degrees(origin_lat_deg, origin_lon_deg, 0.0);
+    let geom = match olayer_core::weather::generate_wind_barb(
+        &origin,
+        speed_knots,
+        direction_deg.to_radians(),
+        staff_length_meters,
+        is_southern_hemisphere,
+    ) {
+        Ok(g) => g,
+        Err(_) => return -2,
+    };
+
+    let flat = olayer_core::weather::wind_barb_to_flat_lines_deg(&geom);
+    *out_count = flat.len();
+    if max_floats < flat.len() {
+        return -3; // Buffer too small
+    }
+    std::ptr::copy_nonoverlapping(flat.as_ptr(), out_lines, flat.len());
+    0
+}
+
+/// Generates Marching Squares 2D isolines from a scalar grid.
+/// Writes flat segments `[isovalue, start_lat_deg, start_lon_deg, end_lat_deg, end_lon_deg, ...]` into `out_segments`.
+#[no_mangle]
+pub unsafe extern "C" fn olayer_weather_generate_isolines(
+    grid: *const f64,
+    width: usize,
+    height: usize,
+    min_lat_deg: f64,
+    min_lon_deg: f64,
+    max_lat_deg: f64,
+    max_lon_deg: f64,
+    isovalues: *const f64,
+    isovalues_count: usize,
+    out_segments: *mut f64,
+    max_floats: usize,
+    out_count: *mut usize,
+) -> c_int {
+    if grid.is_null() || isovalues.is_null() || out_segments.is_null() || out_count.is_null() {
+        return -1;
+    }
+    let grid_slice = std::slice::from_raw_parts(grid, width * height);
+    let iso_slice = std::slice::from_raw_parts(isovalues, isovalues_count);
+    let bounds_rad = (
+        min_lat_deg.to_radians(),
+        min_lon_deg.to_radians(),
+        max_lat_deg.to_radians(),
+        max_lon_deg.to_radians(),
+    );
+
+    let segments = match olayer_core::weather::generate_isolines_rad(grid_slice, width, height, bounds_rad, iso_slice) {
+        Ok(s) => s,
+        Err(_) => return -2,
+    };
+
+    let flat = olayer_core::weather::isolines_to_flat_array_deg(&segments);
+    *out_count = flat.len();
+    if max_floats < flat.len() {
+        return -3;
+    }
+    std::ptr::copy_nonoverlapping(flat.as_ptr(), out_segments, flat.len());
+    0
+}
+
+/// Parses a GeoJSON string into a heap-allocated `SigmetDataset`.
+#[no_mangle]
+pub unsafe extern "C" fn olayer_sigmet_dataset_from_geojson(geojson_str: *const c_char) -> *mut SigmetDataset {
+    if geojson_str.is_null() {
+        return std::ptr::null_mut();
+    }
+    let c_str = match std::ffi::CStr::from_ptr(geojson_str).to_str() {
+        Ok(s) => s,
+        Err(_) => return std::ptr::null_mut(),
+    };
+    match olayer_core::weather::SigmetDataset::from_geojson(c_str) {
+        Ok(ds) => Box::into_raw(Box::new(ds)),
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
+/// Returns the total number of warnings in a `SigmetDataset`.
+#[no_mangle]
+pub unsafe extern "C" fn olayer_sigmet_dataset_total_count(ds: *const SigmetDataset, out_count: *mut usize) -> c_int {
+    if ds.is_null() || out_count.is_null() {
+        return -1;
+    }
+    *out_count = (*ds).len();
+    0
+}
+
+/// Destroys a heap-allocated `SigmetDataset`.
+#[no_mangle]
+pub unsafe extern "C" fn olayer_sigmet_dataset_free(ds: *mut SigmetDataset) {
+    if !ds.is_null() {
+        let _ = Box::from_raw(ds);
+    }
+}
+
+// ============================================================================
+// 3D VOLUMETRIC AIRSPACES & TRAJECTORY RIBBONS (GIS-PROP-007)
+// ============================================================================
+
+/// Generates an extruded 3D volumetric airspace mesh.
+/// Writes flat interleaved vertices `[x, y, z, nx, ny, nz, height_ratio, is_edge, ...]` into `out_vertices`
+/// and triangle indices into `out_indices`.
+#[no_mangle]
+pub unsafe extern "C" fn olayer_volumetric_generate_airspace_mesh(
+    polygon_coords: *const C_LatLon,
+    polygon_len: usize,
+    floor_m: f64,
+    ceiling_m: f64,
+    out_vertices: *mut f32,
+    max_vertices_floats: usize,
+    out_vertices_count: *mut usize,
+    out_indices: *mut u32,
+    max_indices: usize,
+    out_indices_count: *mut usize,
+) -> c_int {
+    if polygon_coords.is_null() || out_vertices.is_null() || out_vertices_count.is_null()
+        || out_indices.is_null() || out_indices_count.is_null()
+    {
+        return -1;
+    }
+    if polygon_len < 3 {
+        return -2;
+    }
+
+    let c_slice = std::slice::from_raw_parts(polygon_coords, polygon_len);
+    let mut polygon = Vec::with_capacity(polygon_len);
+    for pt in c_slice {
+        polygon.push(LatLon::from_degrees(pt.lat, pt.lon, pt.height));
+    }
+
+    let mesh = match olayer_core::volumetric::generate_airspace_volume_mesh(&polygon, floor_m, ceiling_m) {
+        Ok(m) => m,
+        Err(_) => return -3,
+    };
+
+    let flat_verts = mesh.to_flat_f32_vertices();
+    *out_vertices_count = flat_verts.len();
+    *out_indices_count = mesh.indices.len();
+
+    if max_vertices_floats < flat_verts.len() || max_indices < mesh.indices.len() {
+        return -4; // Buffer too small
+    }
+
+    std::ptr::copy_nonoverlapping(flat_verts.as_ptr(), out_vertices, flat_verts.len());
+    std::ptr::copy_nonoverlapping(mesh.indices.as_ptr(), out_indices, mesh.indices.len());
+    0
+}
+
+/// Generates a continuous 3D flight trajectory ribbon mesh in ECEF coordinates.
+/// Writes flat interleaved vertices `[x, y, z, nx, ny, nz, u, v, scalar, ...]` into `out_vertices`
+/// and triangle indices into `out_indices`.
+#[no_mangle]
+pub unsafe extern "C" fn olayer_volumetric_generate_trajectory_ribbon(
+    waypoints: *const C_LatLon,
+    waypoints_len: usize,
+    ribbon_width_m: f64,
+    scalars: *const f64,
+    scalars_len: usize,
+    out_vertices: *mut f32,
+    max_vertices_floats: usize,
+    out_vertices_count: *mut usize,
+    out_indices: *mut u32,
+    max_indices: usize,
+    out_indices_count: *mut usize,
+) -> c_int {
+    if waypoints.is_null() || out_vertices.is_null() || out_vertices_count.is_null()
+        || out_indices.is_null() || out_indices_count.is_null()
+    {
+        return -1;
+    }
+    if waypoints_len < 2 {
+        return -2;
+    }
+
+    let wp_slice = std::slice::from_raw_parts(waypoints, waypoints_len);
+    let mut poly_wp = Vec::with_capacity(waypoints_len);
+    for pt in wp_slice {
+        poly_wp.push(LatLon::from_degrees(pt.lat, pt.lon, pt.height));
+    }
+
+    let scalar_opt = if !scalars.is_null() && scalars_len == waypoints_len {
+        Some(std::slice::from_raw_parts(scalars, scalars_len))
+    } else {
+        None
+    };
+
+    let ribbon = match olayer_core::volumetric::generate_trajectory_ribbon_mesh(&poly_wp, ribbon_width_m, scalar_opt) {
+        Ok(r) => r,
+        Err(_) => return -3,
+    };
+
+    let flat_verts = ribbon.to_flat_f32_vertices();
+    *out_vertices_count = flat_verts.len();
+    *out_indices_count = ribbon.indices.len();
+
+    if max_vertices_floats < flat_verts.len() || max_indices < ribbon.indices.len() {
+        return -4; // Buffer too small
+    }
+
+    std::ptr::copy_nonoverlapping(flat_verts.as_ptr(), out_vertices, flat_verts.len());
+    std::ptr::copy_nonoverlapping(ribbon.indices.as_ptr(), out_indices, ribbon.indices.len());
+    0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2076,6 +2329,125 @@ mod tests {
             assert!((out_elev - 500.0).abs() < 0.2);
 
             olayer_terrain_engine_free(engine);
+        }
+    }
+
+    #[test]
+    fn test_c_ffi_weather_overlays() {
+        unsafe {
+            // 1. dBZ to RGBA
+            let mut rgba = [0u8; 4];
+            let r1 = olayer_weather_dbz_to_rgba(45.0, 0, rgba.as_mut_ptr());
+            assert_eq!(r1, 0);
+            assert_eq!(rgba[0], 253); // Red-Orange
+
+            // 2. Wind barb
+            let mut lines = [0.0; 64];
+            let mut count = 0;
+            let r2 = olayer_weather_generate_wind_barb(
+                51.5, -0.1, 65.0, 90.0, 1000.0, false, lines.as_mut_ptr(), 64, &mut count,
+            );
+            assert_eq!(r2, 0);
+            assert!(count >= 12);
+
+            // 3. Isolines
+            let grid = [0.0, 20.0, 40.0, 60.0];
+            let isos = [30.0];
+            let mut segs = [0.0; 32];
+            let mut seg_count = 0;
+            let r3 = olayer_weather_generate_isolines(
+                grid.as_ptr(), 2, 2, 0.0, 0.0, 1.0, 1.0, isos.as_ptr(), 1, segs.as_mut_ptr(), 32, &mut seg_count,
+            );
+            assert_eq!(r3, 0);
+            assert_eq!(seg_count, 5);
+
+            // 4. SIGMET dataset
+            let geojson = std::ffi::CString::new(r#"{
+                "type": "FeatureCollection",
+                "features": [
+                    {
+                        "type": "Feature",
+                        "properties": { "id": "SIG1", "hazard": "TS", "severity": "SEV" },
+                        "geometry": {
+                            "type": "Polygon",
+                            "coordinates": [[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 0.0]]]
+                        }
+                    }
+                ]
+            }"#).unwrap();
+
+            let ds = olayer_sigmet_dataset_from_geojson(geojson.as_ptr());
+            assert!(!ds.is_null());
+
+            let mut total = 0;
+            let r4 = olayer_sigmet_dataset_total_count(ds, &mut total);
+            assert_eq!(r4, 0);
+            assert_eq!(total, 1);
+
+            olayer_sigmet_dataset_free(ds);
+        }
+    }
+
+    #[test]
+    fn test_c_ffi_volumetric_overlays() {
+        unsafe {
+            // 1. Volumetric Airspace Mesh
+            let polygon = [
+                C_LatLon { lat: 51.0, lon: -0.5, height: 0.0 },
+                C_LatLon { lat: 51.0, lon: 0.5, height: 0.0 },
+                C_LatLon { lat: 51.5, lon: 0.5, height: 0.0 },
+                C_LatLon { lat: 51.5, lon: -0.5, height: 0.0 },
+            ];
+
+            let mut out_verts = [0.0f32; 512];
+            let mut out_verts_count = 0;
+            let mut out_indices = [0u32; 512];
+            let mut out_indices_count = 0;
+
+            let r1 = olayer_volumetric_generate_airspace_mesh(
+                polygon.as_ptr(),
+                polygon.len(),
+                1000.0,
+                5000.0,
+                out_verts.as_mut_ptr(),
+                512,
+                &mut out_verts_count,
+                out_indices.as_mut_ptr(),
+                512,
+                &mut out_indices_count,
+            );
+            assert_eq!(r1, 0);
+            assert_eq!(out_verts_count, 28 * 8);
+            assert_eq!(out_indices_count, 36);
+
+            // 2. Trajectory Ribbon Mesh
+            let waypoints = [
+                C_LatLon { lat: 40.0, lon: -74.0, height: 1000.0 },
+                C_LatLon { lat: 40.5, lon: -73.5, height: 5000.0 },
+                C_LatLon { lat: 41.0, lon: -73.0, height: 10000.0 },
+            ];
+
+            let mut out_ribbon_verts = [0.0f32; 256];
+            let mut out_ribbon_verts_count = 0;
+            let mut out_ribbon_indices = [0u32; 256];
+            let mut out_ribbon_indices_count = 0;
+
+            let r2 = olayer_volumetric_generate_trajectory_ribbon(
+                waypoints.as_ptr(),
+                waypoints.len(),
+                200.0,
+                std::ptr::null(),
+                0,
+                out_ribbon_verts.as_mut_ptr(),
+                256,
+                &mut out_ribbon_verts_count,
+                out_ribbon_indices.as_mut_ptr(),
+                256,
+                &mut out_ribbon_indices_count,
+            );
+            assert_eq!(r2, 0);
+            assert_eq!(out_ribbon_verts_count, 6 * 9);
+            assert_eq!(out_ribbon_indices_count, 12);
         }
     }
 }

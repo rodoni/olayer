@@ -13,8 +13,17 @@ export {
   WasmStyleRegistry,
   WasmSymbolRegistry,
   WasmAeronauticalDataset,
+  WasmSigmetDataset,
+  WasmVolumetricMesh,
+  WasmRibbonMesh,
   parse_aixm_51,
   parse_geojson_aviation,
+  generate_wind_barb_geometry,
+  dbz_to_rgba,
+  colorize_dbz_grid,
+  generate_isolines,
+  generate_airspace_volume_mesh,
+  generate_trajectory_ribbon_mesh,
   decode_mapbox_rgb,
   decode_terrarium_rgb,
   decode_rgb_elevation,
@@ -25,8 +34,31 @@ export { OlayerController } from "./controller";
 export type { OlayerConfig, OlayerMetrics } from "./controller";
 
 // Export SDK Layer System
-export { Layer, LayerManager, TileLayer, VectorTileLayer, AeronauticalLayer } from "./layers";
-export type { AeronauticalLayerOptions } from "./layers";
+export {
+  Layer,
+  LayerManager,
+  TileLayer,
+  VectorTileLayer,
+  AeronauticalLayer,
+  WeatherRadarLayer,
+  WindBarbsLayer,
+  SigmetLayer,
+  VolumetricAirspaceLayer,
+  TrajectoryRibbonLayer,
+} from "./layers";
+export type {
+  AeronauticalLayerOptions,
+  WeatherRadarLayerOptions,
+  RadarPaletteType,
+  RadarGridData,
+  WindBarbsLayerOptions,
+  WindStation,
+  SigmetLayerOptions,
+  VolumetricAirspaceOptions,
+  AirspaceMeshRecord,
+  TrajectoryRibbonOptions,
+  TrajectoryRibbonRecord,
+} from "./layers";
 
 // Export Data Managers and Providers
 export { DataManager, TerrainTileSource, RgbTerrainSource, CogTerrainSource } from "./providers";

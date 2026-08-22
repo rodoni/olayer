@@ -122,6 +122,11 @@ struct C_NavaidSummary {
 };
 
 /**
+ * Opaque pointer type for SIGMET dataset in C ABI.
+ */
+typedef SigmetDataset SigmetDataset;
+
+/**
  * Creates a new TerrainEngine instance and returns an opaque pointer.
  */
 TerrainEngine *olayer_terrain_engine_create(void);
@@ -577,5 +582,90 @@ int olayer_aeronautical_dataset_to_geojson(AeronauticalDataset *ds,
  * Destroys an `AeronauticalDataset` instance.
  */
 void olayer_aeronautical_dataset_free(AeronauticalDataset *ds);
+
+/**
+ * Maps a radar reflectivity value (dBZ) to 4-byte RGBA array.
+ * palette_code: 0 = Nexrad, 1 = Icao, 2 = HighContrast.
+ */
+int olayer_weather_dbz_to_rgba(double dbz, int palette_code, uint8_t *out_rgba);
+
+/**
+ * Generates aviation-standard wind barb line coordinates in degrees.
+ * Writes flat lines `[start_lat, start_lon, end_lat, end_lon, ...]` into `out_lines`.
+ */
+int olayer_weather_generate_wind_barb(double origin_lat_deg,
+                                      double origin_lon_deg,
+                                      double speed_knots,
+                                      double direction_deg,
+                                      double staff_length_meters,
+                                      bool is_southern_hemisphere,
+                                      double *out_lines,
+                                      uintptr_t max_floats,
+                                      uintptr_t *out_count);
+
+/**
+ * Generates Marching Squares 2D isolines from a scalar grid.
+ * Writes flat segments `[isovalue, start_lat_deg, start_lon_deg, end_lat_deg, end_lon_deg, ...]` into `out_segments`.
+ */
+int olayer_weather_generate_isolines(const double *grid,
+                                     uintptr_t width,
+                                     uintptr_t height,
+                                     double min_lat_deg,
+                                     double min_lon_deg,
+                                     double max_lat_deg,
+                                     double max_lon_deg,
+                                     const double *isovalues,
+                                     uintptr_t isovalues_count,
+                                     double *out_segments,
+                                     uintptr_t max_floats,
+                                     uintptr_t *out_count);
+
+/**
+ * Parses a GeoJSON string into a heap-allocated `SigmetDataset`.
+ */
+SigmetDataset *olayer_sigmet_dataset_from_geojson(const char *geojson_str);
+
+/**
+ * Returns the total number of warnings in a `SigmetDataset`.
+ */
+int olayer_sigmet_dataset_total_count(const SigmetDataset *ds, uintptr_t *out_count);
+
+/**
+ * Destroys a heap-allocated `SigmetDataset`.
+ */
+void olayer_sigmet_dataset_free(SigmetDataset *ds);
+
+/**
+ * Generates an extruded 3D volumetric airspace mesh.
+ * Writes flat interleaved vertices `[x, y, z, nx, ny, nz, height_ratio, is_edge, ...]` into `out_vertices`
+ * and triangle indices into `out_indices`.
+ */
+int olayer_volumetric_generate_airspace_mesh(const struct C_LatLon *polygon_coords,
+                                             uintptr_t polygon_len,
+                                             double floor_m,
+                                             double ceiling_m,
+                                             float *out_vertices,
+                                             uintptr_t max_vertices_floats,
+                                             uintptr_t *out_vertices_count,
+                                             uint32_t *out_indices,
+                                             uintptr_t max_indices,
+                                             uintptr_t *out_indices_count);
+
+/**
+ * Generates a continuous 3D flight trajectory ribbon mesh in ECEF coordinates.
+ * Writes flat interleaved vertices `[x, y, z, nx, ny, nz, u, v, scalar, ...]` into `out_vertices`
+ * and triangle indices into `out_indices`.
+ */
+int olayer_volumetric_generate_trajectory_ribbon(const struct C_LatLon *waypoints,
+                                                 uintptr_t waypoints_len,
+                                                 double ribbon_width_m,
+                                                 const double *scalars,
+                                                 uintptr_t scalars_len,
+                                                 float *out_vertices,
+                                                 uintptr_t max_vertices_floats,
+                                                 uintptr_t *out_vertices_count,
+                                                 uint32_t *out_indices,
+                                                 uintptr_t max_indices,
+                                                 uintptr_t *out_indices_count);
 
 #endif /* OLAYER_NATIVE_H */

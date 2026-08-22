@@ -1271,6 +1271,250 @@ pub fn parse_geojson_aviation(json_content: &str) -> Result<WasmAeronauticalData
     WasmAeronauticalDataset::from_geojson(json_content)
 }
 
+// ============================================================================
+// Meteorological GIS Overlays (GIS-PROP-006)
+// ============================================================================
+
+/// WASM wrapper for meteorological warnings dataset (SIGMET/AIRMET).
+#[wasm_bindgen]
+pub struct WasmSigmetDataset {
+    inner: olayer_core::weather::SigmetDataset,
+}
+
+#[wasm_bindgen]
+impl WasmSigmetDataset {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        Self {
+            inner: olayer_core::weather::SigmetDataset::new(),
+        }
+    }
+
+    /// Parses SIGMET features from a GeoJSON FeatureCollection string.
+    pub fn from_geojson(geojson_str: &str) -> Result<WasmSigmetDataset, JsValue> {
+        olayer_core::weather::SigmetDataset::from_geojson(geojson_str)
+            .map(|ds| WasmSigmetDataset { inner: ds })
+            .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    /// Serializes warning features to a GeoJSON FeatureCollection string.
+    pub fn to_geojson(&self) -> Result<String, JsValue> {
+        self.inner
+            .to_geojson()
+            .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    /// Returns the total number of warning features in the dataset.
+    pub fn total_count(&self) -> usize {
+        self.inner.len()
+    }
+
+    /// Finds all hazard features containing the given coordinate in degrees.
+    pub fn find_hazards_at_point(
+        &self,
+        lat_deg: f64,
+        lon_deg: f64,
+        alt_m: Option<f64>,
+    ) -> Result<JsValue, JsValue> {
+        let hazards = self.inner.find_hazards_at_point(
+            lat_deg.to_radians(),
+            lon_deg.to_radians(),
+            alt_m,
+        );
+        serde_wasm_bindgen::to_value(&hazards).map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+}
+
+impl Default for WasmSigmetDataset {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Generates aviation-standard wind barb line geometry in degrees.
+/// Returns flat line coordinates: `[lat0, lon0, lat1, lon1, ...]`.
+#[wasm_bindgen]
+pub fn generate_wind_barb_geometry(
+    origin_lat_deg: f64,
+    origin_lon_deg: f64,
+    speed_knots: f64,
+    direction_deg: f64,
+    staff_length_meters: f64,
+    is_southern_hemisphere: bool,
+) -> Result<Vec<f64>, JsValue> {
+    let origin = olayer_core::geodesy::coords::LatLon::from_degrees(origin_lat_deg, origin_lon_deg, 0.0);
+    let geom = olayer_core::weather::generate_wind_barb(
+        &origin,
+        speed_knots,
+        direction_deg.to_radians(),
+        staff_length_meters,
+        is_southern_hemisphere,
+    ).map_err(|e| JsValue::from_str(&e.to_string()))?;
+
+    Ok(olayer_core::weather::wind_barb_to_flat_lines_deg(&geom))
+}
+
+/// Maps a radar reflectivity value (dBZ) to an RGBA byte array `[R, G, B, A]`.
+#[wasm_bindgen]
+pub fn dbz_to_rgba(dbz: f64, palette: &str) -> Vec<u8> {
+    let pal = olayer_core::weather::RadarColorPalette::from_str_name(palette)
+        .unwrap_or(olayer_core::weather::RadarColorPalette::Nexrad);
+    olayer_core::weather::dbz_to_rgba(dbz, pal).to_vec()
+}
+
+/// Converts a 2D scalar grid of dBZ values into a flat RGBA pixel buffer `(width * height * 4)`.
+#[wasm_bindgen]
+pub fn colorize_dbz_grid(
+    grid: &[f64],
+    width: usize,
+    height: usize,
+    palette: &str,
+) -> Result<Vec<u8>, JsValue> {
+    let pal = olayer_core::weather::RadarColorPalette::from_str_name(palette)
+        .unwrap_or(olayer_core::weather::RadarColorPalette::Nexrad);
+    olayer_core::weather::colorize_dbz_grid(grid, width, height, pal)
+        .map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
+/// Generates 2D isolines / contour lines from a scalar grid using Marching Squares.
+/// Returns flat line coordinates: `[isovalue, start_lat_deg, start_lon_deg, end_lat_deg, end_lon_deg, ...]`.
+#[wasm_bindgen]
+pub fn generate_isolines(
+    grid: &[f64],
+    width: usize,
+    height: usize,
+    min_lat_deg: f64,
+    min_lon_deg: f64,
+    max_lat_deg: f64,
+    max_lon_deg: f64,
+    isovalues: &[f64],
+) -> Result<Vec<f64>, JsValue> {
+    let bounds_rad = (
+        min_lat_deg.to_radians(),
+        min_lon_deg.to_radians(),
+        max_lat_deg.to_radians(),
+        max_lon_deg.to_radians(),
+    );
+    let segments = olayer_core::weather::generate_isolines_rad(grid, width, height, bounds_rad, isovalues)
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    Ok(olayer_core::weather::isolines_to_flat_array_deg(&segments))
+}
+
+// ============================================================================
+// 3D Volumetric Airspaces & Trajectory Ribbon GPU Shaders (GIS-PROP-007)
+// ============================================================================
+
+/// WASM wrapper for an extruded 3D volumetric polygonal mesh.
+#[wasm_bindgen]
+pub struct WasmVolumetricMesh {
+    inner: olayer_core::volumetric::VolumetricMesh,
+}
+
+#[wasm_bindgen]
+impl WasmVolumetricMesh {
+    /// Returns flat 32-bit float array of vertex attributes:
+    /// `[x, y, z, nx, ny, nz, height_ratio, is_edge, ...]` (8 floats per vertex).
+    pub fn vertices(&self) -> Vec<f32> {
+        self.inner.to_flat_f32_vertices()
+    }
+
+    /// Returns the triangle index array.
+    pub fn indices(&self) -> Vec<u32> {
+        self.inner.indices.clone()
+    }
+
+    /// Total number of vertices in the mesh.
+    pub fn vertex_count(&self) -> usize {
+        self.inner.vertices.len()
+    }
+
+    /// Total number of triangle indices.
+    pub fn index_count(&self) -> usize {
+        self.inner.indices.len()
+    }
+}
+
+/// WASM wrapper for a 3D flight trajectory ribbon mesh.
+#[wasm_bindgen]
+pub struct WasmRibbonMesh {
+    inner: olayer_core::volumetric::RibbonMesh,
+}
+
+#[wasm_bindgen]
+impl WasmRibbonMesh {
+    /// Returns flat 32-bit float array of vertex attributes:
+    /// `[x, y, z, nx, ny, nz, u, v, scalar, ...]` (9 floats per vertex).
+    pub fn vertices(&self) -> Vec<f32> {
+        self.inner.to_flat_f32_vertices()
+    }
+
+    /// Returns the triangle index array.
+    pub fn indices(&self) -> Vec<u32> {
+        self.inner.indices.clone()
+    }
+
+    /// Total number of vertices in the ribbon mesh.
+    pub fn vertex_count(&self) -> usize {
+        self.inner.vertices.len()
+    }
+
+    /// Total number of triangle indices.
+    pub fn index_count(&self) -> usize {
+        self.inner.indices.len()
+    }
+}
+
+/// Generates an extruded 3D volumetric airspace mesh from flat 2D polygon degree coordinates `[lat0, lon0, lat1, lon1, ...]`.
+#[wasm_bindgen]
+pub fn generate_airspace_volume_mesh(
+    polygon_flat_deg: &[f64],
+    floor_m: f64,
+    ceiling_m: f64,
+) -> Result<WasmVolumetricMesh, JsValue> {
+    if !polygon_flat_deg.len().is_multiple_of(2) || polygon_flat_deg.len() < 6 {
+        return Err(JsValue::from_str("Polygon array must contain at least 3 pairs of [lat_deg, lon_deg] coordinates"));
+    }
+
+    let num_points = polygon_flat_deg.len() / 2;
+    let mut polygon = Vec::with_capacity(num_points);
+    for i in 0..num_points {
+        let lat_deg = polygon_flat_deg[i * 2];
+        let lon_deg = polygon_flat_deg[i * 2 + 1];
+        polygon.push(olayer_core::geodesy::coords::LatLon::from_degrees(lat_deg, lon_deg, 0.0));
+    }
+
+    let mesh = olayer_core::volumetric::generate_airspace_volume_mesh(&polygon, floor_m, ceiling_m)
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+
+    Ok(WasmVolumetricMesh { inner: mesh })
+}
+
+/// Generates a 3D flight trajectory ribbon mesh from flat waypoint degree coordinates `[lat0, lon0, alt0, lat1, lon1, alt1, ...]`.
+#[wasm_bindgen]
+pub fn generate_trajectory_ribbon_mesh(
+    waypoints_flat_deg: &[f64],
+    ribbon_width_m: f64,
+    scalars: Option<Vec<f64>>,
+) -> Result<WasmRibbonMesh, JsValue> {
+    if !waypoints_flat_deg.len().is_multiple_of(3) || waypoints_flat_deg.len() < 6 {
+        return Err(JsValue::from_str("Waypoints array must contain at least 2 triplets of [lat_deg, lon_deg, alt_m] coordinates"));
+    }
+
+    let num_points = waypoints_flat_deg.len() / 3;
+    let mut waypoints = Vec::with_capacity(num_points);
+    for i in 0..num_points {
+        let lat_deg = waypoints_flat_deg[i * 3];
+        let lon_deg = waypoints_flat_deg[i * 3 + 1];
+        let alt_m = waypoints_flat_deg[i * 3 + 2];
+        waypoints.push(olayer_core::geodesy::coords::LatLon::from_degrees(lat_deg, lon_deg, alt_m));
+    }
+
+    let mesh = olayer_core::volumetric::generate_trajectory_ribbon_mesh(&waypoints, ribbon_width_m, scalars.as_deref())
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+
+    Ok(WasmRibbonMesh { inner: mesh })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1944,5 +2188,79 @@ mod unit_tests {
 
         assert!(engine.unload_rgb_tile(10, 512, 512));
         assert_eq!(engine.rgb_cache_size(), 0);
+    }
+
+    #[test]
+    fn test_wasm_weather_overlays_pure() {
+        // Wind barbs
+        let lines = generate_wind_barb_geometry(51.5, -0.1, 65.0, 90.0, 1000.0, false).unwrap();
+        assert!(lines.len() >= 12); // Staff + 1 pennant + 2 barbs
+
+        // dBZ
+        let rgba = dbz_to_rgba(45.0, "nexrad");
+        assert_eq!(rgba.len(), 4);
+        assert_eq!(rgba[0], 253); // R for 45 dBZ (Orange)
+
+        // Grid
+        let grid = [0.0, 20.0, 40.0, 60.0];
+        let color_grid = colorize_dbz_grid(&grid, 2, 2, "nexrad").unwrap();
+        assert_eq!(color_grid.len(), 16);
+
+        // Isolines
+        let iso_lines = generate_isolines(&grid, 2, 2, 0.0, 0.0, 1.0, 1.0, &[30.0]).unwrap();
+        assert_eq!(iso_lines.len(), 5); // 1 segment * 5 elements (val, lat0, lon0, lat1, lon1)
+
+        // SIGMET dataset
+        let geojson = r#"{
+            "type": "FeatureCollection",
+            "features": [
+                {
+                    "type": "Feature",
+                    "properties": {
+                        "id": "SIG_TEST",
+                        "hazard": "TURBULENCE",
+                        "severity": "SEVERE"
+                    },
+                    "geometry": {
+                        "type": "Polygon",
+                        "coordinates": [[
+                            [0.0, 0.0, 0.0],
+                            [1.0, 0.0, 0.0],
+                            [1.0, 1.0, 0.0],
+                            [0.0, 1.0, 0.0],
+                            [0.0, 0.0, 0.0]
+                        ]]
+                    }
+                }
+            ]
+        }"#;
+        let ds = WasmSigmetDataset::from_geojson(geojson).unwrap();
+        assert_eq!(ds.total_count(), 1);
+    }
+
+    #[test]
+    fn test_wasm_volumetric_overlays_pure() {
+        // Airspace volume mesh
+        let polygon = [
+            51.0, -0.5,
+            51.0, 0.5,
+            51.5, 0.5,
+            51.5, -0.5,
+        ];
+        let mesh = generate_airspace_volume_mesh(&polygon, 1000.0, 5000.0).unwrap();
+        assert_eq!(mesh.vertex_count(), 28);
+        assert_eq!(mesh.index_count(), 36);
+        assert_eq!(mesh.vertices().len(), 28 * 8);
+
+        // Trajectory ribbon mesh
+        let waypoints = [
+            40.0, -74.0, 1000.0,
+            40.5, -73.5, 5000.0,
+            41.0, -73.0, 10000.0,
+        ];
+        let ribbon = generate_trajectory_ribbon_mesh(&waypoints, 200.0, None).unwrap();
+        assert_eq!(ribbon.vertex_count(), 6);
+        assert_eq!(ribbon.index_count(), 12);
+        assert_eq!(ribbon.vertices().len(), 6 * 9);
     }
 }

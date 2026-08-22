@@ -15,6 +15,8 @@
 //! | `symbol_registry` | Pluggable symbology resolver (NATO / ICAO / declarative JSON) |
 //! | `interpolator` | Dead-reckoning target interpolation for sensor fusion |
 //! | `aeronautical` | Aeronautical data ingestion (AIXM 5.1 & GeoJSON-Aviation) |
+//! | `weather` | Meteorological overlays (dBZ radar colorization, aviation wind barbs, Marching Squares isolines, SIGMETs) |
+//! | `volumetric` | 3D volumetric airspace polyhedrons and 3D flight trajectory ribbon mesh generation |
 
 pub mod geodesy;
 pub mod camera;
@@ -24,3 +26,5 @@ pub mod symbol_registry;
 pub mod terrain;
 pub mod interpolator;
 pub mod aeronautical;
+pub mod weather;
+pub mod volumetric;
