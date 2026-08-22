@@ -74,6 +74,8 @@ export type { MapDataSource, TileCacheStats, TileRequestOptions } from "./provid
 export { WebGLRenderer } from "./renderer/gpu";
 export { CPURenderer } from "./renderer/cpu";
 export type { InterpolatedTarget } from "./renderer/cpu";
+export { LabelAntiClutterEngine, OctantDirection } from "./renderer/declutter";
+export type { DeclutterTargetInput, SolvedLabelPlacement } from "./renderer/declutter";
 export { TextureAtlasManager } from "./renderer/atlas";
 export type { SymbolUV } from "./renderer/atlas";
 

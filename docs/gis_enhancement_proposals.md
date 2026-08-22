@@ -62,7 +62,7 @@ GIS-PROP-004 : Aeronautical Data Ingestion (AIXM 5.1 & GeoJSON-Aviation) [IMPLEM
 GIS-PROP-005 : Civil Cloud Terrain Ingestion (COG & Mapbox RGB Elevation) [IMPLEMENTED]
 GIS-PROP-006 : Meteorological GIS Overlays (Radar dBZ, Wind Barbs & Isolines) [IMPLEMENTED]
 GIS-PROP-007 : 3D Volumetric Airspaces & Trajectory Ribbon GPU Shaders [IMPLEMENTED]
-GIS-PROP-008 : Advanced Multi-Octant Force-Directed Label Anti-Cluttering [PROPOSED]
+GIS-PROP-008 : Advanced Multi-Octant Force-Directed Label Anti-Cluttering [IMPLEMENTED]
 ================================================================================
 ```
 
@@ -392,10 +392,10 @@ export class TrajectoryRibbonLayer extends Layer {
 #### Domain Context & GIS Need
 In high-density terminal areas (TMA) and airport surfaces, radar data blocks (callsign, altitude, speed, wake category) overlap if placed at fixed offsets. Label anti-cluttering is a core GIS problem.
 
-Olayer needs an **8-Octant Multi-Leader Resolver with Force-Directed Relaxation**:
+Olayer implements an **8-Octant Multi-Leader Resolver with Force-Directed Relaxation**:
 - Computes leader arm placement across 8 standard positions (N, NE, E, SE, S, SW, W, NW).
-- Applies a cost function scoring overlap area, proximity to aircraft heading vector, and leader line crossings.
-- Solves label layout in $< 1\text{ ms}$ for 500+ simultaneous targets on the CPU rendering thread.
+- Applies a multi-factor cost function scoring overlap area, proximity to aircraft heading/velocity vector, and leader line crossings.
+- Solves label layout in $< 1\text{ ms}$ for 500+ simultaneous targets using uniform spatial hash grid acceleration.
 
 ```
        8-Octant Dynamic Leader Arm Resolver:
@@ -404,6 +404,23 @@ Olayer needs an **8-Octant Multi-Leader Resolver with Force-Directed Relaxation*
               (W) --- [Target] --- (E)
                      /    |    \
                  (SW)    (S)    (SE)
+```
+
+#### Implemented Core & SDK Decluttering Architecture
+
+* **Rust Core Engine:** `core::declutter` (`types`, `spatial_grid`, `engine`)
+  - 8-octant candidate offset generation with diagonal trigonometry and leader anchor coordinates.
+  - Multi-objective cost evaluation ($\text{OverlapArea} \times w_{\text{overlap}} + \text{HeadingConflict} \times w_{\text{heading}} + \text{LeaderCrossings} \times w_{\text{leader}} + \text{Preference} \times w_{\text{pref}}$).
+  - Two-pass force-directed iterative relaxation with spatial grid acceleration.
+* **WASM Bridge:** `solve_label_placements_flat` (zero-copy float array interface) and `solve_label_placements_json`
+* **C-FFI Bridge:** `olayer_declutter_solve_labels` (`C_LabelTarget`, `C_LabelPlacement`)
+* **TypeScript SDK:** `LabelAntiClutterEngine` (`sdk/ts/src/renderer/declutter.ts`) and integrated in `CPURenderer` (`sdk/ts/src/renderer/cpu.ts`).
+
+```typescript
+export class LabelAntiClutterEngine {
+  constructor(leaderLengthPx?: number, safetyMarginPx?: number);
+  public solve(targets: DeclutterTargetInput[], leaderLengthPx?: number, safetyMarginPx?: number): SolvedLabelPlacement[];
+}
 ```
 
 ---
@@ -415,11 +432,11 @@ Olayer needs an **8-Octant Multi-Leader Resolver with Force-Directed Relaxation*
 | **GIS-PROP-001** | `core::geodesy` | Local Tangent Plane (ENU/NED) & World Magnetic Model (WMM) | ✅ **Completed** (Core, WASM, C-FFI) | **P0** | Phase 8 |
 | **GIS-PROP-002** | `core::spatial` | Geodesic Spatial Analysis (Containment, Buffers, XTK/ATD) | ✅ **Completed** (Core, WASM, C-FFI) | **P0** | Phase 8 |
 | **GIS-PROP-003** | `sdk::tools` | Tactical Aeronautical Measurement Tools (RBL, CRSR, PPL, Holding) | ✅ **Completed** (Core, WASM, Native, TS SDK) | **P1** | Phase 9 |
-| **GIS-PROP-008** | `sdk::renderer` | 8-Octant Force-Directed Label Anti-Cluttering Engine | 🟡 **Partially Foundational** (4-quadrant greedy in `cpu.ts`) | **P1** | Phase 9 |
 | **GIS-PROP-004** | `core::aeronautical` | Aeronautical Data Ingestion (AIXM 5.1 & GeoJSON-Aviation) | ✅ **Completed** (Core, WASM, C-FFI, TS SDK) | **P1** | Phase 9 |
 | **GIS-PROP-005** | `core::terrain` | Civil Cloud Terrain Ingestion (COG & Mapbox RGB Elevation) | ✅ **Completed** (Core, WASM, C-FFI, TS SDK) | **P2** | Phase 10 |
 | **GIS-PROP-006** | `sdk::layers` | Meteorological Overlays (Radar dBZ, Wind Barbs & Isolines) | ✅ **Completed** (Core, WASM, C-FFI, TS SDK) | **P2** | Phase 11 |
 | **GIS-PROP-007** | `core::volumetric` / `sdk::layers` | 3D Volumetric Airspace & Trajectory Ribbon GPU Shaders | ✅ **Completed** (Core, WASM, C-FFI, WGPU, TS SDK) | **P2** | Phase 10 |
+| **GIS-PROP-008** | `core::declutter` / `sdk::renderer` | 8-Octant Force-Directed Label Anti-Cluttering Engine | ✅ **Completed** (Core, WASM, C-FFI, TS SDK) | **P1** | Phase 9 |
 
 ---
 

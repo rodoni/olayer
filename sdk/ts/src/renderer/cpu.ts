@@ -1,5 +1,6 @@
 import { WasmProjection, lla_to_ecef } from "olayer-wasm";
 import { SymbolUV } from "./atlas";
+import { LabelAntiClutterEngine, DeclutterTargetInput, SolvedLabelPlacement } from "./declutter";
 
 export interface InterpolatedTarget {
   id: string;
@@ -14,9 +15,11 @@ export interface InterpolatedTarget {
 export class CPURenderer {
   private ctx: CanvasRenderingContext2D;
   private occupiedRects: { x: number; y: number; w: number; h: number }[] = [];
+  public declutterEngine: LabelAntiClutterEngine;
 
-  constructor(ctx: CanvasRenderingContext2D) {
+  constructor(ctx: CanvasRenderingContext2D, leaderLengthPx = 28, safetyMarginPx = 3) {
     this.ctx = ctx;
+    this.declutterEngine = new LabelAntiClutterEngine(leaderLengthPx, safetyMarginPx);
   }
 
   /**
@@ -48,56 +51,40 @@ export class CPURenderer {
   ): { x: number; y: number } | null {
     if (viewMode === "3D" && viewProjMatrix && centerLat !== undefined && centerLon !== undefined) {
       try {
-        // 1. Convert LLA to ECEF using WASM's lla_to_ecef
-        const xyz = lla_to_ecef(latRad, lonRad, height);
-        const X = xyz[0];
-        const Y = xyz[1];
-        const Z = xyz[2];
+        const ecef = lla_to_ecef(latRad, lonRad, height);
+        const centerEcef = lla_to_ecef(centerLat, centerLon, 0.0);
 
-        // 2. Horizon occlusion culling
-        // Calculate camera ECEF coordinates
-        const R = 6378137.0;
-        const baseDistance = 15000000.0;
-        const distance = R + (baseDistance / zoom);
-        const camXyz = lla_to_ecef(centerLat, centerLon, distance - R);
-        
-        // Dot product between camera ECEF and target ECEF
-        const dot = camXyz[0] * X + camXyz[1] * Y + camXyz[2] * Z;
-        if (dot < R * R) {
-          // Culled (blocked by earth)
+        const relX = ecef[0] - centerEcef[0];
+        const relY = ecef[1] - centerEcef[1];
+        const relZ = ecef[2] - centerEcef[2];
+
+        const m = viewProjMatrix;
+        const wNdc = m[3] * relX + m[7] * relY + m[11] * relZ + m[15];
+        if (wNdc <= 0.0) {
           return null;
         }
 
-        // 3. Project using view-projection matrix (column-major)
-        const m = viewProjMatrix;
-        const wNdc = m[3] * X + m[7] * Y + m[11] * Z + m[15];
-        if (wNdc <= 0.0) {
-          return null; // Behind near plane
-        }
-
-        const xNdc = m[0] * X + m[4] * Y + m[8] * Z + m[12];
-        const yNdc = m[1] * X + m[5] * Y + m[9] * Z + m[13];
+        const xNdc = m[0] * relX + m[4] * relY + m[8] * relZ + m[12];
+        const yNdc = m[1] * relX + m[5] * relY + m[9] * relZ + m[13];
 
         const screenX = (xNdc / wNdc + 1) * 0.5 * canvasWidth;
         const screenY = (1 - yNdc / wNdc) * 0.5 * canvasHeight;
 
         return { x: screenX, y: screenY };
-      } catch (err) {
+      } catch {
         return null;
       }
     } else if (viewMode === "2.5D" && viewProjMatrix) {
       try {
-        // 1. Project target coordinates to flat map planar meters
         const xy = projection.project(latRad, lonRad, 0.0);
         const X = xy[0];
         const Y = xy[1];
-        const Z = height; // Z-axis is aircraft altitude in meters
+        const Z = height;
 
-        // 2. Project using view-projection matrix (column-major)
         const m = viewProjMatrix;
         const wNdc = m[3] * X + m[7] * Y + m[11] * Z + m[15];
         if (wNdc <= 0.0) {
-          return null; // Behind near plane
+          return null;
         }
 
         const xNdc = m[0] * X + m[4] * Y + m[8] * Z + m[12];
@@ -107,26 +94,22 @@ export class CPURenderer {
         const screenY = (1 - yNdc / wNdc) * 0.5 * canvasHeight;
 
         return { x: screenX, y: screenY };
-      } catch (err) {
+      } catch {
         return null;
       }
     }
 
     try {
-      // 1. Project to planar meters
       const xy = projection.project(latRad, lonRad, height);
       const px = xy[0];
       const py = xy[1];
 
-      // 2. Translate by camera center
       const tx = px - cx;
       const ty = py - cy;
 
-      // 3. Rotate by negative camera rotation
       const rx = tx * Math.cos(-rotation) - ty * Math.sin(-rotation);
       const ry = tx * Math.sin(-rotation) + ty * Math.cos(-rotation);
 
-      // 4. Map to Normalized Device Coordinates (NDC)
       const aspect = canvasWidth / canvasHeight;
       const w = viewportBaseMeters / zoom;
       const h = w / aspect;
@@ -134,7 +117,6 @@ export class CPURenderer {
       const ndcX = rx / (w / 2);
       const ndcY = ry / (h / 2);
 
-      // 5. Convert to screen pixels
       const screenX = (ndcX + 1) * 0.5 * canvasWidth;
       const screenY = (1 - ndcY) * 0.5 * canvasHeight;
 
@@ -173,7 +155,6 @@ export class CPURenderer {
     ctx.translate(screenPos.x, screenPos.y);
 
     if (atlasTexture && symbolUv) {
-      // Draw from Texture Atlas
       const sw = symbolUv.width;
       const sh = symbolUv.height;
       ctx.drawImage(
@@ -188,27 +169,22 @@ export class CPURenderer {
         sh
       );
     } else {
-      // Fallback: draw standard ATC target symbol (square/circle)
-      ctx.fillStyle = "#00e676"; // Bright green
+      ctx.fillStyle = "#00e676";
       ctx.strokeStyle = "#00e676";
       ctx.lineWidth = 1.5;
       
-      // Target dot
       ctx.beginPath();
       ctx.arc(0, 0, 4, 0, 2 * Math.PI);
       ctx.fill();
-
-      // Outer square
       ctx.strokeRect(-6, -6, 12, 12);
     }
     ctx.restore();
 
     // Draw velocity vector (1-minute prediction)
     if (speedMps > 0.5) {
-      const R = 6378137.0; // Earth radius
-      const vectorTimeSec = 60; // 1 minute prediction
+      const R = 6378137.0;
+      const vectorTimeSec = 60;
 
-      // Approximation of displacement on sphere
       const latOffset = (speedMps * vectorTimeSec * Math.cos(target.heading_rad)) / R;
       const lonOffset = (speedMps * vectorTimeSec * Math.sin(target.heading_rad)) / (R * Math.cos(target.position.lat));
 
@@ -235,9 +211,9 @@ export class CPURenderer {
 
       if (screenEnd) {
         ctx.save();
-        ctx.strokeStyle = "#00b0ff"; // Sleek blue vector line
+        ctx.strokeStyle = "#00b0ff";
         ctx.lineWidth = 1.5;
-        ctx.setLineDash([2, 2]); // Dashed predictive line
+        ctx.setLineDash([2, 2]);
         ctx.beginPath();
         ctx.moveTo(screenPos.x, screenPos.y);
         ctx.lineTo(screenEnd.x, screenEnd.y);
@@ -246,7 +222,7 @@ export class CPURenderer {
       }
     }
 
-    // 3. Draw Data Block with Anti-cluttering
+    // 3. Draw Data Block with 8-Octant Force-Directed Anti-cluttering
     const altitudeFeet = Math.round(target.position.height * 3.28084);
     const fl = Math.round(altitudeFeet / 100);
     const speedKnots = Math.round(speedMps * 1.94384);
@@ -254,84 +230,85 @@ export class CPURenderer {
     const line1 = target.id;
     const line2 = `FL${fl.toString().padStart(3, "0")} ${speedKnots}KT`;
 
-    // Measure label size
     ctx.font = "bold 11px 'Inter', 'Roboto', sans-serif";
     const w1 = ctx.measureText(line1).width;
     const w2 = ctx.measureText(line2).width;
     const labelW = Math.max(w1, w2) + 8;
     const labelH = 26;
 
-    // Define 4 candidate offsets (TR, BR, BL, TL)
-    const offsets = [
-      { dx: 15, dy: -30 }, // Top-Right (default)
-      { dx: 15, dy: 10 },  // Bottom-Right
-      { dx: -labelW - 15, dy: 10 }, // Bottom-Left
-      { dx: -labelW - 15, dy: -30 }, // Top-Left
-    ];
+    const targetInput: DeclutterTargetInput = {
+      id: target.id,
+      x: screenPos.x,
+      y: screenPos.y,
+      headingRad: target.heading_rad,
+      width: labelW,
+      height: labelH,
+      priority: 0,
+    };
 
-    let chosenOffset = null;
-    let labelRect = { x: 0, y: 0, w: labelW, h: labelH };
+    const solved = this.declutterEngine.solve([targetInput]);
+    if (solved.length > 0) {
+      const placement = solved[0];
+      this.occupiedRects.push({
+        x: placement.rect.x,
+        y: placement.rect.y,
+        w: placement.rect.width,
+        h: placement.rect.height,
+      });
 
-    for (const offset of offsets) {
-      const rx = screenPos.x + offset.dx;
-      const ry = screenPos.y + offset.dy;
-
-      // Construct candidate bounding box with a small safety margin
-      const candidate = {
-        x: rx - 2,
-        y: ry - 2,
-        w: labelW + 4,
-        h: labelH + 4,
-      };
-
-      if (!this.checkOverlap(candidate)) {
-        chosenOffset = offset;
-        labelRect = { x: rx, y: ry, w: labelW, h: labelH };
-        break;
-      }
+      this.renderLabelBlock(placement, line1, line2);
     }
+  }
 
-    // Draw label if we found a non-cluttered position
-    if (chosenOffset) {
-      this.occupiedRects.push(labelRect);
+  /**
+   * Renders a solved label block with leader line and text.
+   */
+  public renderLabelBlock(
+    placement: SolvedLabelPlacement,
+    line1: string,
+    line2: string
+  ): void {
+    const ctx = this.ctx;
+    ctx.save();
 
-      ctx.save();
-      
-      // Draw leader line from target to label anchor
-      let leaderEndX = labelRect.x;
-      let leaderEndY = labelRect.y + labelH / 2;
-      if (chosenOffset.dx < 0) {
-        leaderEndX = labelRect.x + labelW;
-      }
-      
-      ctx.strokeStyle = "rgba(0, 230, 118, 0.4)";
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(screenPos.x, screenPos.y);
-      ctx.lineTo(leaderEndX, leaderEndY);
-      ctx.stroke();
+    // Draw leader line
+    ctx.strokeStyle = "rgba(0, 230, 118, 0.5)";
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(placement.leaderStart[0], placement.leaderStart[1]);
+    ctx.lineTo(placement.leaderEnd[0], placement.leaderEnd[1]);
+    ctx.stroke();
 
-      // Draw label background box
-      ctx.fillStyle = "rgba(16, 18, 24, 0.85)"; // Sleek semi-transparency
-      ctx.strokeStyle = "rgba(0, 230, 118, 0.6)"; // Muted green border
-      ctx.lineWidth = 1;
-      ctx.fillRect(labelRect.x, labelRect.y, labelRect.w, labelRect.h);
-      ctx.strokeRect(labelRect.x, labelRect.y, labelRect.w, labelRect.h);
+    // Draw background box
+    ctx.fillStyle = "rgba(16, 18, 24, 0.88)";
+    ctx.strokeStyle = "rgba(0, 230, 118, 0.65)";
+    ctx.lineWidth = 1;
+    ctx.fillRect(
+      placement.rect.x,
+      placement.rect.y,
+      placement.rect.width,
+      placement.rect.height
+    );
+    ctx.strokeRect(
+      placement.rect.x,
+      placement.rect.y,
+      placement.rect.width,
+      placement.rect.height
+    );
 
-      // Draw label text
-      ctx.fillStyle = "#00e676"; // Bright radar green
-      ctx.fillText(line1, labelRect.x + 4, labelRect.y + 11);
-      ctx.fillStyle = "#b9f6ca"; // Soft green
-      ctx.fillText(line2, labelRect.x + 4, labelRect.y + 22);
+    // Draw label text
+    ctx.fillStyle = "#00e676";
+    ctx.fillText(line1, placement.rect.x + 4, placement.rect.y + 11);
+    ctx.fillStyle = "#b9f6ca";
+    ctx.fillText(line2, placement.rect.x + 4, placement.rect.y + 22);
 
-      ctx.restore();
-    }
+    ctx.restore();
   }
 
   /**
    * Checks if the candidate bounding box overlaps with any already occupied screen regions.
    */
-  private checkOverlap(rect: { x: number; y: number; w: number; h: number }): boolean {
+  public checkOverlap(rect: { x: number; y: number; w: number; h: number }): boolean {
     for (const r of this.occupiedRects) {
       if (
         rect.x < r.x + r.w &&
@@ -339,7 +316,7 @@ export class CPURenderer {
         rect.y < r.y + r.h &&
         rect.y + rect.h > r.y
       ) {
-        return true; // Overlap detected
+        return true;
       }
     }
     return false;

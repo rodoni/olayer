@@ -127,6 +127,34 @@ struct C_NavaidSummary {
 typedef SigmetDataset SigmetDataset;
 
 /**
+ * C-compatible target descriptor for label deconfliction.
+ */
+struct C_LabelTarget {
+  float x;
+  float y;
+  float heading_rad;
+  float width;
+  float height;
+  uint8_t priority;
+};
+
+/**
+ * C-compatible solved placement for a label.
+ */
+struct C_LabelPlacement {
+  float rect_x;
+  float rect_y;
+  float rect_width;
+  float rect_height;
+  float leader_start_x;
+  float leader_start_y;
+  float leader_end_x;
+  float leader_end_y;
+  uint8_t octant;
+  float cost;
+};
+
+/**
  * Creates a new TerrainEngine instance and returns an opaque pointer.
  */
 TerrainEngine *olayer_terrain_engine_create(void);
@@ -667,5 +695,16 @@ int olayer_volumetric_generate_trajectory_ribbon(const struct C_LatLon *waypoint
                                                  uint32_t *out_indices,
                                                  uintptr_t max_indices,
                                                  uintptr_t *out_indices_count);
+
+/**
+ * Solves optimal 8-octant non-overlapping label placements for a batch of screen targets.
+ */
+int olayer_declutter_solve_labels(const struct C_LabelTarget *targets,
+                                  uintptr_t targets_len,
+                                  float leader_length_px,
+                                  float safety_margin_px,
+                                  struct C_LabelPlacement *out_placements,
+                                  uintptr_t max_placements,
+                                  uintptr_t *out_placements_count);
 
 #endif /* OLAYER_NATIVE_H */

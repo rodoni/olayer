@@ -17,6 +17,7 @@
 //! | `aeronautical` | Aeronautical data ingestion (AIXM 5.1 & GeoJSON-Aviation) |
 //! | `weather` | Meteorological overlays (dBZ radar colorization, aviation wind barbs, Marching Squares isolines, SIGMETs) |
 //! | `volumetric` | 3D volumetric airspace polyhedrons and 3D flight trajectory ribbon mesh generation |
+//! | `declutter` | 8-octant force-directed label anti-cluttering engine |
 
 pub mod geodesy;
 pub mod camera;
@@ -28,3 +29,4 @@ pub mod interpolator;
 pub mod aeronautical;
 pub mod weather;
 pub mod volumetric;
+pub mod declutter;

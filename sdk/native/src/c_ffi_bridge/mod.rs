@@ -1670,6 +1670,111 @@ pub unsafe extern "C" fn olayer_volumetric_generate_trajectory_ribbon(
     0
 }
 
+// ============================================================================
+// 8-OCTANT LABEL ANTI-CLUTTERING ENGINE (GIS-PROP-008)
+// ============================================================================
+
+/// C-compatible target descriptor for label deconfliction.
+#[repr(C)]
+#[derive(Copy, Clone, Debug)]
+pub struct C_LabelTarget {
+    pub x: f32,
+    pub y: f32,
+    pub heading_rad: f32, // negative if unknown/none
+    pub width: f32,
+    pub height: f32,
+    pub priority: u8,
+}
+
+/// C-compatible solved placement for a label.
+#[repr(C)]
+#[derive(Copy, Clone, Debug)]
+pub struct C_LabelPlacement {
+    pub rect_x: f32,
+    pub rect_y: f32,
+    pub rect_width: f32,
+    pub rect_height: f32,
+    pub leader_start_x: f32,
+    pub leader_start_y: f32,
+    pub leader_end_x: f32,
+    pub leader_end_y: f32,
+    pub octant: u8,
+    pub cost: f32,
+}
+
+/// Solves optimal 8-octant non-overlapping label placements for a batch of screen targets.
+#[no_mangle]
+pub unsafe extern "C" fn olayer_declutter_solve_labels(
+    targets: *const C_LabelTarget,
+    targets_len: usize,
+    leader_length_px: f32,
+    safety_margin_px: f32,
+    out_placements: *mut C_LabelPlacement,
+    max_placements: usize,
+    out_placements_count: *mut usize,
+) -> c_int {
+    if targets.is_null() || out_placements.is_null() || out_placements_count.is_null() {
+        return -1;
+    }
+    if targets_len == 0 {
+        *out_placements_count = 0;
+        return 0;
+    }
+    if max_placements < targets_len {
+        return -2; // Output buffer too small
+    }
+
+    let t_slice = std::slice::from_raw_parts(targets, targets_len);
+    let mut core_targets = Vec::with_capacity(targets_len);
+
+    for (i, t) in t_slice.iter().enumerate() {
+        let heading_rad = if t.heading_rad >= 0.0 {
+            Some(t.heading_rad)
+        } else {
+            None
+        };
+        core_targets.push(olayer_core::declutter::LabelTarget {
+            id: format!("target_{i}"),
+            x: t.x,
+            y: t.y,
+            heading_rad,
+            width: t.width,
+            height: t.height,
+            priority: t.priority,
+        });
+    }
+
+    let mut config = olayer_core::declutter::DeclutterConfig::default();
+    if leader_length_px > 0.0 {
+        config.leader_length_px = leader_length_px;
+    }
+    if safety_margin_px >= 0.0 {
+        config.safety_margin_px = safety_margin_px;
+    }
+
+    let engine = olayer_core::declutter::DeclutterEngine::new(config);
+    let solved = engine.solve(&core_targets);
+
+    let out_slice = std::slice::from_raw_parts_mut(out_placements, targets_len);
+    for (i, p) in solved.into_iter().enumerate() {
+        out_slice[i] = C_LabelPlacement {
+            rect_x: p.rect.x,
+            rect_y: p.rect.y,
+            rect_width: p.rect.width,
+            rect_height: p.rect.height,
+            leader_start_x: p.leader_start[0],
+            leader_start_y: p.leader_start[1],
+            leader_end_x: p.leader_end[0],
+            leader_end_y: p.leader_end[1],
+            octant: p.octant as u8,
+            cost: p.cost,
+        };
+    }
+
+    *out_placements_count = targets_len;
+    0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2448,6 +2553,53 @@ mod tests {
             assert_eq!(r2, 0);
             assert_eq!(out_ribbon_verts_count, 6 * 9);
             assert_eq!(out_ribbon_indices_count, 12);
+
+            // 3. Label Anti-Cluttering
+            let targets = [
+                C_LabelTarget {
+                    x: 100.0,
+                    y: 100.0,
+                    heading_rad: -1.0,
+                    width: 50.0,
+                    height: 20.0,
+                    priority: 0,
+                },
+                C_LabelTarget {
+                    x: 105.0,
+                    y: 105.0,
+                    heading_rad: -1.0,
+                    width: 50.0,
+                    height: 20.0,
+                    priority: 1,
+                },
+            ];
+
+            let mut placements = [C_LabelPlacement {
+                rect_x: 0.0,
+                rect_y: 0.0,
+                rect_width: 0.0,
+                rect_height: 0.0,
+                leader_start_x: 0.0,
+                leader_start_y: 0.0,
+                leader_end_x: 0.0,
+                leader_end_y: 0.0,
+                octant: 0,
+                cost: 0.0,
+            }; 2];
+            let mut placements_count = 0;
+
+            let r3 = olayer_declutter_solve_labels(
+                targets.as_ptr(),
+                2,
+                25.0,
+                2.0,
+                placements.as_mut_ptr(),
+                2,
+                &mut placements_count,
+            );
+            assert_eq!(r3, 0);
+            assert_eq!(placements_count, 2);
+            assert_ne!(placements[0].octant, placements[1].octant);
         }
     }
 }

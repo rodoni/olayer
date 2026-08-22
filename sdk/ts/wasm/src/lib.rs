@@ -1515,6 +1515,107 @@ pub fn generate_trajectory_ribbon_mesh(
     Ok(WasmRibbonMesh { inner: mesh })
 }
 
+// ============================================================================
+// 8-Octant Force-Directed Label Anti-Cluttering Engine (GIS-PROP-008)
+// ============================================================================
+
+/// Solves 8-octant non-overlapping label placements for a batch of targets.
+///
+/// # Arguments
+/// * `targets_flat` - Flat array of target descriptors:
+///   `[x, y, heading_rad_or_neg1, width, height, priority, ...]` (6 floats per target).
+/// * `leader_length_px` - Nominal leader arm length in pixels (e.g. 28.0).
+/// * `safety_margin_px` - Extra safety margin around label boxes in pixels (e.g. 3.0).
+///
+/// # Returns
+/// Flat array of solved placements:
+/// `[rect_x, rect_y, rect_w, rect_h, leader_start_x, leader_start_y, leader_end_x, leader_end_y, octant_u8, cost, ...]`
+/// (10 floats per target, in the same sequence as input).
+#[wasm_bindgen]
+pub fn solve_label_placements_flat(
+    targets_flat: &[f32],
+    leader_length_px: f32,
+    safety_margin_px: f32,
+) -> Result<Vec<f32>, JsValue> {
+    if !targets_flat.len().is_multiple_of(6) {
+        return Err(JsValue::from_str(
+            "targets_flat must contain a multiple of 6 floats: [x, y, heading_or_neg1, width, height, priority]",
+        ));
+    }
+
+    let num_targets = targets_flat.len() / 6;
+    let mut targets = Vec::with_capacity(num_targets);
+
+    for i in 0..num_targets {
+        let x = targets_flat[i * 6];
+        let y = targets_flat[i * 6 + 1];
+        let hdg_val = targets_flat[i * 6 + 2];
+        let width = targets_flat[i * 6 + 3];
+        let height = targets_flat[i * 6 + 4];
+        let priority = targets_flat[i * 6 + 5] as u8;
+
+        let heading_rad = if hdg_val >= 0.0 { Some(hdg_val) } else { None };
+
+        targets.push(olayer_core::declutter::LabelTarget {
+            id: format!("target_{i}"),
+            x,
+            y,
+            heading_rad,
+            width,
+            height,
+            priority,
+        });
+    }
+
+    let mut config = olayer_core::declutter::DeclutterConfig::default();
+    if leader_length_px > 0.0 {
+        config.leader_length_px = leader_length_px;
+    }
+    if safety_margin_px >= 0.0 {
+        config.safety_margin_px = safety_margin_px;
+    }
+
+    let engine = olayer_core::declutter::DeclutterEngine::new(config);
+    let solved = engine.solve(&targets);
+
+    let mut out = Vec::with_capacity(num_targets * 10);
+    for p in solved {
+        out.push(p.rect.x);
+        out.push(p.rect.y);
+        out.push(p.rect.width);
+        out.push(p.rect.height);
+        out.push(p.leader_start[0]);
+        out.push(p.leader_start[1]);
+        out.push(p.leader_end[0]);
+        out.push(p.leader_end[1]);
+        out.push(p.octant as u8 as f32);
+        out.push(p.cost);
+    }
+
+    Ok(out)
+}
+
+/// Solves 8-octant non-overlapping label placements from JSON input and returns JSON array of placements.
+#[wasm_bindgen]
+pub fn solve_label_placements_json(
+    targets_json: &str,
+    leader_length_px: f32,
+) -> Result<String, JsValue> {
+    let targets: Vec<olayer_core::declutter::LabelTarget> = serde_json::from_str(targets_json)
+        .map_err(|e| JsValue::from_str(&format!("Invalid targets JSON: {e}")))?;
+
+    let mut config = olayer_core::declutter::DeclutterConfig::default();
+    if leader_length_px > 0.0 {
+        config.leader_length_px = leader_length_px;
+    }
+
+    let engine = olayer_core::declutter::DeclutterEngine::new(config);
+    let solved = engine.solve(&targets);
+
+    serde_json::to_string(&solved)
+        .map_err(|e| JsValue::from_str(&format!("Serialization error: {e}")))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2262,5 +2363,23 @@ mod unit_tests {
         assert_eq!(ribbon.vertex_count(), 6);
         assert_eq!(ribbon.index_count(), 12);
         assert_eq!(ribbon.vertices().len(), 6 * 9);
+    }
+
+    #[test]
+    fn test_wasm_declutter_pure() {
+        // Two targets nearby: [x, y, heading, width, height, priority]
+        let targets = [
+            100.0, 100.0, -1.0, 50.0, 20.0, 0.0,
+            105.0, 105.0, -1.0, 50.0, 20.0, 1.0,
+        ];
+        let solved = solve_label_placements_flat(&targets, 25.0, 2.0).unwrap();
+        assert_eq!(solved.len(), 20); // 2 targets * 10 floats
+
+        // Verify JSON interface
+        let json_in = r#"[
+            {"id": "T1", "x": 100.0, "y": 100.0, "heading_rad": null, "width": 50.0, "height": 20.0, "priority": 0}
+        ]"#;
+        let json_out = solve_label_placements_json(json_in, 25.0).unwrap();
+        assert!(json_out.contains("NorthEast"));
     }
 }

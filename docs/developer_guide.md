@@ -40,6 +40,7 @@ graph TB
         Aero["🛫 Aeronautical"]:::core
         Weather["⛈️ Weather"]:::core
         Volumetric["📦 Volumetric (3D Airspace & Ribbon)"]:::core
+        Declutter["🏷️ Declutter (8-Octant Engine)"]:::core
     end
 
     HostWeb --> TSSDK
@@ -54,6 +55,7 @@ graph TB
     WASMBridge --> Aero
     WASMBridge --> Weather
     WASMBridge --> Volumetric
+    WASMBridge --> Declutter
 
     HostDesktop --> NativeSDK
     NativeSDK --> Geodesy
@@ -61,6 +63,7 @@ graph TB
     NativeSDK --> Projections
     NativeSDK --> Terrain
     NativeSDK --> Volumetric
+    NativeSDK --> Declutter
     NativeSDK --> Symbols
     NativeSDK --> Interp
     NativeSDK --> Aero
@@ -1396,6 +1399,25 @@ const ribbonLayer = new TrajectoryRibbonLayer("flight-ribbons", {
 // Add aircraft track: waypoints [lat0, lon0, alt0, lat1, lon1, alt1, ...]
 ribbonLayer.addTrajectory("AFR123", [40.0, -74.0, 1000, 40.5, -73.5, 5000, 41.0, -73.0, 10000]);
 controller.layerManager.addLayer(ribbonLayer);
+```
+
+### 16.5 8-Octant Force-Directed Label Anti-Cluttering Engine
+
+`CPURenderer` and `LabelAntiClutterEngine` automatically deconflict target data blocks across 8 radial directions (N, NE, E, SE, S, SW, W, NW) using spatial hash grid partitioning, heading avoidance, and leader line crossing minimization:
+
+```typescript
+import { LabelAntiClutterEngine, OctantDirection } from "olayer-sdk";
+
+const declutterEngine = new LabelAntiClutterEngine(28, 3); // 28px leader, 3px safety margin
+
+const placements = declutterEngine.solve([
+  { id: "AFR101", x: 400, y: 300, headingRad: 0.785, width: 60, height: 26, priority: 0 },
+  { id: "BAW202", x: 405, y: 305, headingRad: null,  width: 60, height: 26, priority: 1 },
+]);
+
+for (const p of placements) {
+  console.log(`Target ${p.id} placed at octant ${OctantDirection[p.octant]} (cost: ${p.cost.toFixed(2)})`);
+}
 ```
 
 See [`conformance.md`](conformance.md), [`core_api_inventory.md`](core_api_inventory.md),

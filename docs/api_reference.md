@@ -623,6 +623,46 @@ pub fn signed_area_2d(points: &[[f64; 2]]) -> f64
 
 ---
 
+### 1.11 `declutter` — 8-Octant Force-Directed Label Anti-Cluttering Engine
+
+Sub-modules: `types`, `spatial_grid`, `engine`.
+
+```rust
+pub enum OctantDirection { North, NorthEast, East, SouthEast, South, SouthWest, West, NorthWest }
+
+pub struct Rect2D { pub x: f32, pub y: f32, pub width: f32, pub height: f32 }
+
+pub struct LabelTarget {
+    pub id: String, pub x: f32, pub y: f32,
+    pub heading_rad: Option<f32>,
+    pub width: f32, pub height: f32,
+    pub priority: u8,
+}
+
+pub struct LabelPlacement {
+    pub id: String, pub octant: OctantDirection,
+    pub rect: Rect2D,
+    pub leader_start: [f32; 2], pub leader_end: [f32; 2],
+    pub cost: f32, pub visible: bool,
+}
+
+pub struct DeclutterConfig {
+    pub leader_length_px: f32, pub safety_margin_px: f32,
+    pub weight_overlap: f32, pub weight_heading: f32,
+    pub weight_leader_crossing: f32, pub weight_preference: f32,
+    pub max_iterations: usize,
+}
+
+pub struct DeclutterEngine { /* ... */ }
+impl DeclutterEngine {
+    pub fn new(config: DeclutterConfig) -> Self
+    pub fn with_default_config() -> Self
+    pub fn solve(&self, targets: &[LabelTarget]) -> Vec<LabelPlacement>
+}
+```
+
+---
+
 ## 2. WASM Bridge (`olayer-wasm`)
 
 All `#[wasm_bindgen]` structs. Errors returned as `JsValue` strings.

@@ -18,6 +18,7 @@ intentionally module-level; signatures remain in `docs/api_reference.md`.
 | `aeronautical` data ingestion | Exposed through `WasmAeronauticalDataset` | Exposed through `olayer_aeronautical_*` | AIXM 5.1 XML and GeoJSON-Aviation parsing, spatial queries, and GeoJSON export |
 | `weather` overlays | Exposed through `WasmSigmetDataset`, `colorize_dbz_grid`, `generate_wind_barb_geometry`, `generate_isolines` | Exposed through `olayer_weather_*` and `olayer_sigmet_*` | Radar dBZ colorization (NEXRAD/ICAO), aviation wind barbs, Marching Squares isolines, SIGMET/AIRMET hazard polygon containment |
 | `volumetric` airspaces & ribbons | Exposed through `WasmVolumetricMesh`, `WasmRibbonMesh`, `generate_airspace_volume_mesh`, `generate_trajectory_ribbon_mesh` | Exposed through `olayer_volumetric_*` | 3D extruded airspace volume mesh generation (sidewalls + caps) and 3D flight trajectory ribbon extrusion with altitude/scalar gradient mapping |
+| `declutter` label anti-cluttering | Exposed through `solve_label_placements_flat`, `solve_label_placements_json` | Exposed through `olayer_declutter_solve_labels` | 8-octant force-directed label anti-cluttering engine with spatial grid partitioning and heading deconfliction |
 
 Changes to a public core module must update this table and the generated/API
 reference checks before merging.
