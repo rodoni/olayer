@@ -358,23 +358,30 @@ In 2.5D profile and 3D globe views:
    WGS84 Surface    +---------------------------------+ (Footprint)
 ```
 
-#### Proposed GPU Vertex Extrusion Shader (WebGL2 / WGPU)
+#### Implemented Core & SDK Volumetric Architecture
 
-```glsl
-#version 300 es
-// Extrudes a 2D geodesic polygon into a 3D volumetric prism
-in vec3 a_lla_floor;   // (lat_rad, lon_rad, floor_height_m)
-in vec3 a_lla_ceiling; // (lat_rad, lon_rad, ceiling_height_m)
-in float a_extrusion;  // 0.0 = floor vertex, 1.0 = ceiling vertex
+* **Rust Core Engine:** `core::volumetric` (`triangulation`, `airspace_mesh`, `ribbon_mesh`, `types`, `errors`)
+  - Ear-clipping 2D polygon triangulation for convex/concave footprints and top/bottom cap generation.
+  - Sidewall quad decomposition into outward-facing ECEF triangles with surface normals, height ratios ($0.0 \dots 1.0$), and boundary edge flags.
+  - Continuous 3D flight trajectory ribbon mesh generator with mitered corner joints, along-track distance ($v$), lateral width coordinates ($u \in [0, 1]$), and scalar gradient attributes.
+* **WASM Bridge:** `WasmVolumetricMesh`, `WasmRibbonMesh`, `generate_airspace_volume_mesh`, `generate_trajectory_ribbon_mesh`
+* **C-FFI Bridge:** `olayer_volumetric_generate_airspace_mesh`, `olayer_volumetric_generate_trajectory_ribbon`
+* **Native Desktop WGPU Pipeline:** `WgpuVolumetricPipeline` (`sdk/native/src/wgpu_volumetric_pipeline/`) with hardware-accelerated WGSL shaders for Fresnel rim glow, alpha blending, and altitude color ramps.
+* **TypeScript SDK Layers:** `VolumetricAirspaceLayer`, `TrajectoryRibbonLayer` (`sdk/ts/src/layers/`)
 
-uniform mat4 u_viewProjMatrix;
-out float v_heightRatio;
+```typescript
+export class VolumetricAirspaceLayer extends Layer {
+  constructor(id: string, options?: VolumetricAirspaceOptions);
+  public addAirspace(id: string, polygonDeg: number[], floorM: number, ceilingM: number): void;
+  public removeAirspace(id: string): boolean;
+  public getAirspaceMesh(id: string): AirspaceMeshRecord | undefined;
+}
 
-void main() {
-    v_heightRatio = a_extrusion;
-    vec3 lla = mix(a_lla_floor, a_lla_ceiling, a_extrusion);
-    vec3 ecef = lla_to_ecef(lla);
-    gl_Position = u_viewProjMatrix * vec4(ecef, 1.0);
+export class TrajectoryRibbonLayer extends Layer {
+  constructor(id: string, options?: TrajectoryRibbonOptions);
+  public addTrajectory(id: string, waypointsDeg: number[], ribbonWidthM?: number, scalars?: number[]): void;
+  public removeTrajectory(id: string): boolean;
+  public getRibbonMesh(id: string): TrajectoryRibbonRecord | undefined;
 }
 ```
 
@@ -407,12 +414,12 @@ Olayer needs an **8-Octant Multi-Leader Resolver with Force-Directed Relaxation*
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **GIS-PROP-001** | `core::geodesy` | Local Tangent Plane (ENU/NED) & World Magnetic Model (WMM) | ✅ **Completed** (Core, WASM, C-FFI) | **P0** | Phase 8 |
 | **GIS-PROP-002** | `core::spatial` | Geodesic Spatial Analysis (Containment, Buffers, XTK/ATD) | ✅ **Completed** (Core, WASM, C-FFI) | **P0** | Phase 8 |
-| **GIS-PROP-003** | `sdk::tools` | Tactical Aeronautical Measurement Tools (RBL, CRSR, PPL, Holding) | ✅ **Completed** (WASM & TS SDK) | **P1** | Phase 9 |
+| **GIS-PROP-003** | `sdk::tools` | Tactical Aeronautical Measurement Tools (RBL, CRSR, PPL, Holding) | ✅ **Completed** (Core, WASM, Native, TS SDK) | **P1** | Phase 9 |
 | **GIS-PROP-008** | `sdk::renderer` | 8-Octant Force-Directed Label Anti-Cluttering Engine | 🟡 **Partially Foundational** (4-quadrant greedy in `cpu.ts`) | **P1** | Phase 9 |
 | **GIS-PROP-004** | `core::aeronautical` | Aeronautical Data Ingestion (AIXM 5.1 & GeoJSON-Aviation) | ✅ **Completed** (Core, WASM, C-FFI, TS SDK) | **P1** | Phase 9 |
 | **GIS-PROP-005** | `core::terrain` | Civil Cloud Terrain Ingestion (COG & Mapbox RGB Elevation) | ✅ **Completed** (Core, WASM, C-FFI, TS SDK) | **P2** | Phase 10 |
 | **GIS-PROP-006** | `sdk::layers` | Meteorological Overlays (Radar dBZ, Wind Barbs & Isolines) | ✅ **Completed** (Core, WASM, C-FFI, TS SDK) | **P2** | Phase 11 |
-| **GIS-PROP-007** | `sdk::renderer` | 3D Volumetric Airspace & Trajectory Ribbon GPU Shaders | ⏳ **Pending** | **P2** | Phase 10 |
+| **GIS-PROP-007** | `core::volumetric` / `sdk::layers` | 3D Volumetric Airspace & Trajectory Ribbon GPU Shaders | ✅ **Completed** (Core, WASM, C-FFI, WGPU, TS SDK) | **P2** | Phase 10 |
 
 ---
 
