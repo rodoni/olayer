@@ -33,10 +33,14 @@ graph TB
         geodesy["📐 Geodesy Engine<br>[Component]<br>WGS84 ellipsoidal calculations and ECEF conversions."]:::core
         camera["📷 Camera Engine<br>[Component]<br>CameraState management and View-Proj matrices for 2D/2.5D/3D."]:::core
         projections["🗺️ Projections Engine<br>[Component]<br>Cartographic matrices and LCC, Stereographic, and Mercator projections."]:::core
-        terrain["⛰️ Terrain Engine (DTED)<br>[Component]<br>O(1) altitude spatial indexer and 2.5D profile."]:::core
+        terrain["⛰️ Terrain Engine (DTED/RGB/COG)<br>[Component]<br>O(1) altitude spatial indexer and 2.5D profile."]:::core
         sld_parser["📄 SLD Parser<br>[Component]<br>XML parser for Styled Layer Descriptor (OGC) styling."]:::core
         symbol_registry["🎖️ Symbol Registry<br>[Component]<br>Decoder and builder of tactical symbols (NATO/ICAO)."]:::core
         interpolator["⏱️ Target Interpolator<br>[Component]<br>State prediction and Dead Reckoning of dynamic geodetic targets."]:::core
+        aero["🛫 Aeronautical Engine<br>[Component]<br>AIXM 5.1 & GeoJSON-Aviation ingestion and spatial containment."]:::core
+        weather["⛈️ Weather Engine<br>[Component]<br>Radar dBZ colorizer, wind barbs, isolines, and SIGMET hazards."]:::core
+        volumetric["📦 Volumetric Engine<br>[Component]<br>3D airspace polyhedrons and flight trajectory ribbons."]:::core
+        declutter["🏷️ Declutter Engine<br>[Component]<br>8-octant force-directed label anti-cluttering."]:::core
     end
 
     %% Input Relationships
@@ -49,6 +53,10 @@ graph TB
     wasm_bridge -->|Injects XML / Configures| sld_parser
     wasm_bridge -->|Queries SIDC| symbol_registry
     wasm_bridge -->|Registers / Interpolates| interpolator
+    wasm_bridge -->|Parses / Queries| aero
+    wasm_bridge -->|Colorizes / Contours| weather
+    wasm_bridge -->|Extrudes 3D Meshes| volumetric
+    wasm_bridge -->|Solves Label Layout| declutter
 
     %% FFI Bridge Connections
     ffi_bridge -->|Invokes / Controls| camera
@@ -56,6 +64,10 @@ graph TB
     ffi_bridge -->|Injects XML / Configures| sld_parser
     ffi_bridge -->|Queries SIDC| symbol_registry
     ffi_bridge -->|Registers / Interpolates| interpolator
+    ffi_bridge -->|Parses / Queries| aero
+    ffi_bridge -->|Colorizes / Contours| weather
+    ffi_bridge -->|Extrudes 3D Meshes| volumetric
+    ffi_bridge -->|Solves Label Layout| declutter
 
     %% Internal Core Dependencies
     camera -->|Requires projections| projections
@@ -64,6 +76,10 @@ graph TB
     terrain -->|Requires LLA-ECEF conversion| geodesy
     interpolator -->|Requires distance/heading calculation| geodesy
     symbol_registry -->|Requires parsed rules| sld_parser
+    aero -->|Requires polygon containment| geodesy
+    weather -->|Requires polygon containment| geodesy
+    volumetric -->|Requires ECEF conversion| geodesy
+    declutter -->|Requires spatial math| geodesy
 
     linkStyle 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17 stroke:#555,stroke-width:1.5px;
 ```
@@ -483,6 +499,39 @@ The dynamic module responsible for synchronizing and smoothing the tracking of d
   }
   ```
 * **Dependencies:** `Geodesy Engine` (for direct geodetic heading extrapolation, distance, and vertical altitude variation).
+
+### 🛫 2.8 Aeronautical Engine (`core::aeronautical`)
+*See full architecture document: [`aeronautical/arch.md`](aeronautical/arch.md)*
+* **Responsibilities:**
+  * Stream-parse AIXM 5.1 XML documents using `quick-xml` and GeoJSON-Aviation features into unified in-memory datasets.
+  * Ingest 3D airspace volumes (`AeronauticalAirspace`), radio navaids (`AeronauticalNavaid`), ATS airways (`AeronauticalAirway`), and airports/runways (`AeronauticalAirport`).
+  * Provide fast spatial queries (radial navaid proximity, 3D point-in-airspace containment) and GeoJSON export.
+* **Dependencies:** `Geodesy Engine` (for ellipsoidal distances and spherical polygon containment).
+
+### ⛈️ 2.9 Weather Engine (`core::weather`)
+*See full architecture document: [`weather/arch.md`](weather/arch.md)*
+* **Responsibilities:**
+  * Colorize raw radar reflectivity grids ($\text{dBZ}$) to 32-bit RGBA buffers with NOAA NEXRAD 15-level and ICAO severe convection palettes.
+  * Synthesize 2D vector wind barbs according to WMO Publication No. 306 / ICAO Annex 3 with Southern Hemisphere mirroring.
+  * Generate smooth isoline contours from scalar fields using 16-case Marching Squares with linear edge interpolation.
+  * Ingest and evaluate 3D SIGMET/AIRMET hazard polygon containment.
+* **Dependencies:** `Geodesy Engine` (for geodesic polygon containment).
+
+### 📦 2.10 Volumetric Engine (`core::volumetric`)
+*See full architecture document: [`volumetric/arch.md`](volumetric/arch.md)*
+* **Responsibilities:**
+  * Procedural 3D mesh synthesis for extruded airspace polyhedrons (FIR, TMA, CTR) in Geocentric Cartesian (ECEF) with outward surface normals for Fresnel edge glow shaders.
+  * Ear clipping 2D polygon triangulation with signed area orientation detection and collinear tolerance.
+  * Procedural 3D trajectory ribbon extrusion along flight waypoints with mitered joins and along-track/scalar gradient mapping.
+* **Dependencies:** `Geodesy Engine` (for LLA to ECEF transformations).
+
+### 🏷️ 2.11 Declutter Engine (`core::declutter`)
+*See full architecture document: [`declutter/arch.md`](declutter/arch.md)*
+* **Responsibilities:**
+  * Optimal 8-octant force-directed label anti-cluttering solver for radar data blocks.
+  * Multi-objective cost optimization (bounding box overlap area, aircraft velocity vector deconfliction, leader line crossing minimization, human-factors preference bias).
+  * Uniform 2D spatial hash grid acceleration for $< 1\text{ ms}$ layout resolution across 500+ targets.
+* **Dependencies:** `Geodesy Engine` (for spatial geometry).
 
 ---
 
