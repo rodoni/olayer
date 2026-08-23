@@ -77,6 +77,8 @@ graph TB
     FFIBridge --> Interp
     FFIBridge --> Aero
     FFIBridge --> Weather
+    FFIBridge --> Volumetric
+    FFIBridge --> Declutter
 ```
 
 The Core has **no filesystem or network I/O**. It only processes memory structures
@@ -91,29 +93,34 @@ provided by the host layer — essential for WebAssembly compatibility.
 ```
 olayer/
 ├── core/                     # Pure Rust engine (crate: olayer-core)
-│   ├── src/geodesy/          #   WGS84 conversions, solvers (Vincenty, Haversine)
+│   ├── src/geodesy/          #   WGS84 conversions, solvers (Vincenty, Haversine), ENU/NED, WMM-2025
 │   ├── src/camera/           #   CameraState and 2D/2.5D/3D VP matrices
 │   ├── src/projections/      #   Stereographic, LCC, WebMercator
-│   ├── src/terrain/          #   DTED parsing and O(1) bilinear interpolation
+│   ├── src/terrain/          #   DTED parsing, Mapbox/Terrarium RGB, COG, O(1) interpolation, MSAW
 │   ├── src/sld/              #   OGC SLD XML parser (quick-xml)
 │   ├── src/symbol_registry/  #   Pluggable symbology (NATO APP-6, ICAO, Declarative)
-│   └── src/interpolator/     #   Dead-reckoning target interpolation
+│   ├── src/interpolator/     #   Dead-reckoning target interpolation
+│   ├── src/aeronautical/     #   AIXM 5.1 XML & GeoJSON-Aviation parser and spatial containment
+│   ├── src/weather/          #   Radar dBZ colorizer, wind barbs, isolines, and SIGMET hazards
+│   ├── src/volumetric/       #   3D ECEF extruded airspace polyhedrons and trajectory ribbons
+│   └── src/declutter/        #   8-octant force-directed label anti-cluttering solver
 ├── sdk/ts/                   # Browser TypeScript SDK (npm: olayer-sdk)
 │   ├── src/controller/       #   Animation loop, FPS throttling, camera input
-│   ├── src/layers/           #   Layer, LayerManager, TileLayer, VectorTileLayer
-│   ├── src/providers/        #   TerrainTileSource, RasterTileSource, VectorTileSource
-│   ├── src/renderer/         #   WebGLRenderer (GPU), CPURenderer (Canvas 2D), TextureAtlas
+│   ├── src/layers/           #   Layer, LayerManager, TileLayer, VectorTileLayer, AeronauticalLayer, Weather layers, Volumetric layers
+│   ├── src/providers/        #   TerrainTileSource, RgbTerrainSource, CogTerrainSource, RasterTileSource, VectorTileSource
+│   ├── src/tools/            #   TacticalToolsManager (RBL, PPL, Holding, ILS, Rings), SnailTrailTracker
+│   ├── src/renderer/         #   WebGLRenderer (GPU), CPURenderer (Canvas 2D), LabelAntiClutterEngine, TextureAtlas
 │   └── wasm/                 #   WASM bindings crate (crate: olayer-wasm)
 ├── sdk/native/               # Desktop Native SDK (crate: olayer-native)
 │   ├── src/native_controller/#   Facade with FPS throttler
 │   ├── src/native_layer_manager/# Layer stack with Layer trait
 │   ├── src/native_map_data_stack/# Generic MapDataSource registry + TerrainDataSource
-│   ├── src/wgpu_gpu_pipeline/#    WGSL grid shader + vertex generation
+│   ├── src/wgpu_gpu_pipeline/#    WGSL grid/volumetric shader + vertex generation
 │   ├── src/wgpu_cpu_vertex_pipeline/# CPU LLA→screen projection + SVG raster
 │   ├── src/c_ffi_bridge/     #   C ABI exports + cbindgen header
 │   └── demo/                 #   Desktop demo (winit + wgpu + egui)
 ├── tools/symbol-compiler/    # CLI to compile SVG libraries → JSON
-└── docs/                     # Architecture, spec, plan, per-module docs
+└── docs/                     # Architecture, spec, conformance, per-module docs
 ```
 
 ### 2.2 Build Order
@@ -1418,6 +1425,90 @@ const placements = declutterEngine.solve([
 for (const p of placements) {
   console.log(`Target ${p.id} placed at octant ${OctantDirection[p.octant]} (cost: ${p.cost.toFixed(2)})`);
 }
+```
+
+### 16.6 Tactical Aeronautical Measurement Tools
+
+Use `TacticalToolsManager` and `SnailTrailTracker` to compute Range-Bearing Lines (RBL), Predicted Position Lines (PPL), standard holding pattern racetracks, and ILS instrument approach fan geometry:
+
+```typescript
+import { TacticalToolsManager, SnailTrailTracker } from "olayer-sdk";
+
+// 1. Measure Range and Bearing Line (orthodromic distance & initial/final azimuth)
+const rbl = TacticalToolsManager.measureRbl(
+  { lat: 0.895, lon: -0.008 },
+  { lat: 0.899, lon: 0.002 }
+);
+console.log(`Distance: ${rbl.distanceNm.toFixed(1)} NM, Bearing: ${rbl.initialBearingDeg.toFixed(1)}°`);
+
+// 2. Generate Holding Pattern (Standard 1-minute right-hand turn)
+const holdingTrack = TacticalToolsManager.generateHoldingPattern(
+  { lat: 0.895, lon: -0.008 },
+  {
+    inboundBearingRad: 1.5708, // 090° Inbound
+    inboundLegTimeSec: 60,
+    turnDirection: "Right",
+    speedMps: 110, // 210 knots IAS
+  }
+);
+
+// 3. Track Radar History Trail with Snail Trail Decay
+const tracker = new SnailTrailTracker(10, 60.0); // 10 dots max, 60s decay
+tracker.recordPosition({ lat: 0.895, lon: -0.008 });
+const activeDots = tracker.getActiveTrail();
+```
+
+### 16.7 Meteorological Overlays & SIGMET Hazard Polygons
+
+Integrate Doppler radar reflectivity (`WeatherRadarLayer`), WMO standard wind barbs (`WindBarbsLayer`), and active weather warnings (`SigmetLayer`):
+
+```typescript
+import { WeatherRadarLayer, WindBarbsLayer, SigmetLayer, WasmSigmetDataset } from "olayer-sdk";
+
+// 1. Weather Radar Grid (NOAA NEXRAD 15-level / ICAO Severe Convective)
+const radarLayer = new WeatherRadarLayer("weather-radar", {
+  palette: "Nexrad15",
+  opacity: 0.75,
+});
+radarLayer.updateGrid(rawDbzFloat32Array, 512, 512);
+controller.layerManager.addLayer(radarLayer);
+
+// 2. Aviation Wind Barbs Layer
+const windLayer = new WindBarbsLayer("surface-winds", {
+  color: "#00e5ff",
+  staffLengthPx: 25,
+  southernHemisphere: false,
+});
+windLayer.setStations([
+  { id: "KJFK", latRad: 0.709, lonRad: -1.288, speedKts: 45, dirRad: 4.71 }, // 270° @ 45KT
+]);
+controller.layerManager.addLayer(windLayer);
+
+// 3. SIGMET / AIRMET Severe Hazard Polygons
+const sigmetLayer = new SigmetLayer("sigmet-warnings");
+const dataset = WasmSigmetDataset.from_geojson(sigmetGeoJsonString);
+sigmetLayer.setDataset(dataset);
+controller.layerManager.addLayer(sigmetLayer);
+```
+
+### 16.8 Aeronautical Information System (AIXM 5.1 & GeoJSON)
+
+Load and display international aeronautical datasets with 3D airspace limits and radio navigation aids:
+
+```typescript
+import { AeronauticalLayer, parse_aixm_51, parse_geojson_aviation } from "olayer-sdk";
+
+const aeroLayer = new AeronauticalLayer("airac-cycle-2608", {
+  showAirspaces: true,
+  showNavaids: true,
+  showAirways: true,
+  showAirports: true,
+});
+
+// Load AIXM 5.1 XML dataset
+const aixmDataset = parse_aixm_51(aixmXmlString);
+aeroLayer.setDataset(aixmDataset);
+controller.layerManager.addLayer(aeroLayer);
 ```
 
 See [`conformance.md`](conformance.md), [`core_api_inventory.md`](core_api_inventory.md),

@@ -767,11 +767,69 @@ register_declarative_provider(json_content: string): void
 resolve_symbol(code: string, style: WasmStyleRegistry): JsValue  // JSON string
 ```
 
-### 2.6 Free Functions
+### 2.6 Free Functions (Geodesy & Topocentric Frames)
 
 ```typescript
 function lla_to_ecef(lat_rad: f64, lon_rad: f64, height: f64): [f64, f64, f64]
 function ecef_to_lla(x: f64, y: f64, z: f64): WasmLatLon
+```
+
+### 2.7 `WasmAeronauticalDataset` (Aeronautical Ingestion)
+
+```typescript
+class WasmAeronauticalDataset {
+  static from_aixm_51(xml_content: string): WasmAeronauticalDataset
+  static from_geojson(geojson_content: string): WasmAeronauticalDataset
+  to_geojson(): string
+  total_feature_count(): number
+  find_airspaces_containing_point(lat_deg: number, lon_deg: number, alt_m: number): string
+}
+
+function parse_aixm_51(xml_content: string): WasmAeronauticalDataset
+function parse_geojson_aviation(geojson_content: string): WasmAeronauticalDataset
+```
+
+### 2.8 `WasmSigmetDataset` & Weather Functions
+
+```typescript
+class WasmSigmetDataset {
+  static from_geojson(geojson_content: string): WasmSigmetDataset
+  total_count(): number
+  find_hazards_containing_point(lat_deg: number, lon_deg: number, alt_m: number): string
+}
+
+function colorize_dbz_grid(dbz_grid: Float32Array, width: number, height: number, palette: "Nexrad15" | "IcaoDbz"): Uint8Array
+function dbz_to_rgba(dbz: number, palette: "Nexrad15" | "IcaoDbz"): Uint8Array
+function generate_wind_barb_geometry(origin_x: number, origin_y: number, speed_kts: number, dir_rad: number, staff_length_px: number, southern_hemisphere: boolean): string
+function generate_isolines(grid: Float32Array, width: number, height: number, threshold: number, min_val: number, max_val: number): string
+```
+
+### 2.9 `WasmVolumetricMesh` & `WasmRibbonMesh` (3D Meshes)
+
+```typescript
+class WasmVolumetricMesh {
+  vertices(): Float32Array // flat [x, y, z, nx, ny, nz, u, v, ...]
+  indices(): Uint32Array
+  vertex_count(): number
+  index_count(): number
+}
+
+class WasmRibbonMesh {
+  vertices(): Float32Array // flat [x, y, z, nx, ny, nz, along_track, v, scalar, ...]
+  indices(): Uint32Array
+  vertex_count(): number
+  index_count(): number
+}
+
+function generate_airspace_volume_mesh(polygon_flat_deg: Float64Array, floor_m: number, ceiling_m: number): WasmVolumetricMesh
+function generate_trajectory_ribbon_mesh(waypoints_flat_deg: Float64Array, ribbon_width_m: number, scalars?: Float64Array): WasmRibbonMesh
+```
+
+### 2.10 8-Octant Label Anti-Cluttering Solver
+
+```typescript
+function solve_label_placements_flat(targets_flat: Float32Array, leader_length_px: number, safety_margin_px: number): Float32Array
+function solve_label_placements_json(targets_json: string, leader_length_px: number): string
 ```
 
 ---
@@ -859,8 +917,65 @@ class LayerManager {
   renderDynamicLayers(ctx: CanvasRenderingContext2D, currentTime: number): void
 }
 
-class TileLayer extends Layer { ... }
-class VectorTileLayer extends Layer { ... }
+class TileLayer extends Layer {
+  constructor(id: string, options?: { opacity?: number; minZoom?: number; maxZoom?: number })
+  renderStatic(gl: WebGL2RenderingContext, viewProjMatrix: Float32Array): void
+  renderDynamic(ctx: CanvasRenderingContext2D, currentTime: number): void
+}
+
+class VectorTileLayer extends Layer {
+  constructor(id: string, options?: { opacity?: number; minZoom?: number; maxZoom?: number; filter?: (feature: VectorFeature) => boolean })
+  renderStatic(gl: WebGL2RenderingContext, viewProjMatrix: Float32Array): void
+  renderDynamic(ctx: CanvasRenderingContext2D, currentTime: number): void
+}
+
+class AeronauticalLayer extends Layer {
+  constructor(id: string, options?: { dataset?: WasmAeronauticalDataset; showAirspaces?: boolean; showNavaids?: boolean; showAirways?: boolean; showAirports?: boolean })
+  setDataset(dataset: WasmAeronauticalDataset): void
+  getDataset(): WasmAeronauticalDataset | undefined
+  renderStatic(gl: WebGL2RenderingContext, viewProjMatrix: Float32Array): void
+  renderDynamic(ctx: CanvasRenderingContext2D, currentTime: number): void
+}
+
+class WeatherRadarLayer extends Layer {
+  constructor(id: string, options?: { palette?: "Nexrad15" | "IcaoDbz"; opacity?: number; textureUnit?: number })
+  updateGrid(grid: Float32Array, width: number, height: number): void
+  setPalette(palette: "Nexrad15" | "IcaoDbz"): void
+  renderStatic(gl: WebGL2RenderingContext, viewProjMatrix: Float32Array): void
+  renderDynamic(ctx: CanvasRenderingContext2D, currentTime: number): void
+}
+
+class WindBarbsLayer extends Layer {
+  constructor(id: string, options?: { color?: string; staffLengthPx?: number; southernHemisphere?: boolean })
+  setStations(stations: Array<{ id: string; latRad: number; lonRad: number; speedKts: number; dirRad: number }>): void
+  renderStatic(gl: WebGL2RenderingContext, viewProjMatrix: Float32Array): void
+  renderDynamic(ctx: CanvasRenderingContext2D, currentTime: number): void
+}
+
+class SigmetLayer extends Layer {
+  constructor(id: string, options?: { dataset?: WasmSigmetDataset; fillAlpha?: number; strokeWidth?: number })
+  setDataset(dataset: WasmSigmetDataset): void
+  renderStatic(gl: WebGL2RenderingContext, viewProjMatrix: Float32Array): void
+  renderDynamic(ctx: CanvasRenderingContext2D, currentTime: number): void
+}
+
+class VolumetricAirspaceLayer extends Layer {
+  constructor(id: string, options?: { baseColor?: string; edgeColor?: string; fresnelIntensity?: number })
+  addAirspace(id: string, polygonFlatDeg: number[], floorM: number, ceilingM: number): void
+  removeAirspace(id: string): boolean
+  getAirspaceMesh(id: string): AirspaceMeshRecord | undefined
+  renderStatic(gl: WebGL2RenderingContext, viewProjMatrix: Float32Array): void
+  renderDynamic(ctx: CanvasRenderingContext2D, currentTime: number): void
+}
+
+class TrajectoryRibbonLayer extends Layer {
+  constructor(id: string, options?: { defaultRibbonWidthMeters?: number; colorLow?: string; colorHigh?: string })
+  addTrajectory(id: string, waypointsFlatDeg: number[], ribbonWidthM?: number, scalars?: number[]): void
+  removeTrajectory(id: string): boolean
+  getRibbonMesh(id: string): TrajectoryRibbonRecord | undefined
+  renderStatic(gl: WebGL2RenderingContext, viewProjMatrix: Float32Array): void
+  renderDynamic(ctx: CanvasRenderingContext2D, currentTime: number): void
+}
 ```
 
 ### 3.3 Data Sources
@@ -1039,6 +1154,67 @@ class TextureAtlasManager {
 
 interface SymbolUV { u0: number, v0: number, u1: number, v1: number, width: number, height: number }
 ```
+
+### 3.5 Tactical Aeronautical Measurement Tools (`olayer-sdk/tools`)
+
+```typescript
+interface LatLonCoords { lat: number; lon: number; height?: number }
+interface RblMeasurement { distanceMeters: number; distanceNm: number; initialBearingRad: number; initialBearingDeg: number; finalBearingRad: number; finalBearingDeg: number }
+interface PplTick { lat: number; lon: number; timeSec: number }
+interface PplLeader { endLat: number; endLon: number; ticks: PplTick[] }
+type TurnDirection = "Right" | "Left"
+interface HoldingPatternConfig { inboundBearingRad: number; inboundLegTimeSec: number; turnDirection: TurnDirection; speedMps: number; standardRateDps?: number }
+interface IlsConeConfig { runwayHeadingRad: number; glideSlopeAngleRad?: number; localizerHalfAngleRad?: number; rangeMeters?: number }
+interface IlsGeometry { centerlineEnd: LatLonCoords; leftSectorBoundary: LatLonCoords; rightSectorBoundary: LatLonCoords; dmeRings: Array<{ distanceMeters: number; altitudeMeters: number }> }
+interface RangeRingsConfig { center: LatLonCoords; radiiMeters: number[]; intervalNm?: number; count?: number }
+
+class TacticalToolsManager {
+  static measureRbl(p1: LatLonCoords, p2: LatLonCoords): RblMeasurement
+  static generatePplLeader(position: LatLonCoords, speedMps: number, headingRad: number, lookaheadMinutes?: number, tickIntervalMinutes?: number): PplLeader
+  static generateHoldingPattern(fix: LatLonCoords, config: HoldingPatternConfig, numPointsPerTurn?: number): LatLonCoords[]
+  static generateIlsApproach(threshold: LatLonCoords, config: IlsConeConfig): IlsGeometry
+  static generateRangeRings(config: RangeRingsConfig, numPointsPerRing?: number): LatLonCoords[][]
+  static generateCompassRose(center: LatLonCoords, radiusMeters: number, tickLengthMeters?: number): Array<{ start: LatLonCoords; end: LatLonCoords; bearingDeg: number; isMajor: boolean }>
+}
+
+class SnailTrailTracker {
+  constructor(maxPoints?: number, decayDurationSec?: number)
+  recordPosition(coords: LatLonCoords, timestamp?: number): void
+  getActiveTrail(currentTimestamp?: number): HistoryDot[]
+  clear(): void
+}
+```
+
+### 3.6 Label Anti-Cluttering Engine (`olayer-sdk/renderer`)
+
+```typescript
+enum OctantDirection { North = 0, NorthEast = 1, East = 2, SouthEast = 3, South = 4, SouthWest = 5, West = 6, NorthWest = 7 }
+
+interface DeclutterTargetInput {
+  id: string;
+  x: number;
+  y: number;
+  headingRad?: number;
+  width: number;
+  height: number;
+  priority?: number;
+}
+
+interface SolvedLabelPlacement {
+  id: string;
+  rect: { x: number; y: number; width: number; height: number };
+  leaderStart: [number, number];
+  leaderEnd: [number, number];
+  octant: OctantDirection;
+  cost: number;
+}
+
+class LabelAntiClutterEngine {
+  defaultLeaderLengthPx: number;
+  defaultSafetyMarginPx: number;
+  constructor(leaderLengthPx?: number, safetyMarginPx?: number);
+  solve(targets: DeclutterTargetInput[], leaderLengthPx?: number, safetyMarginPx?: number): SolvedLabelPlacement[];
+}
 ```
 
 ---
@@ -1338,7 +1514,68 @@ void olayer_interpolated_targets_free(struct C_InterpolatedTarget* targets, size
 void olayer_interpolator_free(InterpolationEngine* engine);
 ```
 
-### 5.4 Memory Ownership Rules
+### 5.4 Geodesy, Topocentric Frames & WMM Functions
+
+```c
+int olayer_geodesy_lla_to_ecef(double lat_rad, double lon_rad, double alt_m, double *out_x, double *out_y, double *out_z);
+int olayer_geodesy_ecef_to_lla(double x, double y, double z, double *out_lat_rad, double *out_lon_rad, double *out_alt_m);
+
+int olayer_local_frame_lla_to_enu(const struct C_LatLon *origin, const struct C_LatLon *target, double *out_east, double *out_north, double *out_up);
+int olayer_local_frame_enu_to_lla(const struct C_LatLon *origin, double east, double north, double up, struct C_LatLon *out_target);
+int olayer_local_frame_radar_look_angles(const struct C_LatLon *origin, const struct C_LatLon *target, double k_factor, double *out_slant_range_m, double *out_azimuth_rad, double *out_elevation_rad);
+
+int olayer_wmm_evaluate(double lat_rad, double lon_rad, double alt_m, double year_decimal, double *out_declination_rad, double *out_inclination_rad, double *out_total_intensity_nt);
+int olayer_wmm_true_to_magnetic(double true_bearing_rad, double declination_rad, double *out_mag_bearing_rad);
+int olayer_wmm_magnetic_to_true(double mag_bearing_rad, double declination_rad, double *out_true_bearing_rad);
+```
+
+### 5.5 Geodesic Spatial Analysis Functions
+
+```c
+int olayer_spatial_contains_point(const struct C_LatLon *polygon_vertices, uintptr_t num_vertices, const struct C_LatLon *point, bool *out_contains);
+int olayer_spatial_cross_track_deviation(const struct C_LatLon *p1, const struct C_LatLon *p2, const struct C_LatLon *target, double *out_xtk_m, double *out_atd_m);
+int olayer_spatial_generate_buffer(const struct C_LatLon *centerline, uintptr_t centerline_len, double buffer_radius_m, struct C_LatLon *out_polygon, uintptr_t max_polygon_pts, uintptr_t *out_polygon_count);
+int olayer_spatial_geodesic_intersection(const struct C_LatLon *p1, const struct C_LatLon *p2, const struct C_LatLon *p3, const struct C_LatLon *p4, struct C_LatLon *out_intersection, bool *out_has_intersection);
+```
+
+### 5.6 Tactical Aeronautical Measurement Functions
+
+```c
+int olayer_tactical_measure_rbl(const struct C_LatLon *p1, const struct C_LatLon *p2, double *out_distance_m, double *out_init_bearing_rad, double *out_final_bearing_rad);
+int olayer_tactical_generate_ppl_leader(const struct C_LatLon *pos, double speed_mps, double heading_rad, double lookahead_sec, double tick_interval_sec, struct C_LatLon *out_leader_end, struct C_LatLon *out_ticks, uintptr_t max_ticks, uintptr_t *out_ticks_count);
+int olayer_tactical_generate_holding_pattern(const struct C_LatLon *fix, double inbound_bearing_rad, double inbound_leg_sec, int32_t turn_direction, double speed_mps, double standard_rate_dps, struct C_LatLon *out_points, uintptr_t max_points, uintptr_t *out_points_count);
+int olayer_tactical_generate_ils_cone(const struct C_LatLon *threshold, double runway_heading_rad, double glide_slope_rad, double localizer_half_angle_rad, double range_m, struct C_LatLon *out_centerline_end, struct C_LatLon *out_left_boundary, struct C_LatLon *out_right_boundary);
+```
+
+### 5.7 Aeronautical Data Ingestion Functions
+
+```c
+int olayer_aeronautical_dataset_create_from_aixm(const char *xml_content, struct AeronauticalDataset **out_dataset);
+int olayer_aeronautical_dataset_create_from_geojson(const char *geojson_content, struct AeronauticalDataset **out_dataset);
+int olayer_aeronautical_dataset_total_count(const struct AeronauticalDataset *dataset, uintptr_t *out_count);
+int olayer_aeronautical_dataset_free(struct AeronauticalDataset *dataset);
+```
+
+### 5.8 Meteorological & SIGMET Functions
+
+```c
+int olayer_weather_colorize_dbz_grid(const float *dbz_grid, uintptr_t width, uintptr_t height, int32_t palette_type, uint8_t *out_rgba_pixels, uintptr_t max_bytes, uintptr_t *out_bytes_count);
+int olayer_weather_generate_wind_barb(float origin_x, float origin_y, float speed_kts, float dir_rad, float staff_length_px, bool southern_hemisphere, float *out_line_segments, uintptr_t max_floats, uintptr_t *out_floats_count, bool *out_is_calm);
+int olayer_sigmet_dataset_create_from_geojson(const char *geojson_content, struct SigmetDataset **out_dataset);
+int olayer_sigmet_dataset_total_count(const struct SigmetDataset *dataset, uintptr_t *out_count);
+int olayer_sigmet_dataset_free(struct SigmetDataset *dataset);
+```
+
+### 5.9 Volumetric Meshes & Label Anti-Cluttering Functions
+
+```c
+int olayer_volumetric_generate_airspace_mesh(const struct C_LatLon *polygon, uintptr_t polygon_len, double floor_m, double ceiling_m, float *out_vertices, uintptr_t max_vertices_floats, uintptr_t *out_vertices_count, uint32_t *out_indices, uintptr_t max_indices, uintptr_t *out_indices_count);
+int olayer_volumetric_generate_trajectory_ribbon(const struct C_LatLon *waypoints, uintptr_t waypoints_len, double ribbon_width_m, const double *scalars, uintptr_t scalars_len, float *out_vertices, uintptr_t max_vertices_floats, uintptr_t *out_vertices_count, uint32_t *out_indices, uintptr_t max_indices, uintptr_t *out_indices_count);
+
+int olayer_declutter_solve_labels(const struct C_LabelTarget *targets, uintptr_t targets_len, float leader_length_px, float safety_margin_px, struct C_LabelPlacement *out_placements, uintptr_t max_placements, uintptr_t *out_placements_count);
+```
+
+### 5.10 Memory Ownership Rules
 
 | Allocation | Deletion | Rule |
 |-----------|----------|------|

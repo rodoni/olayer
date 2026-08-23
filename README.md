@@ -13,17 +13,22 @@ The project is structured as a monorepo containing the following components:
 ```text
 ├── core/                      # Pure Rust Core (Agnostic & Mathematical Engine)
 │   ├── src/
-│   │   ├── geodesy/           # Geodetic formulas, WGS84 ellipsoid, and ECEF coordinates
+│   │   ├── geodesy/           # Geodetic formulas, WGS84 ellipsoid, ENU/NED, WMM-2025, and spatial analysis
 │   │   ├── camera/            # CameraState and View-Projection matrix generators for 2D/2.5D/3D
-│   │   ├── terrain/           # DTED file parsing and O(1) elevation query indexing
+│   │   ├── terrain/           # Multi-source elevation (DTED, Mapbox/Terrarium RGB, Cloud-Optimized GeoTIFF/COG)
 │   │   ├── sld/               # Styled Layer Descriptor (SLD) XML rules parser
 │   │   ├── symbol_registry/   # Pluggable symbology resolver (NATO / ICAO / declarative JSON)
-│   │   └── projections/       # Cartographic projections (Stereographic, LCC, Mercator)
-│   └── benches/               # Performance benchmarks (geodesy, projections)
+│   │   ├── projections/       # Cartographic projections (Stereographic, LCC, Mercator)
+│   │   ├── interpolator/      # State prediction and dead-reckoning of dynamic geodetic targets
+│   │   ├── aeronautical/      # Aeronautical data ingestion (AIXM 5.1 XML & GeoJSON-Aviation)
+│   │   ├── weather/           # Meteorological overlays (Radar dBZ colorizer, wind barbs, isolines, SIGMETs)
+│   │   ├── volumetric/        # 3D airspace polyhedrons (ECEF) and trajectory ribbon mesh generation
+│   │   └── declutter/         # 8-octant force-directed label anti-cluttering engine
+│   └── benches/               # Performance benchmarks (geodesy, projections, terrain, interpolator)
 │
 ├── sdk/
 │   ├── ts/                    # TypeScript Client SDK for Browsers (WebGL2 + Canvas 2D)
-│   │   ├── src/               # SDK source files (LayerManager, Controller, etc.)
+│   │   ├── src/               # SDK source files (LayerManager, Controller, Layers, Tools, Providers)
 │   │   ├── demo/              # Interactive web demo application
 │   │   └── wasm/              # wasm-bindgen bridge exposing the Rust core to TypeScript
 │   │
@@ -34,7 +39,7 @@ The project is structured as a monorepo containing the following components:
 │       │   ├── native_layer_manager/# Native layer stack
 │       │   ├── native_map_data_stack/# Native tile/data source management
 │       │   ├── wgpu_cpu_vertex_pipeline/# CPU-side target projection (WGPU)
-│       │   └── wgpu_gpu_pipeline/    # GPU-side background/grid rendering (WGPU)
+│       │   └── wgpu_gpu_pipeline/    # GPU-side background/grid/volumetric rendering (WGPU)
 │       └── demo/              # Native desktop demo application
 │
 └── tools/
@@ -46,16 +51,24 @@ The project is structured as a monorepo containing the following components:
 ## Features
 
 - **High-Precision Geodesy Engine:** All kinematic math, camera locations, and physical positions are calculated in double-precision 64-bit float (`f64`) on the WGS84 ellipsoid.
+- **Local Tangent Plane & World Magnetic Model (WMM-2025):** Topocentric ENU/NED frames, radar look angles (slant range, azimuth, elevation) with standard 4/3 tropospheric refraction bending, and degree 12 spherical harmonics magnetic declination.
+- **Geodesic Spatial Analysis Engine:** Point-in-polygon containment robust across the antimeridian and polar singularities, Cross-Track Error (XTK), Along-Track Distance (ATD), constant-width geodesic corridors/buffers, and line-line intersection.
+- **Tactical Aeronautical Measurement Tools:** Range Bearing Lines (RBL), Compass Rose, Predicted Position Lines (PPL), Holding Patterns, ILS Approaches, and radar Snail Trails.
 - **Cartographic Projections:**
   - **Stereographic Azimuthal:** Preserves local angles, ideal for Terminal Maneuvering Area (TMA) radar displays.
   - **Lambert Conformal Conic (LCC):** Minimizes distortion along flight routes, optimal for En-Route displays.
   - **Mercator / Web Mercator:** Universal mapping projection.
+- **Multi-Source Altimetry & Cloud Terrain Ingestion:** Military DTED (Levels 0, 1, 2), Mapbox Terrain-RGB ($0.1\text{m}$ precision), Mapzen/Nextzen Terrarium, and pure-Rust GeoTIFF / Cloud-Optimized GeoTIFF (COG) elevation decoders with tiered fallback and MSAW clearance.
+- **Aeronautical Data Ingestion:** Native streaming parsing of AIXM 5.1 XML and GeoJSON-Aviation features (airspaces, navaids, airways, airports, runways) with 3D altitude limits.
+- **Meteorological GIS Overlays:** NOAA NEXRAD 15-level and ICAO severe convection radar dBZ colorizer, WMO No. 306 aviation wind barbs with Southern Hemisphere mirroring, Marching Squares isolines, and 3D SIGMET/AIRMET hazard containment.
+- **3D Volumetric Airspaces & Trajectory Ribbon Meshes:** 2D ear clipping triangulation, 3D ECEF extruded airspace polyhedrons with outward surface normals for Fresnel edge glow shaders, and continuous mitered 3D flight trajectory ribbons with altitude/speed color ramps.
+- **8-Octant Force-Directed Label Anti-Cluttering:** Sub-millisecond ($< 1\text{ ms}$ for 500+ targets) deconfliction of radar target data blocks using 2D uniform spatial hash grid acceleration, velocity vector avoidance, and leader line crossing minimization.
 - **Dynamic Camera & Multi-view Modes:**
   - **2D View:** Traditional flat orthographic map with rotation (bearing).
   - **2.5D View:** Tilted map perspective (supporting pitch/tilt from `-180°` to `180°` and roll).
   - **3D View:** Full virtual digital globe projection using Earth's ellipsoidal curvature.
 - **Hybrid Rendering Pipeline:**
-  - **GPU-Oriented Layer:** Render dense maps, vector tiles (MVT), and raster backgrounds efficiently using WebGL.
+  - **GPU-Oriented Layer:** Render dense maps, vector tiles (MVT), and raster backgrounds efficiently using WebGL / WGPU.
   - **CPU-Oriented Layer:** Interpolates aircraft targets (Dead Reckoning) on the WGS84 ellipsoid and projects positions to pixel space for pixel-perfect data blocks and symbols.
 - **Symbology & Style Engine:**
   - Support for civil navigation aids (VOR, DME, TACAN, NDB) and runways.
