@@ -7,6 +7,20 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <script>
+    window.addEventListener('error', (e) => {
+      const b = document.createElement('div');
+      b.style.cssText = 'position:fixed;top:16px;left:50%;transform:translateX(-50%);background:#e53e3e;color:white;padding:12px 20px;border-radius:8px;z-index:999999;font-family:monospace;font-size:13px;max-width:90vw;max-height:40vh;overflow:auto;white-space:pre-wrap;box-shadow:0 4px 16px rgba(0,0,0,0.6);border:1px solid #ff8080;';
+      b.textContent = `[ERROR] ${e.message} at ${e.filename}:${e.lineno}\n${e.error?.stack || ''}`;
+      document.body ? document.body.appendChild(b) : document.addEventListener('DOMContentLoaded', () => document.body.appendChild(b));
+    });
+    window.addEventListener('unhandledrejection', (e) => {
+      const b = document.createElement('div');
+      b.style.cssText = 'position:fixed;top:16px;left:50%;transform:translateX(-50%);background:#e53e3e;color:white;padding:12px 20px;border-radius:8px;z-index:999999;font-family:monospace;font-size:13px;max-width:90vw;max-height:40vh;overflow:auto;white-space:pre-wrap;box-shadow:0 4px 16px rgba(0,0,0,0.6);border:1px solid #ff8080;';
+      b.textContent = `[UNHANDLED REJECTION]\n${e.reason?.stack || e.reason?.message || e.reason}`;
+      document.body ? document.body.appendChild(b) : document.addEventListener('DOMContentLoaded', () => document.body.appendChild(b));
+    });
+  </script>
   <style>
     :root {
       --bg-dark: #0a0b0e;
