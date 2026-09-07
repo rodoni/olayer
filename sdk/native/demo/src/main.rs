@@ -27,9 +27,14 @@ fn main() {
             .unwrap(),
     );
 
-    // Setup wgpu - prefer DX12 on Windows to bypass Vulkan overlay hook issues
+    // Setup wgpu - prefer DX12 on Windows to bypass Vulkan overlay hook issues, all backends on non-Windows
+    let backends = if cfg!(target_os = "windows") {
+        wgpu::Backends::DX12
+    } else {
+        wgpu::Backends::all()
+    };
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-        backends: wgpu::Backends::DX12,
+        backends,
         ..Default::default()
     });
     let surface = instance.create_surface(window.clone()).unwrap();
