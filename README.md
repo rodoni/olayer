@@ -80,11 +80,14 @@ The project is structured as a monorepo containing the following components:
 
 ## Getting Started
 
-### Prerequisites
+### Prerequisites & Build Requirements
 
-- **Rust & Cargo:** For compiling the Core mathematical engine.
-- **wasm-pack:** For building the WebAssembly module.
-- **Node.js & npm:** For compiling and running the TypeScript SDK and Demo.
+For a comprehensive list of all system packages (Debian/Ubuntu, Fedora, Arch, Windows, macOS), GPU drivers, toolchains, and package dependencies required to build Olayer and both demos, see the **[Build Requirements Guide](docs/requirements.md)**.
+
+- **Rust & Cargo:** `1.75+` (Edition 2021) for compiling the Core mathematical engine and native desktop demo.
+- **wasm-pack:** `0.12+` for building the WebAssembly module (`sdk/ts/wasm`).
+- **Node.js & npm:** Node.js (`v18+` / `v20+` LTS) and npm for compiling and running the TypeScript SDK and web demo.
+- **Native Graphics Libraries:** Windowing and graphics drivers (`X11`/`Wayland`/`Vulkan` on Linux, `DirectX 12` on Windows, `Metal` on macOS) for the native desktop demo.
 
 ### 1. Build the WebAssembly Bindings
 
