@@ -9,6 +9,11 @@ Este formato JSON é compatível com o componente `DeclarativeProvider` do **Ola
 - **Elementos SVG:** Conversão automática de elementos `<path>`, `<circle>` e `<text>` em primitivas do Olayer.
 - **Estilos:** Processamento de cores CSS (hexadecimais, RGB/RGBA e nomes padrão), largura de contorno (`stroke-width`), tracejados (`stroke-dasharray`) e opacidades (`opacity`, `fill-opacity`, `stroke-opacity`).
 - **Nesting:** Suporte a agrupamentos `<g>` herdando atributos de estilização e opacidades acumuladas de forma recursiva.
+- **Paths normalizados:** Os comandos `M`, `L`, `H`, `V` e `Z` são convertidos para paths absolutos compatíveis com o renderer TypeScript.
+- **Validação:** Configuração, cores, opacidades, geometria e IDs duplicados são validados antes da geração do JSON.
+- **Diagnóstico:** Elementos SVG não suportados geram warnings ou falham com `--strict`.
+
+O compilador não é um renderer SVG completo. Curvas, arcos, filtros, máscaras, `<use>`, CSS externo e elementos dentro de `<defs>` não são compilados.
 
 ---
 
@@ -59,6 +64,18 @@ Execute a ferramenta passando o arquivo de configuração e o arquivo JSON de sa
 
 ```bash
 node dist/cli.js -c path/to/symbols.config.json -o path/to/compiled_symbols.json
+```
+
+Use `--strict` para transformar elementos SVG não suportados em erros e `--verbose` para exibir warnings:
+
+```bash
+node dist/cli.js --strict --verbose -c path/to/symbols.config.json -o path/to/compiled_symbols.json
+```
+
+### 4. Testes
+
+```bash
+npm test
 ```
 
 ---

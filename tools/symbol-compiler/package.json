@@ -9,7 +9,9 @@
   "main": "./dist/compiler.js",
   "scripts": {
     "build": "tsc",
-    "compile": "node ./dist/cli.js"
+    "compile": "node ./dist/cli.js",
+    "test": "npm run build && node ./dist/test.js",
+    "test:watch": "npm run build && node --watch ./dist/test.js"
   },
   "dependencies": {
     "commander": "^12.1.0",
