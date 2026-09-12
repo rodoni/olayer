@@ -1,11 +1,14 @@
 import { Layer } from "./layer";
 import { generate_trajectory_ribbon_mesh, WasmRibbonMesh } from "olayer-wasm";
+import type { AltitudeMode, AltitudeResolver } from "../types/altitude";
 
 export interface TrajectoryRibbonOptions {
   defaultRibbonWidthMeters?: number;
   colorLow?: string;
   colorHigh?: string;
   opacity?: number;
+  altitudeMode?: AltitudeMode;
+  altitudeResolver?: AltitudeResolver;
 }
 
 export interface TrajectoryRibbonRecord {
@@ -27,6 +30,8 @@ export class TrajectoryRibbonLayer extends Layer {
   public colorLow: string;
   public colorHigh: string;
   public opacity: number;
+  public altitudeMode: AltitudeMode;
+  private altitudeResolver?: AltitudeResolver;
 
   private ribbons: Map<string, TrajectoryRibbonRecord> = new Map();
 
@@ -36,6 +41,8 @@ export class TrajectoryRibbonLayer extends Layer {
     this.colorLow = options.colorLow ?? "#00e5ff"; // Cyan at low altitude
     this.colorHigh = options.colorHigh ?? "#ff1744"; // Vivid red at high altitude
     this.opacity = options.opacity ?? 0.9;
+    this.altitudeMode = options.altitudeMode ?? "absolute";
+    this.altitudeResolver = options.altitudeResolver;
   }
 
   /**
@@ -53,11 +60,12 @@ export class TrajectoryRibbonLayer extends Layer {
     scalars?: number[]
   ): void {
     const width = ribbonWidthM ?? this.defaultRibbonWidthMeters;
+    const resolvedWaypoints = this.resolveWaypoints(waypointsDeg);
     let wasmMesh: WasmRibbonMesh | null = null;
 
     try {
       wasmMesh = generate_trajectory_ribbon_mesh(
-        Float64Array.from(waypointsDeg),
+        Float64Array.from(resolvedWaypoints),
         width,
         scalars ? Float64Array.from(scalars) : undefined
       );
@@ -69,7 +77,7 @@ export class TrajectoryRibbonLayer extends Layer {
 
       this.ribbons.set(id, {
         id,
-        waypointsDeg: [...waypointsDeg],
+         waypointsDeg: [...resolvedWaypoints],
         ribbonWidthM: width,
         vertices,
         indices,
@@ -81,6 +89,24 @@ export class TrajectoryRibbonLayer extends Layer {
         wasmMesh.free();
       }
     }
+  }
+
+  public setAltitudeResolver(resolver: AltitudeResolver | undefined): void {
+    this.altitudeResolver = resolver;
+  }
+
+  private resolveWaypoints(waypointsDeg: number[]): number[] {
+    if (this.altitudeMode === "absolute" || !this.altitudeResolver) return [...waypointsDeg];
+    const resolved = [...waypointsDeg];
+    for (let index = 0; index + 2 < resolved.length; index += 3) {
+      resolved[index + 2] = this.altitudeResolver(
+        resolved[index] * Math.PI / 180,
+        resolved[index + 1] * Math.PI / 180,
+        resolved[index + 2],
+        this.altitudeMode,
+      );
+    }
+    return resolved;
   }
 
   /**

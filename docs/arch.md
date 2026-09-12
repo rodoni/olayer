@@ -29,7 +29,7 @@ graph TB
     host_app["📱 ATC Host Application<br>[Software System]<br>Client or ATC console application (Web/Desktop) that consumes Olayer."]:::system
     geoserver["🗺️ GeoServer / GeoWebCache<br>[External System]<br>Map server providing MVT, WMTS, and SLD styling."]:::external
     sensor_feed["📡 ATC Sensor Feed<br>[External System]<br>Raw data provider (ADS-B, ASTERIX, radar feeds)."]:::external
-    terrain_source["🏔️ Terrain Server / Repository<br>[External System]<br>Provides elevation data (DTED files) via HTTP or locally."]:::external
+        terrain_source["🏔️ Terrain Server / Repository<br>[External System]<br>Provides elevation data (DTED, RGB tiles, GeoTIFF/COG) via HTTP or locally."]:::external
     
     %% Relationships
     dev -->|Integrates and configures in code| host_app
@@ -83,7 +83,7 @@ graph TB
     subgraph Map_Server_Stack ["Map Data Stack"]
         geoserver["🗺️ GeoServer + GWC<br>[GeoServer Container]<br>Provides Vector Tiles (MVT), WMTS, and SLD styles."]:::external
         postgis[("🗄️ PostgreSQL + PostGIS<br>[Database]<br>Stores spatial geographic features.")]:::external
-        terrain_repo["🏔️ Static DTED Repository<br>[Data Store]<br>Stores binary terrain elevation files (DTED) via HTTP."]:::external
+        terrain_repo["🏔️ Static Terrain Repository<br>[Data Store]<br>Stores DTED, RGB tiles, and GeoTIFF/COG elevation data via HTTP."]:::external
     end
     
     %% Web Flows
@@ -91,13 +91,13 @@ graph TB
     ts_sdk -->|Calls via JS| wasm_bind
     wasm_bind -->|Executes core routines| wasm_core
     ts_sdk -->|Consumes MVT/WMTS and SLD via HTTP| geoserver
-    ts_sdk -->|Downloads DTED files via HTTP| terrain_repo
+    ts_sdk -->|Downloads terrain/GeoTIFF data via HTTP| terrain_repo
     
     %% Native Flows
     host_rust -->|Imports and initializes| native_sdk
     native_sdk -->|Direct static function call| rust_core
     native_sdk -->|Consumes MVT/WMTS and SLD via HTTP| geoserver
-    native_sdk -->|Reads DTED files from disk| local_disk
+    native_sdk -->|Reads terrain data from disk| local_disk
 
     %% Data Infrastructure
     geoserver -->|Spatial query via SQL| postgis
@@ -160,10 +160,10 @@ graph TB
     end
 
     subgraph Rust_Core_Comp ["Agnostic Core Modules (Rust)"]
-        geodesy["📐 Geodesy Module<br>ECEF/WGS84 geodetic conversions"]:::coreComponent
+        geodesy["📐 Geodesy Module<br>ECEF/WGS84, Height, VerticalDatum"]:::coreComponent
         camera["📷 Camera Module<br>CameraState management and View-Proj matrices for 2D/2.5D/3D"]:::coreComponent
         projections["🗺️ Projections Module<br>LCC, Stereographic, Web Mercator"]:::coreComponent
-        terrain["⛰️ Terrain Engine (DTED)<br>Spatial index & O(1) Altitude"]:::coreComponent
+        terrain["⛰️ Terrain Engine<br>DTED/RGB/COG + altitude modes"]:::coreComponent
         sld_parser["📄 SLD Parser<br>XML parser and symbol styles"]:::coreComponent
         symbol_registry["🎖️ Symbol Registry<br>Agnostic symbology registry and resolution"]:::coreComponent
         interpolator["⏱️ Target Interpolator<br>Dead Reckoning of dynamic targets"]:::coreComponent
@@ -206,10 +206,10 @@ graph TB
 ### Component Details
 
 #### 1. Rust Core Modules
-* **[Geodesy Module](../core/src/geodesy):** Provides the mathematical functions based on the WGS84 reference ellipsoid, Vincenty/Haversine solvers, Local Tangent Frames (ENU/NED), World Magnetic Model (WMM-2025/WMMHR), and spherical spatial analysis (XTK/ATD, geodesic polygon containment, buffering, intersection).
+* **[Geodesy Module](../core/src/geodesy):** Provides WGS84 conversions, solvers, local frames, magnetic/spatial analysis, and validated vertical reference types (`Height`, `VerticalDatum`). It does not query terrain.
 * **[Camera Module](../core/src/camera):** Manages the three-dimensional geographic navigation state and camera attitude (center, zoom, bearing/yaw, pitch, roll) and calculates the View-Projection matrices for 2D, 2.5D, and 3D in a unified and performant manner.
 * **[Projections Module](../core/src/projections):** Contains the mathematical formulas to project three-dimensional or geodetic points onto 2D planes. Implements the equations for Stereographic, LCC, and Mercator projections.
-* **[Terrain Engine (DTED)](../core/src/terrain):** Manages DTED files in memory. Builds a simplified 2D spatial index (Grid) where each cell points to the loaded elevation bytes. Allows altitude queries at arbitrary coordinates to run in constant time $O(1)$.
+* **[Terrain Engine](../core/src/terrain):** Manages DTED, RGB, and COG/GeoTIFF sources, samples elevation, resolves altitude modes, and calculates profiles/MSAW. It keeps visual mesh exaggeration outside geodetic altitude resolution.
 * **[SLD Parser](../core/src/sld):** Syntactic parser (Parser) of XML that converts the OGC SLD (Styled Layer Descriptor) standard into structured style metadata.
 * **[Symbol Registry](../core/src/symbol_registry):** Unified and agnostic symbology registry that resolves symbol codes (such as VOR or fighter jets) using simplified vector primitives generated from consolidated JSON library files.
 * **[Target Interpolator](../core/src/interpolator):** Maintains the state table of dynamic targets in 3D geodetic space. For each target, records the last known state vector. Computes interpolated positions via 3D Dead Reckoning based on system time (WGS84 LatLon and heading), completely decoupled from screen projection.
@@ -278,9 +278,9 @@ sequenceDiagram
     end
 ```
 
-### 4.2 DTED Terrain Loading and Vertical Alert Processing (MSAW)
+### 4.2 Terrain Loading, Altitude Resolution and Vertical Alert Processing (MSAW)
 
-This diagram illustrates the loading of DTED files into memory and the calculation of vertical alerts and elevation profile, detailing the difference in data consumption between Web and Desktop.
+This diagram illustrates multi-source elevation loading, explicit altitude-mode resolution, and the calculation of vertical alerts and elevation profiles, detailing the difference in data consumption between Web and Desktop.
 
 ```mermaid
 sequenceDiagram

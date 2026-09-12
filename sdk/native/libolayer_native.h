@@ -237,6 +237,20 @@ int olayer_terrain_engine_get_elevation_status(TerrainEngine *engine,
                                                double *out_elevation);
 
 /**
+ * Resolves an object height against terrain.
+ * `mode`: 0 absolute, 1 clamp-to-ground, 2 relative-to-ground, 3 relative-to-mesh.
+ * `unknown_policy`: 0 reject, 1 use-absolute, 2 use-zero.
+ */
+int olayer_terrain_engine_resolve_altitude(TerrainEngine *engine,
+                                           double lat_rad,
+                                           double lon_rad,
+                                           double input_height,
+                                           int mode,
+                                           int unknown_policy,
+                                           double mesh_height,
+                                           double *out_height);
+
+/**
  * Computes MSAW clearance. Returns 0 safe, 1 warning, 2 unknown terrain, or a negative error.
  */
 int olayer_terrain_engine_calculate_clearance(TerrainEngine *engine,

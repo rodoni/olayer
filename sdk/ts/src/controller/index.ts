@@ -9,6 +9,7 @@ import {
 import { LayerManager } from "../layers";
 import { MapDataStack, TerrainTileSource } from "../providers";
 import { TextureAtlasManager } from "../renderer/atlas";
+import type { AltitudeMode, AltitudeUnknownPolicy } from "../types/altitude";
 
 export type ViewMode = "2D" | "2.5D" | "3D";
 
@@ -29,6 +30,8 @@ export interface OlayerConfig {
   initialZoom?: number;
   viewportBaseMeters?: number;
   onMetrics?: (metrics: OlayerMetrics) => void;
+  altitudeMode?: AltitudeMode;
+  altitudeUnknownPolicy?: AltitudeUnknownPolicy;
 }
 
 export class OlayerController {
@@ -60,6 +63,8 @@ export class OlayerController {
   private pitch: number = 35 * (Math.PI / 180); // radians (tilt / pitch), default 35 degrees for 2.5D
   private roll: number = 0.0; // radians
   private viewportBaseMeters: number;
+  private altitudeMode: AltitudeMode;
+  private altitudeUnknownPolicy: AltitudeUnknownPolicy;
 
   // View Mode State
   private viewMode: ViewMode = "2D";
@@ -116,6 +121,8 @@ export class OlayerController {
     this.centerLon = config.initialCenterLonRad ?? 0.0;
     this.zoom = config.initialZoom ?? 1.0;
     this.viewportBaseMeters = config.viewportBaseMeters ?? 100000.0;
+    this.altitudeMode = config.altitudeMode ?? "absolute";
+    this.altitudeUnknownPolicy = config.altitudeUnknownPolicy ?? "reject";
 
     // Initialize Event Listeners
     this.setupInteractions();
@@ -244,6 +251,43 @@ export class OlayerController {
 
   public getCenterHeight(): number {
     return this.centerHeight;
+  }
+
+  public getAltitudeMode(): AltitudeMode {
+    return this.altitudeMode;
+  }
+
+  public setAltitudeMode(mode: AltitudeMode): void {
+    this.altitudeMode = mode;
+    this.triggerActive();
+  }
+
+  public getAltitudeUnknownPolicy(): AltitudeUnknownPolicy {
+    return this.altitudeUnknownPolicy;
+  }
+
+  public setAltitudeUnknownPolicy(policy: AltitudeUnknownPolicy): void {
+    this.altitudeUnknownPolicy = policy;
+    this.triggerActive();
+  }
+
+  /** Resolves an object height in metres without applying visual exaggeration. */
+  public resolveAltitude(
+    latRad: number,
+    lonRad: number,
+    inputHeightMeters: number,
+    mode: AltitudeMode = this.altitudeMode,
+    unknownPolicy: AltitudeUnknownPolicy = this.altitudeUnknownPolicy,
+    meshHeightMeters?: number,
+  ): number {
+    return this.terrainEngine.resolve_altitude(
+      latRad,
+      lonRad,
+      inputHeightMeters,
+      mode,
+      unknownPolicy,
+      meshHeightMeters,
+    );
   }
 
   public getZoom(): number {

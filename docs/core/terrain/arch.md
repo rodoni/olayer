@@ -10,13 +10,14 @@ The **Terrain Engine** processes altimetric data passively in the Rust Core, wit
 1. **Multi-Source Elevation Ingestion:**
    - **Military DTED Parser:** Interpret binary buffers of DTED files (Levels 0, 1, and 2) without direct disk I/O requests (compatible with WASM).
    - **Civil RGB Tile Decoder:** High-speed vectorized decoders for **Mapbox Terrain-RGB** ($0.1\text{m}$ precision) and **Mapzen/Nextzen Terrarium** ($1.0\text{m}$ precision), with spherical Mercator $(Z, X, Y)$ spatial indexing.
-   - **Pure-Rust GeoTIFF / COG Parser:** Decode Float32, Float64, and Int16 raster grids, extracting tiepoints (`ModelTiepointTag`), pixel scales (`ModelPixelScaleTag`), and NoData sentinels (`GDAL_NODATA`).
+    - **Pure-Rust GeoTIFF / COG Parser:** Decode Float32, Float64, and Int16 raster grids, extracting tiepoints (`ModelTiepointTag`), pixel scales (`ModelPixelScaleTag`), and NoData sentinels (`GDAL_NODATA`). Tiled Deflate/Zlib rasters and horizontal predictors are decoded before sampling.
 2. **Multi-Source In-Memory Spatial Indexing:** Store active DTED tiles, Slippy RGB tiles, and GeoTIFF elevation grids in LRU caches with automatic memory reclamation.
 3. **Multi-Source Tiered Fallback:** Transparently query elevations in priority order:
    $$\text{DTED} \longrightarrow \text{Web Mercator RGB Tile} \longrightarrow \text{GeoTIFF Raster}$$
 4. **Bilinear Interpolation in Constant Time $O(1)$:** Estimate exact altitude at any geographic coordinate based on neighboring raster cells.
 5. **Vertical Profile Generation (2.5D View):** Calculate cumulative distance, ground elevation, and coordinate path along flight routes.
 6. **MSAW (Minimum Safe Altitude Warning):** Provide ultra-fast mathematical ground safety evaluation against aircraft altitude.
+7. **Altitude Resolution:** Resolve object heights as absolute, clamped to ground, relative to ground, or relative to the effective mesh surface.
 
 ---
 
@@ -74,6 +75,22 @@ classDiagram
         +get_elevation_status(lat_rad: f64, lon_rad: f64) Result~ElevationSample, TerrainError~
         +get_vertical_profile(route: &[LatLon], step_meters: f64) Result~Vec~ProfilePoint~~, TerrainError~
         +calculate_clearance(...) Result~ClearanceResult, TerrainError~
+        +resolve_altitude(lat_rad, lon_rad, input_height, mode, policy, mesh_height) Result~f64, TerrainError~
+    }
+
+    class AltitudeMode {
+        <<enumeration>>
+        Absolute
+        ClampToGround
+        RelativeToGround
+        RelativeToMesh
+    }
+
+    class AltitudeUnknownPolicy {
+        <<enumeration>>
+        Reject
+        UseAbsolute
+        UseZero
     }
 
     class TileKey {
@@ -125,6 +142,8 @@ classDiagram
     TerrainEngine "1" *-- "*" RgbElevationTile : stores RGB
     TerrainEngine "1" *-- "*" GeoTiffTile : stores GeoTIFF
     TerrainEngine ..> TerrainError : may fail with
+    TerrainEngine ..> AltitudeMode : resolves using
+    TerrainEngine ..> AltitudeUnknownPolicy : handles missing samples
 ```
 
 ---
@@ -136,6 +155,8 @@ For any geographic coordinate $(\phi, \lambda)$, `TerrainEngine` evaluates terra
 2. **RGB Slippy Tile Check:** If not in DTED, checks loaded Web Mercator RGB tiles (selecting highest zoom $Z$). Latitude is mapped to Mercator isometric coordinate $q = \ln(\tan(\pi/4 + \phi/2))$ and interpolated across pixel $(u, v)$.
 3. **GeoTIFF Raster Check:** If not in RGB tiles, checks loaded GeoTIFF bounding boxes and interpolates across $(col, row)$ indices with NoData handling.
 
+For GeoTIFF tiles, the parser maps tiled blocks back into the global raster matrix. Compression and predictors are decoded before values are converted to elevation samples; compressed bytes are never interpreted directly as floating-point heights.
+
 ---
 
 ## 5. Vertical Profile Algorithm (2.5D Cut)
@@ -145,3 +166,18 @@ For any geographic coordinate $(\phi, \lambda)$, `TerrainEngine` evaluates terra
 3. **Position Interpolation:** Intermediate coordinates $(\phi_i, \lambda_i)$ are computed via direct geodetic projection.
 4. **Altimetric Sampling:** The multi-source `get_elevation` engine query resolves ground altitude for each sample point.
 5. **Structured Return:** Returns sequential `ProfilePoint` list containing distance, elevation, and 3D coordinate.
+
+---
+
+## 6. Altitude Resolution
+
+Altitude placement is separate from raster sampling. `TerrainEngine::resolve_altitude` first obtains the ground sample when required and then applies `AltitudeMode`:
+
+| Mode | Result |
+|---|---|
+| `Absolute` | Input height unchanged |
+| `ClampToGround` | Ground elevation |
+| `RelativeToGround` | Ground elevation plus input offset |
+| `RelativeToMesh` | Mesh elevation plus input offset; ground is the fallback when no mesh height is supplied |
+
+`AltitudeUnknownPolicy` controls missing samples. `Reject` is appropriate for safety-critical operations; `UseAbsolute` and `UseZero` are explicit compatibility fallbacks. Vertical exaggeration is visual-only and is not applied by the resolver.

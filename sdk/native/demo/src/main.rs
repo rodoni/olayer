@@ -132,6 +132,7 @@ fn main() {
     let mut tile_zoom: u32 = 10;
     let mut auto_zoom = true;
     let mut auto_fetch_tiles = false;
+    let mut terrain_exaggeration = 1.0f32;
     let mut egui_tile_textures: std::collections::HashMap<String, egui::TextureHandle> = std::collections::HashMap::new();
 
     // Mouse drag state
@@ -141,6 +142,7 @@ fn main() {
 
     // Initial grid rebuild
     gpu_pipeline.rebuild_grid_buffers(&controller, &device, &queue);
+    gpu_pipeline.rebuild_terrain_buffers(&controller, &device, &queue, terrain_exaggeration);
 
     // Dynamic radar update ticker
     let start_time = std::time::Instant::now();
@@ -288,6 +290,7 @@ fn main() {
                                                 controller.view_mode = "3D".to_string();
                                             }
                                             gpu_pipeline.rebuild_grid_buffers(&controller, &device, &queue);
+                                            gpu_pipeline.rebuild_terrain_buffers(&controller, &device, &queue, terrain_exaggeration);
                                             gpu_pipeline.rebuild_raster_tile_buffers(&device, &controller);
                                             controller.trigger_active();
                                         }
@@ -297,7 +300,11 @@ fn main() {
                                     ui.label("Layer Toggles:");
                                     ui.checkbox(&mut layer_manager.show_grid, "Show Geodetic Grid");
                                     ui.checkbox(&mut layer_manager.show_targets, "Show Radar Targets");
+                                    ui.checkbox(&mut layer_manager.show_terrain_mesh, "Render Terrain Mesh");
                                     ui.checkbox(&mut layer_manager.show_terrain, "Show Raster Map");
+                                    if ui.add(egui::Slider::new(&mut terrain_exaggeration, 0.0..=5.0).text("Terrain exaggeration")).changed() {
+                                        gpu_pipeline.rebuild_terrain_buffers(&controller, &device, &queue, terrain_exaggeration);
+                                    }
 
                                     ui.separator();
                                     ui.collapsing("🗺️ GeoServer WMTS Connection", |ui| {
@@ -523,6 +530,11 @@ fn main() {
                                 timestamp_writes: None,
                                 occlusion_query_set: None,
                             });
+
+                             // Draw sampled terrain mesh in WGPU
+                             if layer_manager.show_terrain_mesh {
+                                 gpu_pipeline.render_terrain(&mut render_pass);
+                             }
 
                              // Draw Raster Map Tiles in WGPU
                              if layer_manager.show_terrain {

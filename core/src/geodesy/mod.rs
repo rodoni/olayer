@@ -1,6 +1,7 @@
 pub mod conversions;
 pub mod coords;
 pub mod ellipsoid;
+pub mod altitude;
 pub mod errors;
 pub mod local_frame;
 pub mod magnetic;
@@ -14,6 +15,7 @@ mod tests;
 pub use conversions::{ecef_to_enu, ecef_to_lla, enu_to_ecef, enu_to_lla, lla_to_ecef, lla_to_enu};
 pub use coords::{Ecef, Enu, LatLon};
 pub use ellipsoid::Ellipsoid;
+pub use altitude::{Height, VerticalDatum};
 pub use errors::GeodesyError;
 pub use local_frame::{EnuPoint, LocalTangentFrame, NedPoint, STANDARD_RADAR_K_FACTOR};
 pub use magnetic::{

@@ -5,7 +5,7 @@ The **Layer Manager** manages the visual layer stack (Layer Stack), defining the
 ---
 
 ## 1. Responsibilities
-* **Stack Composition:** Organize static layers (base map, borders, airways) and dynamic layers (weather radar, air traffic, distance rings).
+* **Stack Composition:** Organize static layers (base map, terrain mesh, elevation contours, borders, airways) and dynamic layers (weather radar, air traffic, distance rings).
 * **Repaint Segregation (Optimization):**
   * **Static Painting (WebGL):** Evaluated only under physical camera interactions (Pan, Zoom, Rotation), saving results in static GPU buffers.
   * **Dynamic Painting (Canvas 2D):** Drawn in real-time in each frame (up to 60 FPS) on top of the static background, without cost of reprocessing the map background.
@@ -78,3 +78,9 @@ export class LayerManager {
   public renderDynamicLayers(ctx: CanvasRenderingContext2D, currentTime: number): void;
 }
 ```
+
+### 2.1 Terrain and altitude-aware layers
+
+`TerrainLayer` samples `WasmTerrainEngine` and renders the elevation mesh. `TerrainContourLayer` applies marching squares to the same samples and renders isolines above the mesh. Both layers invalidate their cached geometry when the camera, projection, DEM, or vertical exaggeration changes.
+
+Object-producing layers do not implement terrain lookup themselves. `TrajectoryRibbonLayer` and `VolumetricAirspaceLayer` can receive an `AltitudeResolver` callback and an `AltitudeMode`; the callback is normally `OlayerController.resolveAltitude`. This keeps altitude policy outside WebGL shaders and preserves `Absolute` as the default.

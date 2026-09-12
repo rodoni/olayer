@@ -4,6 +4,7 @@ pub mod rgb_decoder;
 pub mod rgb_tile;
 mod tile;
 pub mod engine;
+pub mod altitude;
 
 #[cfg(test)]
 mod tests;
@@ -20,3 +21,4 @@ pub use engine::{
     ClearanceResult, ElevationSample, MsawState, ProfilePoint, ProfilePointStatus, TerrainEngine,
     TileKey, UnknownTerrainPolicy,
 };
+pub use altitude::{resolve_altitude, AltitudeMode, AltitudeUnknownPolicy};

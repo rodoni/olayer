@@ -1,5 +1,6 @@
 export { Layer, LayerManager } from "./layer";
 export { TileLayer } from "./tile";
+export { TerrainLayer, TerrainContourLayer } from "./terrain";
 export { VectorTileLayer } from "./vector";
 export { AeronauticalLayer } from "./aeronautical";
 export type { AeronauticalLayerOptions } from "./aeronautical";

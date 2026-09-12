@@ -49,5 +49,5 @@ In the desktop event loop:
 
 When an aircraft is selected, the SDK activates the 2.5D flight profile visualization at the bottom of the operational panel:
 1. **Route Sampling:** Generates geodetic route points ahead and behind the target's current position.
-2. **Altitude Profile:** The Core's `TerrainEngine` queries in constant time $O(1)$ the DTED files to extract the ground relief under these points.
+2. **Altitude Profile:** The Core's `TerrainEngine` queries loaded terrain sources in constant time $O(1)$ to extract the ground relief under these points.
 3. **CFIT Alert (Controlled Flight Into Terrain):** If the difference between the aircraft's altitude and the ground altitude is less than the tactical safety margin (e.g., 300 meters / 1000 feet), a red alert with visual warning `CFIT HAZARD` is triggered on the flight controller's screen.

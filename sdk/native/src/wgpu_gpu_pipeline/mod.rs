@@ -9,6 +9,13 @@ pub struct RasterVertex {
     pub tex_coords: [f32; 2],
 }
 
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct TerrainVertex {
+    pub position: [f32; 3],
+    pub elevation: f32,
+}
+
 pub struct WgpuRasterTile {
     pub key: String,
     pub x: u32,
@@ -51,6 +58,10 @@ pub struct WgpuGpuPipeline {
     pub raster_bind_group_layout: wgpu::BindGroupLayout,
     pub raster_sampler: wgpu::Sampler,
     pub loaded_gpu_tiles: std::collections::HashMap<String, WgpuRasterTile>,
+    pub terrain_pipeline: wgpu::RenderPipeline,
+    pub terrain_vertex_buffer: Option<wgpu::Buffer>,
+    pub terrain_vertices_len: usize,
+    terrain_cache_key: Option<String>,
 }
 
 impl WgpuGpuPipeline {
@@ -286,6 +297,83 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             multiview: None,
         });
 
+        let terrain_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Terrain Mesh Shader"),
+            source: wgpu::ShaderSource::Wgsl("\nstruct VertexInput {
+    @location(0) position: vec3<f32>,
+    @location(1) elevation: f32,
+};
+
+struct VertexOutput {
+    @builtin(position) position: vec4<f32>,
+    @location(0) elevation: f32,
+};
+
+@group(0) @binding(0)
+var<uniform> view_proj: mat4x4<f32>;
+
+@vertex
+fn vs_main(in: VertexInput) -> VertexOutput {
+    var out: VertexOutput;
+    out.position = view_proj * vec4<f32>(in.position, 1.0);
+    out.elevation = in.elevation;
+    return out;
+}
+
+@fragment
+fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+    let amount = clamp((in.elevation + 100.0) / 1400.0, 0.0, 1.0);
+    let low = vec3<f32>(0.08, 0.18, 0.12);
+    let high = vec3<f32>(0.62, 0.48, 0.22);
+    return vec4<f32>(mix(low, high, amount), 0.82);
+}
+".into()),
+        });
+
+        let terrain_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Terrain Pipeline Layout"),
+            bind_group_layouts: &[&bind_group_layout],
+            push_constant_ranges: &[],
+        });
+
+        let terrain_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Terrain Mesh Pipeline"),
+            layout: Some(&terrain_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &terrain_shader,
+                entry_point: "vs_main",
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<TerrainVertex>() as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &[
+                        wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x3, offset: 0, shader_location: 0 },
+                        wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32, offset: 12, shader_location: 1 },
+                    ],
+                }],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &terrain_shader,
+                entry_point: "fs_main",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: config_format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+        });
+
         Self {
             pipeline,
             bind_group,
@@ -296,6 +384,10 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             raster_bind_group_layout,
             raster_sampler,
             loaded_gpu_tiles: std::collections::HashMap::new(),
+            terrain_pipeline,
+            terrain_vertex_buffer: None,
+            terrain_vertices_len: 0,
+            terrain_cache_key: None,
         }
     }
 
@@ -393,6 +485,91 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             render_pass.set_bind_group(0, &self.bind_group, &[]);
             render_pass.set_vertex_buffer(0, buffer.slice(..));
             render_pass.draw(0..(self.grid_vertices_len / 3) as u32, 0..1);
+        }
+    }
+
+    fn terrain_cache_key(controller: &NativeController, exaggeration: f32) -> String {
+        format!(
+            "{}:{:.5}:{:.5}:{:.3}:{:.3}:{:.3}:{:.2}",
+            controller.view_mode,
+            controller.camera.center.lat,
+            controller.camera.center.lon,
+            controller.camera.zoom,
+            controller.camera.rotation,
+            controller.camera.pitch,
+            exaggeration
+        )
+    }
+
+    pub fn generate_terrain_vertices(controller: &NativeController, exaggeration: f32) -> Vec<TerrainVertex> {
+        let grid = 32usize;
+        let span_meters = controller.camera.viewport_base_meters / controller.camera.zoom;
+        let lat_span = (span_meters / 111_000.0 / 2.0).to_radians().min(60.0f64.to_radians());
+        let lon_span = lat_span / controller.camera.center.lat.cos().abs().max(0.15);
+        let mut grid_vertices = Vec::with_capacity((grid + 1) * (grid + 1));
+
+        for row in 0..=grid {
+            let v = row as f64 / grid as f64;
+            let lat = controller.camera.center.lat + (0.5 - v) * lat_span;
+            for column in 0..=grid {
+                let u = column as f64 / grid as f64;
+                let lon = controller.camera.center.lon + (u - 0.5) * lon_span;
+                let elevation = controller.terrain.get_elevation(lat.to_degrees(), lon.to_degrees()).unwrap_or(0.0);
+                let height = elevation * exaggeration as f64;
+                let position = if controller.view_mode == "3D" {
+                    let ecef = olayer_core::geodesy::lla_to_ecef(
+                        &LatLon::new(lat, lon, height),
+                        &olayer_core::geodesy::ellipsoid::Ellipsoid::wgs84(),
+                    );
+                    [ecef.x as f32, ecef.y as f32, ecef.z as f32]
+                } else {
+                    let projected = controller.projection.project(&LatLon::new(lat, lon, 0.0)).unwrap_or((0.0, 0.0));
+                    [projected.0 as f32, projected.1 as f32, height as f32]
+                };
+                grid_vertices.push(TerrainVertex { position, elevation: elevation as f32 });
+            }
+        }
+
+        let mut vertices = Vec::with_capacity(grid * grid * 6);
+        for row in 0..grid {
+            for column in 0..grid {
+                let top_left = row * (grid + 1) + column;
+                let top_right = top_left + 1;
+                let bottom_left = top_left + grid + 1;
+                let bottom_right = bottom_left + 1;
+                vertices.extend_from_slice(&[
+                    grid_vertices[top_left], grid_vertices[top_right], grid_vertices[bottom_left],
+                    grid_vertices[top_right], grid_vertices[bottom_right], grid_vertices[bottom_left],
+                ]);
+            }
+        }
+        vertices
+    }
+
+    pub fn rebuild_terrain_buffers(&mut self, controller: &NativeController, device: &wgpu::Device, queue: &wgpu::Queue, exaggeration: f32) {
+        let key = Self::terrain_cache_key(controller, exaggeration);
+        if self.terrain_cache_key.as_deref() == Some(key.as_str()) {
+            return;
+        }
+        let vertices = Self::generate_terrain_vertices(controller, exaggeration);
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Terrain Vertex Buffer"),
+            size: (vertices.len() * std::mem::size_of::<TerrainVertex>()) as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        queue.write_buffer(&buffer, 0, bytemuck::cast_slice(&vertices));
+        self.terrain_vertex_buffer = Some(buffer);
+        self.terrain_vertices_len = vertices.len();
+        self.terrain_cache_key = Some(key);
+    }
+
+    pub fn render_terrain<'a>(&'a self, render_pass: &mut wgpu::RenderPass<'a>) {
+        if let Some(ref buffer) = self.terrain_vertex_buffer {
+            render_pass.set_pipeline(&self.terrain_pipeline);
+            render_pass.set_bind_group(0, &self.bind_group, &[]);
+            render_pass.set_vertex_buffer(0, buffer.slice(..));
+            render_pass.draw(0..self.terrain_vertices_len as u32, 0..1);
         }
     }
 
@@ -586,6 +763,14 @@ mod tests {
         assert!(!vertices.is_empty(), "2D grid should produce vertices");
         // Each vertex is 3 floats (x, y, z); each line segment is 2 vertices = 6 floats
         assert_eq!(vertices.len() % 6, 0, "Vertex count must be a multiple of 6 (2 endpoints × 3 coords)");
+    }
+
+    #[test]
+    fn test_generate_terrain_vertices_has_two_triangles_per_cell() {
+        let controller = NativeController::new((-23.62f64).to_radians(), (-46.65f64).to_radians());
+        let vertices = WgpuGpuPipeline::generate_terrain_vertices(&controller, 1.0);
+        assert_eq!(vertices.len(), 32 * 32 * 6);
+        assert!(vertices.iter().all(|vertex| vertex.position.iter().all(|value| value.is_finite())));
     }
 
     #[test]

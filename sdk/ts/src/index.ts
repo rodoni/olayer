@@ -32,12 +32,15 @@ export {
 // Export SDK Controller
 export { OlayerController } from "./controller";
 export type { OlayerConfig, OlayerMetrics } from "./controller";
+export type { AltitudeMode, AltitudeUnknownPolicy, AltitudeResolver } from "./types/altitude";
 
 // Export SDK Layer System
 export {
   Layer,
   LayerManager,
   TileLayer,
+  TerrainLayer,
+  TerrainContourLayer,
   VectorTileLayer,
   AeronauticalLayer,
   WeatherRadarLayer,
@@ -93,4 +96,3 @@ export type {
   RangeRingsConfig,
   HistoryDot,
 } from "./tools";
-

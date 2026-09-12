@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 use crate::terrain::errors::TerrainError;
+use flate2::read::{DeflateDecoder, ZlibDecoder};
+use std::io::Read;
 
 /// Decoded Cloud-Optimized GeoTIFF or standard GeoTIFF elevation raster.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -56,6 +58,10 @@ impl GeoTiffTile {
         let mut bits_per_sample: usize = 32;
         let mut sample_format: u16 = 3; // default: IEEE float
         let mut strip_offsets: Vec<usize> = Vec::new();
+        let mut strip_byte_counts: Vec<usize> = Vec::new();
+        let mut compression: u16 = 1;
+        let mut predictor: u16 = 1;
+        let mut tile_width: Option<usize> = None;
         let mut pixel_scale: Option<[f64; 3]> = None;
         let mut tiepoints: Vec<[f64; 6]> = Vec::new();
         let mut nodata_val: Option<f64> = None;
@@ -88,6 +94,21 @@ impl GeoTiffTile {
                 273 | 324 => {
                     // StripOffsets or TileOffsets
                     strip_offsets = read_offset_list(data, field_type, count, val_or_offset, is_le)?;
+                }
+                259 => {
+                    // Compression: 1 = none, 8/32946 = Deflate
+                    compression = read_field_val_u32(data, field_type, count, val_or_offset, is_le)? as u16;
+                }
+                279 | 325 => {
+                    // StripByteCounts or TileByteCounts
+                    strip_byte_counts = read_offset_list(data, field_type, count, val_or_offset, is_le)?;
+                }
+                317 => {
+                    // Predictor: 2 = horizontal differencing
+                    predictor = read_field_val_u32(data, field_type, count, val_or_offset, is_le)? as u16;
+                }
+                322 => {
+                    tile_width = Some(read_field_val_u32(data, field_type, count, val_or_offset, is_le)? as usize);
                 }
                 339 => {
                     // SampleFormat
@@ -157,70 +178,65 @@ impl GeoTiffTile {
             (-std::f64::consts::FRAC_PI_2, -std::f64::consts::PI, std::f64::consts::FRAC_PI_2, std::f64::consts::PI)
         };
 
-        // Extract elevation values from raster strips
-        let mut elevations = Vec::with_capacity(width * height);
-        for &strip_offset in &strip_offsets {
+        // Extract elevation values from raster strips or tiled blocks.
+        let is_tiled = tile_width.is_some();
+        let mut elevations = vec![None; width * height];
+        let tiles_across = tile_width.map(|tile| (width + tile - 1) / tile).unwrap_or(0);
+        for (strip_index, &strip_offset) in strip_offsets.iter().enumerate() {
             if strip_offset >= data.len() {
                 continue;
             }
-            let strip_data = &data[strip_offset..];
-            match (bits_per_sample, sample_format) {
-                (32, 3) => {
-                    // Float32
-                    for chunk in strip_data.chunks_exact(4) {
-                        if elevations.len() >= width * height {
-                            break;
-                        }
-                        let val = if is_le {
-                            f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]])
-                        } else {
-                            f32::from_be_bytes([chunk[0], chunk[1], chunk[2], chunk[3]])
-                        };
-                        let is_nodata = nodata_val.is_some_and(|nd| (val as f64 - nd).abs() < 1e-3) || val.is_nan();
-                        elevations.push(if is_nodata { None } else { Some(val) });
-                    }
-                }
-                (64, 3) => {
-                    // Float64
-                    for chunk in strip_data.chunks_exact(8) {
-                        if elevations.len() >= width * height {
-                            break;
-                        }
-                        let val = if is_le {
-                            f64::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], chunk[6], chunk[7]])
-                        } else {
-                            f64::from_be_bytes([chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], chunk[6], chunk[7]])
-                        };
-                        let is_nodata = nodata_val.is_some_and(|nd| (val - nd).abs() < 1e-3) || val.is_nan();
-                        elevations.push(if is_nodata { None } else { Some(val as f32) });
-                    }
-                }
-                (16, 2) | (16, 1) => {
-                    // Int16 / UInt16
-                    for chunk in strip_data.chunks_exact(2) {
-                        if elevations.len() >= width * height {
-                            break;
-                        }
-                        let val = if is_le {
-                            i16::from_le_bytes([chunk[0], chunk[1]])
-                        } else {
-                            i16::from_be_bytes([chunk[0], chunk[1]])
-                        };
-                        let is_nodata = nodata_val.is_some_and(|nd| (val as f64 - nd).abs() < 1e-3) || val == -32767 || val == -9999;
-                        elevations.push(if is_nodata { None } else { Some(val as f32) });
-                    }
-                }
-                _ => {
+            let byte_count = strip_byte_counts
+                .get(strip_index)
+                .copied()
+                .unwrap_or(data.len() - strip_offset);
+            let strip_end = strip_offset.saturating_add(byte_count).min(data.len());
+            let compressed_data = &data[strip_offset..strip_end];
+            let decoded_data = match compression {
+                1 => compressed_data.to_vec(),
+                8 | 32946 => decode_deflate(compressed_data)?,
+                other => {
                     return Err(TerrainError::GeoTiffError(format!(
-                        "Unsupported GeoTIFF sample format (bits: {bits_per_sample}, format: {sample_format})"
-                    )));
+                        "Unsupported GeoTIFF compression method: {other}"
+                    )))
+                }
+            };
+            let mut decoded_data = decoded_data;
+            if predictor == 2 {
+                let sample_bytes = bits_per_sample / 8;
+                let row_samples = tile_width.unwrap_or(width);
+                apply_horizontal_predictor(&mut decoded_data, row_samples, sample_bytes, is_le);
+            } else if predictor != 1 {
+                return Err(TerrainError::GeoTiffError(format!(
+                    "Unsupported GeoTIFF predictor method: {predictor}"
+                )));
+            }
+            let values = decode_samples(decoded_data.as_slice(), bits_per_sample, sample_format, is_le, nodata_val)?;
+            if is_tiled {
+                let tile_width = tile_width.unwrap();
+                let tile_x = strip_index % tiles_across;
+                let tile_y = strip_index / tiles_across;
+                let valid_width = tile_width.min(width.saturating_sub(tile_x * tile_width));
+                let valid_height = (values.len() / tile_width).min(height.saturating_sub(tile_y * (values.len() / tile_width)));
+                for row in 0..valid_height {
+                    for column in 0..valid_width {
+                        let source = row * tile_width + column;
+                        let target = (tile_y * (values.len() / tile_width) + row) * width + tile_x * tile_width + column;
+                        if target < elevations.len() && source < values.len() {
+                            elevations[target] = values[source];
+                        }
+                    }
+                }
+            } else {
+                let mut target = strip_index * values.len();
+                for value in values {
+                    if target >= elevations.len() {
+                        break;
+                    }
+                    elevations[target] = value;
+                    target += 1;
                 }
             }
-        }
-
-        // Pad if partial
-        while elevations.len() < width * height {
-            elevations.push(None);
         }
 
         Ok(Self {
@@ -281,6 +297,113 @@ impl GeoTiffTile {
         let z_final = z_top * (1.0 - ty) + z_bottom * ty;
 
         Some(z_final)
+    }
+}
+
+fn decode_deflate(data: &[u8]) -> Result<Vec<u8>, TerrainError> {
+    let mut decoded = Vec::new();
+    if ZlibDecoder::new(data).read_to_end(&mut decoded).is_ok() {
+        return Ok(decoded);
+    }
+
+    decoded.clear();
+    DeflateDecoder::new(data)
+        .read_to_end(&mut decoded)
+        .map_err(|error| TerrainError::GeoTiffError(format!("Failed to decompress Deflate raster strip: {error}")))?;
+    Ok(decoded)
+}
+
+fn decode_samples(data: &[u8], bits_per_sample: usize, sample_format: u16, is_le: bool, nodata: Option<f64>) -> Result<Vec<Option<f32>>, TerrainError> {
+    let mut values = Vec::new();
+    match (bits_per_sample, sample_format) {
+        (32, 3) => {
+            for chunk in data.chunks_exact(4) {
+                let value = if is_le {
+                    f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]])
+                } else {
+                    f32::from_be_bytes([chunk[0], chunk[1], chunk[2], chunk[3]])
+                };
+                let missing = nodata.is_some_and(|nd| (value as f64 - nd).abs() < 1e-3) || value.is_nan();
+                values.push(if missing { None } else { Some(value) });
+            }
+        }
+        (64, 3) => {
+            for chunk in data.chunks_exact(8) {
+                let value = if is_le {
+                    f64::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], chunk[6], chunk[7]])
+                } else {
+                    f64::from_be_bytes([chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], chunk[6], chunk[7]])
+                };
+                let missing = nodata.is_some_and(|nd| (value - nd).abs() < 1e-3) || value.is_nan();
+                values.push(if missing { None } else { Some(value as f32) });
+            }
+        }
+        (16, 2) | (16, 1) => {
+            for chunk in data.chunks_exact(2) {
+                let value = if is_le {
+                    i16::from_le_bytes([chunk[0], chunk[1]])
+                } else {
+                    i16::from_be_bytes([chunk[0], chunk[1]])
+                };
+                let missing = nodata.is_some_and(|nd| (value as f64 - nd).abs() < 1e-3) || value == -32767 || value == -9999;
+                values.push(if missing { None } else { Some(value as f32) });
+            }
+        }
+        _ => {
+            return Err(TerrainError::GeoTiffError(format!(
+                "Unsupported GeoTIFF sample format (bits: {bits_per_sample}, format: {sample_format})"
+            )));
+        }
+    }
+    Ok(values)
+}
+
+fn apply_horizontal_predictor(data: &mut [u8], samples_per_row: usize, sample_bytes: usize, is_le: bool) {
+    if sample_bytes == 0 || samples_per_row == 0 {
+        return;
+    }
+    let row_bytes = samples_per_row.saturating_mul(sample_bytes);
+    for row in data.chunks_mut(row_bytes) {
+        for sample in 1..samples_per_row {
+            let current = sample * sample_bytes;
+            let previous = current - sample_bytes;
+            if current + sample_bytes > row.len() {
+                break;
+            }
+            match sample_bytes {
+                2 if is_le => {
+                    let value = u16::from_le_bytes([row[current], row[current + 1]])
+                        .wrapping_add(u16::from_le_bytes([row[previous], row[previous + 1]]));
+                    row[current..current + 2].copy_from_slice(&value.to_le_bytes());
+                }
+                2 => {
+                    let value = u16::from_be_bytes([row[current], row[current + 1]])
+                        .wrapping_add(u16::from_be_bytes([row[previous], row[previous + 1]]));
+                    row[current..current + 2].copy_from_slice(&value.to_be_bytes());
+                }
+                4 if is_le => {
+                    let value = u32::from_le_bytes([row[current], row[current + 1], row[current + 2], row[current + 3]])
+                        .wrapping_add(u32::from_le_bytes([row[previous], row[previous + 1], row[previous + 2], row[previous + 3]]));
+                    row[current..current + 4].copy_from_slice(&value.to_le_bytes());
+                }
+                4 => {
+                    let value = u32::from_be_bytes([row[current], row[current + 1], row[current + 2], row[current + 3]])
+                        .wrapping_add(u32::from_be_bytes([row[previous], row[previous + 1], row[previous + 2], row[previous + 3]]));
+                    row[current..current + 4].copy_from_slice(&value.to_be_bytes());
+                }
+                8 if is_le => {
+                    let value = u64::from_le_bytes(row[current..current + 8].try_into().unwrap())
+                        .wrapping_add(u64::from_le_bytes(row[previous..previous + 8].try_into().unwrap()));
+                    row[current..current + 8].copy_from_slice(&value.to_le_bytes());
+                }
+                8 => {
+                    let value = u64::from_be_bytes(row[current..current + 8].try_into().unwrap())
+                        .wrapping_add(u64::from_be_bytes(row[previous..previous + 8].try_into().unwrap()));
+                    row[current..current + 8].copy_from_slice(&value.to_be_bytes());
+                }
+                _ => {}
+            }
+        }
     }
 }
 

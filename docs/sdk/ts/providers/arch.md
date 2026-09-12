@@ -1,12 +1,13 @@
 # SDK TS Component: Map Data Stack (`sdk/ts/src/providers`)
 
-The **TS Map Data Stack** manages all ingestion and caching of cartographic data (raster and vector MVT) from GeoServer/GeoWebCache and terrain elevations (DTED files), decoupling network I/O operations from real-time main rendering.
+The **TS Map Data Stack** manages all ingestion and caching of cartographic data (raster and vector MVT) from GeoServer/GeoWebCache and terrain elevations (DTED, RGB terrain, and COG/GeoTIFF), decoupling network I/O operations from real-time main rendering.
 
 ---
 
 ## 1. Responsibilities
 * **Data Source Management (`MapDataSource`):** Abstract the network under static and dynamic map providers.
 * **Terrain Paging and Loading (DTED):** Asynchronously download terrain elevation tiles based on camera geographic coordinates.
+* **COG/GeoTIFF Injection:** Fetch local or remote elevation rasters and pass their bytes to `WasmTerrainEngine.load_geotiff_tile`.
 * **Limited Cache Management (LRU Cache):** Maintain strict memory buffer limits (avoiding memory leaks in WebAssembly) with algorithms for evicting oldest blocks (*Least Recently Used*).
 * **Parallel asynchronous consumption:** Control HTTP request queues and delegate heavy MVT/DTED file processing to background threads using Web Workers.
 
@@ -64,6 +65,17 @@ export class TerrainTileSource implements MapDataSource {
    */
   public clearCache(): void;
   public getCacheStats(): TileCacheStats;
+}
+
+/**
+ * Provider for a Cloud-Optimized GeoTIFF or standard GeoTIFF elevation raster.
+ */
+export class CogTerrainSource implements MapDataSource {
+  public id: string;
+  constructor(id: string, terrainEngine: any, url: string);
+  public loadTile(_x: number, _y: number, _z?: number, options?: TileRequestOptions): Promise<void>;
+  public unloadTile(_x: number, _y: number, _z?: number): void;
+  public clearCache(): void;
 }
 
 /**

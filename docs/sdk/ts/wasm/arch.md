@@ -87,7 +87,7 @@ pub struct WasmTileKey {
 }
 ```
 
-### 3.2 Terrain Engine (DTED)
+### 3.2 Terrain Engine (DTED, RGB, GeoTIFF and altitude resolution)
 For the loading of dense geographic data, the WASM interface consumes direct buffer pointers for maximum I/O performance.
 ```rust
 #[wasm_bindgen]
@@ -118,6 +118,11 @@ impl WasmTerrainEngine {
 
     /// Returns `{ elevation_meters: number | null }` without converting null DTED samples to zero.
     pub fn get_elevation_status(&self, lat_rad: f64, lon_rad: f64) -> Result<JsValue, JsValue> { ... }
+
+    /// Resolves an object height without applying visual terrain exaggeration.
+    /// `mode`: absolute, clamp-to-ground, relative-to-ground, or relative-to-mesh.
+    /// `unknown_policy`: reject, use-absolute, or use-zero.
+    pub fn resolve_altitude(&self, lat_rad: f64, lon_rad: f64, input_height: f64, mode: &str, unknown_policy: &str, mesh_height: Option<f64>) -> Result<f64, JsValue> { ... }
 
     /// Returns a profile with nullable elevations; reject_unknown selects strict policy.
     pub fn get_vertical_profile_status(&self, route_coords: &[f64], step_meters: f64, reject_unknown: bool) -> Result<JsValue, JsValue> { ... }

@@ -97,6 +97,9 @@ constructor(config: OlayerConfig)
 - `setViewMode(value: ViewMode): void` - Switches camera viewport mode. (e.g. switches to `2.5D` with standard `35°` pitch).
 - `getIs3D(): boolean` / `setIs3D(value: boolean): void` - Helpers to toggle between flat 2D maps and the 3D globe.
 - `getCameraState(): WasmCameraState` - Constructs a WASM camera struct holding center coordinates, zoom, rotation, pitch, roll, aspect ratio, and base dimensions.
+- `getAltitudeMode(): AltitudeMode` / `setAltitudeMode(mode): void` - Reads or changes the default object altitude interpretation.
+- `getAltitudeUnknownPolicy(): AltitudeUnknownPolicy` / `setAltitudeUnknownPolicy(policy): void` - Controls missing-terrain behavior (`reject`, `use-absolute`, `use-zero`).
+- `resolveAltitude(latRad, lonRad, inputHeightMeters, mode?, policy?, meshHeightMeters?): number` - Resolves an altitude before projection; visual exaggeration is not applied.
 
 ---
 
@@ -356,6 +359,7 @@ Imported directly from `"olayer-wasm"`. Below are the primary classes and functi
 - `unload_tile(lat: number, lon: number): void` - Removes DTED file of a grid lat/lon sector.
 - `get_elevation(latDeg: number, lonDeg: number): number` - Fast $O(1)$ ground height query in decimal degrees.
 - `get_elevation_rad(latRad: number, lonRad: number): number` - Fast $O(1)$ ground height query in radians.
+- `resolve_altitude(latRad, lonRad, inputHeight, mode, unknownPolicy, meshHeight?): number` - Resolves `absolute`, `clamp-to-ground`, `relative-to-ground`, or `relative-to-mesh` heights.
 - `set_cache_capacity(capacity: number): void` - Sets the maximum number of cached DTED tiles.
 - `cache_size(): number` - Returns the current number of cached tiles.
 - `clear_cache(): void` - Clears all cached tiles.

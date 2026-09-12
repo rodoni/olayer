@@ -288,6 +288,7 @@ pub fn get_elevation_status(&self, lat_rad: f64, lon_rad: f64) -> Result<Elevati
 pub fn get_elevation_with_policy(&self, lat_rad: f64, lon_rad: f64, policy: UnknownTerrainPolicy) -> Result<Option<f64>, TerrainError>
 pub fn get_vertical_profile_status(&self, route: &[LatLon], step_meters: f64, policy: UnknownTerrainPolicy) -> Result<Vec<ProfilePointStatus>, TerrainError>
 pub fn calculate_clearance(&self, lat_rad: f64, lon_rad: f64, aircraft_height_meters: f64, minimum_clearance_meters: f64, policy: UnknownTerrainPolicy) -> Result<ClearanceResult, TerrainError>
+pub fn resolve_altitude(&self, lat_rad: f64, lon_rad: f64, input_height: f64, mode: AltitudeMode, policy: AltitudeUnknownPolicy, mesh_height: Option<f64>) -> Result<f64, TerrainError>
 
 // Vertical profile
 pub fn get_vertical_profile(&self, route: &[LatLon], step_meters: f64) -> Result<Vec<ProfilePoint>, TerrainError>
@@ -718,6 +719,7 @@ get_elevation_rad(lat_rad: f64, lon_rad: f64): f64        // throws JsValue on e
 get_elevation_status(lat_rad: f64, lon_rad: f64): JsValue // { elevation_meters: number | null }
 get_vertical_profile_status(route_coords: Float64Array, step_meters: f64, reject_unknown: boolean): JsValue
 calculate_clearance(lat_rad: f64, lon_rad: f64, aircraft_height_meters: f64, minimum_clearance_meters: f64, reject_unknown: boolean): JsValue
+resolve_altitude(lat_rad: f64, lon_rad: f64, input_height: f64, mode: string, unknown_policy: string, mesh_height?: f64): f64
 get_vertical_profile(route_coords: Float64Array, step_meters: f64): Float64Array
   // Input: flat [lat0, lon0, h0, lat1, lon1, h1, ...] in degrees
   // Output: flat [dist0, elev0, lat0, lon0, h0, ...] — 5 values per point
@@ -847,6 +849,8 @@ interface OlayerConfig {
   initialCenterLonRad?: number;
   initialZoom?: number;
   viewportBaseMeters?: number;
+  altitudeMode?: "absolute" | "clamp-to-ground" | "relative-to-ground" | "relative-to-mesh";
+  altitudeUnknownPolicy?: "reject" | "use-absolute" | "use-zero";
 }
 
 class OlayerController {
@@ -886,6 +890,11 @@ class OlayerController {
   setViewMode(value: "2D" | "2.5D" | "3D"): void
   getIs3D(): boolean
   setIs3D(value: boolean): void
+  getAltitudeMode(): "absolute" | "clamp-to-ground" | "relative-to-ground" | "relative-to-mesh"
+  setAltitudeMode(mode: "absolute" | "clamp-to-ground" | "relative-to-ground" | "relative-to-mesh"): void
+  getAltitudeUnknownPolicy(): "reject" | "use-absolute" | "use-zero"
+  setAltitudeUnknownPolicy(policy: "reject" | "use-absolute" | "use-zero"): void
+  resolveAltitude(latRad: number, lonRad: number, inputHeightMeters: number, mode?: string, policy?: string, meshHeightMeters?: number): number
 
   // Lifecycle
   startLoop(): void
@@ -921,6 +930,20 @@ class TileLayer extends Layer {
   constructor(id: string, options?: { opacity?: number; minZoom?: number; maxZoom?: number })
   renderStatic(gl: WebGL2RenderingContext, viewProjMatrix: Float32Array): void
   renderDynamic(ctx: CanvasRenderingContext2D, currentTime: number): void
+}
+
+class TerrainLayer extends Layer {
+  constructor(id: string, gridSize?: number)
+  setVerticalExaggeration(value: number): void
+  getVerticalExaggeration(): number
+  invalidateMesh(): void
+}
+
+class TerrainContourLayer extends Layer {
+  constructor(id: string)
+  setInterval(meters: number): void
+  setVerticalExaggeration(value: number): void
+  invalidate(): void
 }
 
 class VectorTileLayer extends Layer {
@@ -960,7 +983,7 @@ class SigmetLayer extends Layer {
 }
 
 class VolumetricAirspaceLayer extends Layer {
-  constructor(id: string, options?: { baseColor?: string; edgeColor?: string; fresnelIntensity?: number })
+  constructor(id: string, options?: { baseColor?: string; edgeColor?: string; fresnelIntensity?: number; altitudeMode?: AltitudeMode; altitudeResolver?: AltitudeResolver })
   addAirspace(id: string, polygonFlatDeg: number[], floorM: number, ceilingM: number): void
   removeAirspace(id: string): boolean
   getAirspaceMesh(id: string): AirspaceMeshRecord | undefined
@@ -969,13 +992,16 @@ class VolumetricAirspaceLayer extends Layer {
 }
 
 class TrajectoryRibbonLayer extends Layer {
-  constructor(id: string, options?: { defaultRibbonWidthMeters?: number; colorLow?: string; colorHigh?: string })
+  constructor(id: string, options?: { defaultRibbonWidthMeters?: number; colorLow?: string; colorHigh?: string; altitudeMode?: AltitudeMode; altitudeResolver?: AltitudeResolver })
   addTrajectory(id: string, waypointsFlatDeg: number[], ribbonWidthM?: number, scalars?: number[]): void
   removeTrajectory(id: string): boolean
   getRibbonMesh(id: string): TrajectoryRibbonRecord | undefined
   renderStatic(gl: WebGL2RenderingContext, viewProjMatrix: Float32Array): void
   renderDynamic(ctx: CanvasRenderingContext2D, currentTime: number): void
 }
+
+type AltitudeMode = "absolute" | "clamp-to-ground" | "relative-to-ground" | "relative-to-mesh"
+type AltitudeResolver = (latRad: number, lonRad: number, inputHeightMeters: number, mode: AltitudeMode) => number
 ```
 
 ### 3.3 Data Sources
@@ -1247,7 +1273,8 @@ impl NativeController {
     pub fn create_geoserver_source(&self, id: &str, base_url: &str, layer_name: &str) -> GeoserverWmtsSource
     pub fn trigger_active(&mut self)
     pub fn check_active(&mut self) -> bool
-    pub fn get_target_fps(&mut self) -> u32   // 60 (active) or 15 (idle)
+pub fn get_target_fps(&mut self) -> u32   // 60 (active) or 15 (idle)
+pub fn resolve_altitude(&self, lat_rad: f64, lon_rad: f64, input_height: f64, mode: AltitudeMode, policy: AltitudeUnknownPolicy, mesh_height: Option<f64>) -> Result<f64, TerrainError>
 }
 ```
 
@@ -1472,6 +1499,13 @@ int olayer_terrain_engine_get_elevation_rad(
 int olayer_terrain_engine_get_elevation_status(
     TerrainEngine* engine, double lat_rad, double lon_rad, double* out_elevation);
 
+// mode: 0 absolute, 1 clamp-to-ground, 2 relative-to-ground, 3 relative-to-mesh
+// unknown_policy: 0 reject, 1 use-absolute, 2 use-zero
+int olayer_terrain_engine_resolve_altitude(
+    TerrainEngine* engine, double lat_rad, double lon_rad,
+    double input_height, int mode, int unknown_policy,
+    double mesh_height, double* out_height);
+
 // Returns 0 safe, 1 warning, 2 unknown terrain, or a negative error.
 int olayer_terrain_engine_calculate_clearance(
     TerrainEngine* engine, double lat_rad, double lon_rad,
@@ -1661,4 +1695,5 @@ function compileLibrary(configPath: string, rootDir: string): DeclarativeLibrary
 - `TerrainEngine` gained `get_elevation_rad`, `set_cache_capacity`, `cache_size`, and `clear_cache` in all bindings.
 - `NativeController` gained `create_geoserver_source`, `check_active`, and `get_target_fps`.
 - `WgpuGpuPipeline` gained raster tile upload/rendering alongside the existing grid pipeline.
+- `TerrainEngine`, WASM, Native Controller, and C-FFI gained explicit altitude-mode resolution. `Absolute` remains the default and vertical exaggeration is visual-only.
 - `CPURenderer`/`WgpuCpuVertexPipeline` signatures were unified to accept explicit camera/projection parameters for 2D, 2.5D, and 3D modes.

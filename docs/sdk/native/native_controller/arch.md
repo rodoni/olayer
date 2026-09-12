@@ -60,7 +60,10 @@ pub struct NativeController {
 2. **State Control:**
    * `trigger_active(&mut self)`: Forces the active state by renewing the timestamp.
    * `check_active(&mut self) -> bool`: Compares `last_active_time.elapsed()` with `active_timeout` to update and return the `is_active` flag.
-   * `get_target_fps(&mut self) -> u32`: Returns the target frame rate (60 if active, 15 if idle).
+    * `get_target_fps(&mut self) -> u32`: Returns the target frame rate (60 if active, 15 if idle).
+    * `resolve_altitude(...)`: Resolves an object height through the owned `TerrainEngine`, preserving the distinction between geodetic altitude and visual mesh exaggeration.
+
+The controller uses `olayer_core::terrain::AltitudeMode` and `AltitudeUnknownPolicy`. `RelativeToMesh` accepts an optional effective mesh height and falls back to sampled ground when it is not supplied.
 
 ---
 

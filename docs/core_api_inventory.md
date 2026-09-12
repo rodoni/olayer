@@ -5,11 +5,11 @@ intentionally module-level; signatures remain in `docs/api_reference.md`.
 
 | Core area | WASM | C-FFI | Notes |
 |---|---|---|---|
-| `geodesy` coordinates and ECEF | Exposed | Exposed where used by FFI operations | Radians internally; degree conversion only at documented boundaries |
+| `geodesy` coordinates, ECEF, and vertical references | Exposed | Exposed where used by FFI operations | `Height`/`VerticalDatum` are geodesy-only; radians internally and no terrain dependency |
 | `geodesy` solvers | Exposed through core operations | Exposed through profile/interpolation operations | No standalone solver object at either boundary |
 | `camera` | Exposed through `WasmCameraState` and projection matrices | Exposed through native controller APIs | Shared camera fixtures remain a follow-up |
 | `projections` | Exposed through `WasmProjection` | Exposed through native controller APIs | All angles are radians |
-| `terrain` tile/cache/elevation | Exposed through `WasmTerrainEngine` | Exposed through terrain functions | DTED, Mapbox/Terrarium RGB tiles, and COG/GeoTIFF ingestion, Status and MSAW APIs |
+| `terrain` tile/cache/elevation/altitude modes | Exposed through `WasmTerrainEngine.resolve_altitude` | Exposed through `olayer_terrain_engine_resolve_altitude` | DTED, Mapbox/Terrarium RGB tiles, COG/GeoTIFF ingestion, status/MSAW, `Absolute`, `ClampToGround`, `RelativeToGround`, `RelativeToMesh` |
 | `terrain` profiles | Exposed as flat arrays/status JSON | Exposed through allocated `C_ProfilePoint` arrays | Matching free functions are required |
 | `interpolator` target state | Exposed through `WasmInterpolationEngine` | Exposed through update/remove functions | IDs are copied into boundary-owned allocations |
 | `interpolator` prediction status | Exposed as JSON batch | Exposed as quality integer | Quality values are documented in `docs/conformance.md` |

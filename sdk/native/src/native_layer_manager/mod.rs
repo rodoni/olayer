@@ -53,6 +53,8 @@ pub struct NativeLayerManager {
     pub show_hud: bool,
     /// Convenience toggle for the terrain base layer (demo use).
     pub show_terrain: bool,
+    /// Convenience toggle for the sampled terrain mesh (demo use).
+    pub show_terrain_mesh: bool,
 }
 
 impl Default for NativeLayerManager {
@@ -64,6 +66,7 @@ impl Default for NativeLayerManager {
             show_targets: true,
             show_hud: true,
             show_terrain: true,
+            show_terrain_mesh: true,
         }
     }
 }

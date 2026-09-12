@@ -84,6 +84,25 @@ impl WasmTerrainEngine {
             .map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
+    /// Resolves an object height against terrain using an explicit altitude mode.
+    /// `mode` accepts absolute, clamp-to-ground, relative-to-ground, or relative-to-mesh.
+    /// `unknown_policy` accepts reject, use-absolute, or use-zero.
+    pub fn resolve_altitude(
+        &self,
+        lat_rad: f64,
+        lon_rad: f64,
+        input_height: f64,
+        mode: &str,
+        unknown_policy: &str,
+        mesh_height: Option<f64>,
+    ) -> Result<f64, JsValue> {
+        let mode = parse_altitude_mode(mode)?;
+        let policy = parse_altitude_unknown_policy(unknown_policy)?;
+        self.inner
+            .resolve_altitude(lat_rad, lon_rad, input_height, mode, policy, mesh_height)
+            .map_err(|error| JsValue::from_str(&error.to_string()))
+    }
+
     /// Returns `{ elevation_meters: number | null }`, preserving DTED null samples.
     pub fn get_elevation_status(&self, lat_rad: f64, lon_rad: f64) -> Result<JsValue, JsValue> {
         let sample = self.inner.get_elevation_status(lat_rad, lon_rad)
@@ -250,6 +269,25 @@ impl WasmTerrainEngine {
     /// Clears all loaded terrain sources (DTED, RGB tiles, GeoTIFFs).
     pub fn clear_all_terrain(&self) {
         self.inner.clear_all();
+    }
+}
+
+fn parse_altitude_mode(value: &str) -> Result<olayer_core::terrain::AltitudeMode, JsValue> {
+    match value {
+        "absolute" => Ok(olayer_core::terrain::AltitudeMode::Absolute),
+        "clamp-to-ground" | "clamp_to_ground" => Ok(olayer_core::terrain::AltitudeMode::ClampToGround),
+        "relative-to-ground" | "relative_to_ground" => Ok(olayer_core::terrain::AltitudeMode::RelativeToGround),
+        "relative-to-mesh" | "relative_to_mesh" => Ok(olayer_core::terrain::AltitudeMode::RelativeToMesh),
+        _ => Err(JsValue::from_str(&format!("Unknown altitude mode: {value}"))),
+    }
+}
+
+fn parse_altitude_unknown_policy(value: &str) -> Result<olayer_core::terrain::AltitudeUnknownPolicy, JsValue> {
+    match value {
+        "reject" => Ok(olayer_core::terrain::AltitudeUnknownPolicy::Reject),
+        "use-absolute" | "use_absolute" => Ok(olayer_core::terrain::AltitudeUnknownPolicy::UseAbsolute),
+        "use-zero" | "use_zero" => Ok(olayer_core::terrain::AltitudeUnknownPolicy::UseZero),
+        _ => Err(JsValue::from_str(&format!("Unknown terrain altitude policy: {value}"))),
     }
 }
 

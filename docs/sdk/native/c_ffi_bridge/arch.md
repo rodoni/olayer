@@ -108,8 +108,9 @@ pub struct C_ProfilePoint {
 * `olayer_terrain_engine_load_tile`: Parses and registers a raw binary DTED buffer in memory. Writes the origin coordinates to the passed pointers.
 * `olayer_terrain_engine_unload_tile`: Removes a terrain cell from memory by its coordinate degree.
 * `olayer_terrain_engine_get_elevation`: Queries and returns the ground altitude at the specified geographic point in constant time $O(1)$.
-* `olayer_terrain_engine_get_elevation_status`: Preserves unknown DTED samples; returns status `1` instead of converting them to zero.
-* `olayer_terrain_engine_calculate_clearance`: Computes MSAW safe, warning, or unknown status.
+ * `olayer_terrain_engine_get_elevation_status`: Preserves unknown DTED samples; returns status `1` instead of converting them to zero.
+* `olayer_terrain_engine_resolve_altitude`: Resolves an object height against terrain. Mode codes are `0` absolute, `1` clamp-to-ground, `2` relative-to-ground, and `3` relative-to-mesh. Unknown policy codes are `0` reject, `1` use-absolute, and `2` use-zero.
+ * `olayer_terrain_engine_calculate_clearance`: Computes MSAW safe, warning, or unknown status.
 * `olayer_terrain_engine_get_vertical_profile`: Calculates the terrain vertical profile under the provided route.
 * `olayer_profile_points_free`: Frees the memory of the profile point array allocated by Rust.
 * `olayer_terrain_engine_free`: Safely destroys the terrain engine instance.

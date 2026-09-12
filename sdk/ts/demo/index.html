@@ -252,6 +252,34 @@
           </select>
         </div>
 
+        <div class="form-group">
+          <label>
+            <input id="showTerrainCheckbox" type="checkbox" checked style="accent-color: var(--accent); margin-right: 6px;">
+            Render DTED Terrain Mesh
+          </label>
+          <select id="terrainFileSelect" style="width: 100%; margin-top: 8px;">
+            <option value="23S48_ZN.tif" selected>23S48_ZN.tif (São Paulo)</option>
+            <option value="22S465ZN.tif">22S465ZN.tif</option>
+            <option value="22S48_ZN.tif">22S48_ZN.tif</option>
+            <option value="23S48_ZN.tif">23S48_ZN.tif</option>
+          </select>
+          <button id="loadTerrainFileBtn" type="button" style="width: 100%; margin-top: 6px;">Load GeoTIFF Elevation</button>
+          <small id="terrainFileStatus" style="display: block; margin-top: 5px; color: var(--text-muted);">Loading local elevation...</small>
+          <input id="terrainExaggerationRange" type="range" min="0" max="5" step="0.25" value="1" style="width: 100%; accent-color: var(--accent);">
+          <label style="display: block; margin-top: 8px;">
+            <input id="showTerrainContoursCheckbox" type="checkbox" checked style="accent-color: var(--accent); margin-right: 6px;">
+            Show elevation contours
+          </label>
+          <input id="terrainContourIntervalRange" type="range" min="25" max="500" step="25" value="100" style="width: 100%; accent-color: var(--accent);">
+          <label for="altitudeModeSelect" style="display: block; margin-top: 8px;">Object altitude mode</label>
+          <select id="altitudeModeSelect" style="width: 100%;">
+            <option value="absolute" selected>Absolute</option>
+            <option value="clamp-to-ground">Clamp to ground</option>
+            <option value="relative-to-ground">Relative to ground</option>
+            <option value="relative-to-mesh">Relative to mesh</option>
+          </select>
+        </div>
+
         <div id="geoserverConfigGroup" style="display: none;">
           <div class="form-group">
             <label for="geoserverHostInput">GeoServer Host</label>

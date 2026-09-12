@@ -10,6 +10,7 @@ use crate::terrain::geotiff::GeoTiffTile;
 use crate::terrain::rgb_decoder::RgbElevationEncoding;
 use crate::terrain::rgb_tile::{RgbElevationTile, SlippyTileKey};
 use crate::terrain::tile::DtedTile;
+use crate::terrain::altitude::{resolve_altitude, AltitudeMode, AltitudeUnknownPolicy};
 
 /// Default maximum number of DTED and RGB tiles kept in memory.
 const DEFAULT_TILE_CAPACITY: usize = 64;
@@ -318,6 +319,33 @@ impl TerrainEngine {
             ));
         }
         Ok(elevation)
+    }
+
+    /// Resolves an object's height against the sampled terrain. Vertical
+    /// exaggeration is intentionally not applied here because it is visual-only.
+    pub fn resolve_altitude(
+        &self,
+        lat_rad: f64,
+        lon_rad: f64,
+        input_height: f64,
+        mode: AltitudeMode,
+        unknown_policy: AltitudeUnknownPolicy,
+        mesh_height: Option<f64>,
+    ) -> Result<f64, TerrainError> {
+        if mode == AltitudeMode::Absolute {
+            return resolve_altitude(input_height, None, mesh_height, mode, unknown_policy)
+                .map_err(|error| TerrainError::MalformedData(error.to_string()));
+        }
+
+        let ground_height = match self.get_elevation_status(lat_rad, lon_rad) {
+            Ok(sample) => sample.elevation_meters,
+            Err(error) => match unknown_policy {
+                AltitudeUnknownPolicy::Reject => return Err(error),
+                AltitudeUnknownPolicy::UseAbsolute | AltitudeUnknownPolicy::UseZero => None,
+            },
+        };
+        resolve_altitude(input_height, ground_height, mesh_height, mode, unknown_policy)
+            .map_err(|error| TerrainError::MalformedData(error.to_string()))
     }
 
     /// Builds a profile while preserving unknown samples or rejecting them by policy.

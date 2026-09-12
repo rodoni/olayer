@@ -1,11 +1,14 @@
 import { Layer } from "./layer";
 import { generate_airspace_volume_mesh, WasmVolumetricMesh } from "olayer-wasm";
+import type { AltitudeMode, AltitudeResolver } from "../types/altitude";
 
 export interface VolumetricAirspaceOptions {
   baseColor?: string;
   edgeColor?: string;
   opacity?: number;
   fresnelIntensity?: number;
+  altitudeMode?: AltitudeMode;
+  altitudeResolver?: AltitudeResolver;
 }
 
 export interface AirspaceMeshRecord {
@@ -28,6 +31,8 @@ export class VolumetricAirspaceLayer extends Layer {
   public edgeColor: string;
   public opacity: number;
   public fresnelIntensity: number;
+  public altitudeMode: AltitudeMode;
+  private altitudeResolver?: AltitudeResolver;
 
   private airspaces: Map<string, AirspaceMeshRecord> = new Map();
 
@@ -37,6 +42,8 @@ export class VolumetricAirspaceLayer extends Layer {
     this.edgeColor = options.edgeColor ?? "#00e5ff";
     this.opacity = options.opacity ?? 0.85;
     this.fresnelIntensity = options.fresnelIntensity ?? 0.5;
+    this.altitudeMode = options.altitudeMode ?? "absolute";
+    this.altitudeResolver = options.altitudeResolver;
   }
 
   /**
@@ -48,6 +55,13 @@ export class VolumetricAirspaceLayer extends Layer {
    * @param ceilingM Upper altitude limit in meters above WGS84 ellipsoid.
    */
   public addAirspace(id: string, polygonDeg: number[], floorM: number, ceilingM: number): void {
+    const [baseLatDeg, baseLonDeg] = polygonDeg;
+    if (this.altitudeMode !== "absolute" && this.altitudeResolver && Number.isFinite(baseLatDeg) && Number.isFinite(baseLonDeg)) {
+      const latRad = baseLatDeg * Math.PI / 180;
+      const lonRad = baseLonDeg * Math.PI / 180;
+      floorM = this.altitudeResolver(latRad, lonRad, floorM, this.altitudeMode);
+      ceilingM = this.altitudeResolver(latRad, lonRad, ceilingM, this.altitudeMode);
+    }
     let wasmMesh: WasmVolumetricMesh | null = null;
     try {
       wasmMesh = generate_airspace_volume_mesh(
@@ -76,6 +90,10 @@ export class VolumetricAirspaceLayer extends Layer {
         wasmMesh.free();
       }
     }
+  }
+
+  public setAltitudeResolver(resolver: AltitudeResolver | undefined): void {
+    this.altitudeResolver = resolver;
   }
 
   /**

@@ -5,15 +5,19 @@ import init, {
   WebGLRenderer,
   CPURenderer,
   TileLayer,
+  TerrainLayer,
+  TerrainContourLayer,
   RasterTileSource,
   VectorTileSource,
   VectorTileLayer,
   WasmStyleRegistry,
 } from "../src";
+import type { AltitudeMode } from "../src";
 
 // Pre-define coordinates for São Paulo (TMA SP) in radians
 const SP_LAT_RAD = -23.62 * (Math.PI / 180);
 const SP_LON_RAD = -46.65 * (Math.PI / 180);
+const LOCAL_TERRAIN_FILES = ["23S48_ZN.tif", "23S465ZN.tif", "22S48_ZN.tif", "22S465ZN.tif"];
 
 // Global State
 let currentProjType = "Stereographic";
@@ -23,6 +27,8 @@ let gridLayer: GridLayer;
 let radarLayer: RadarLayer;
 let navAidLayer: NavAidLayer; // Dynamic layer for NavAids
 let tileLayer: TileLayer | null = null;
+let terrainLayer: TerrainLayer | null = null;
+let terrainContourLayer: TerrainContourLayer | null = null;
 let vectorLayer: VectorTileLayer | null = null;
 let selectedTargetId: string | null = null;
 
@@ -85,6 +91,49 @@ function createMockDted0(latStr: string, lonStr: string, numCols: number, numRow
   }
 
   return data;
+}
+
+async function loadLocalGeoTiff(fileName: string): Promise<boolean> {
+  const status = document.getElementById("terrainFileStatus");
+  const url = `/@fs/home/rodoni/data/elevacao/${encodeURIComponent(fileName)}`;
+  if (status) status.textContent = `Loading ${fileName}...`;
+  try {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    controller.terrainEngine.clear_all_terrain();
+    const bounds = Array.from(controller.terrainEngine.load_geotiff_tile(bytes) as number[]);
+    terrainLayer?.invalidateMesh();
+    controller.triggerActive();
+    if (status) status.textContent = `${fileName} loaded (${bounds.map(value => value.toFixed(3)).join(", ")})`;
+    return true;
+  } catch (error) {
+    console.error(`Failed to load local GeoTIFF ${fileName}:`, error);
+    if (status) status.textContent = `Could not load ${fileName}; using synthetic DTED`;
+    return false;
+  }
+}
+
+function loadMockDtedTerrain(): void {
+  console.log("Loading mock DTED tiles...");
+  for (let lat = -25; lat <= -22; lat++) {
+    for (let lon = -48; lon <= -45; lon++) {
+      const latStr = Math.abs(lat).toString().padStart(2, "0") + "0000" + (lat < 0 ? "S" : "N");
+      const lonStr = Math.abs(lon).toString().padStart(3, "0") + "0000" + (lon < 0 ? "W" : "E");
+      const tile = createMockDted0(latStr, lonStr, 100, 100);
+      try {
+        controller.terrainEngine.load_tile(tile);
+      } catch (error) {
+        console.error(`Failed to load tile for lat=${lat}, lon=${lon}:`, error);
+      }
+    }
+  }
+  console.log("Mock DTED tiles loaded successfully!");
+}
+
+function selectedAltitudeMode(): AltitudeMode {
+  const value = (document.getElementById("altitudeModeSelect") as HTMLSelectElement | null)?.value;
+  return (value as AltitudeMode | undefined) ?? "absolute";
 }
 
 // Draw the 2.5D vertical flight profile chart
@@ -581,6 +630,7 @@ interface SimulatedTarget {
   lat: number; // radians
   lon: number; // radians
   alt: number; // meters
+  inputAltitude: number; // meters before altitude-mode resolution
   speed: number; // m/s
   heading: number; // radians
 }
@@ -597,7 +647,13 @@ function generateRandomTarget(): void {
 
   const lat = SP_LAT_RAD + offsetRadiusRad * Math.cos(angle);
   const lon = SP_LON_RAD + offsetRadiusRad * Math.sin(angle);
-  const alt = 1000 + Math.random() * 6000; // 3k to 23k feet
+  const inputAltitude = 1000 + Math.random() * 6000; // metres above the selected reference
+  let alt = inputAltitude;
+  try {
+    alt = controller.resolveAltitude(lat, lon, inputAltitude, selectedAltitudeMode(), "use-absolute");
+  } catch {
+    // Keep the source altitude when the selected terrain is not available.
+  }
   const speed = 180 + Math.random() * 70; // 350-500 KT
   const heading = Math.random() * 2 * Math.PI;
 
@@ -606,6 +662,7 @@ function generateRandomTarget(): void {
     lat,
     lon,
     alt,
+    inputAltitude,
     speed,
     heading,
   };
@@ -642,6 +699,12 @@ function updateMapLayers(): void {
     vectorLayer.destroy(controller.gl);
     vectorLayer = null;
   }
+  if (terrainLayer) {
+    controller.layerManager.removeLayer(terrainLayer.id);
+  }
+  if (terrainContourLayer) {
+    controller.layerManager.removeLayer(terrainContourLayer.id);
+  }
 
   // Also remove standard layers temporarily so we can re-add in order
   if (gridLayer) {
@@ -670,6 +733,15 @@ function updateMapLayers(): void {
 
   const vectorLayerInput = document.getElementById("vectorLayerInput") as HTMLInputElement;
   const vectorLayerName = vectorLayerInput ? vectorLayerInput.value.trim() : "topp:states";
+
+  const terrainCheckbox = document.getElementById("showTerrainCheckbox") as HTMLInputElement;
+  if (terrainLayer) {
+    terrainLayer.visible = terrainCheckbox ? terrainCheckbox.checked : true;
+  }
+  const contourCheckbox = document.getElementById("showTerrainContoursCheckbox") as HTMLInputElement;
+  if (terrainContourLayer) {
+    terrainContourLayer.visible = contourCheckbox ? contourCheckbox.checked : true;
+  }
 
   // Toggle DOM element visibility based on selections
   const geoserverConfigGroup = document.getElementById("geoserverConfigGroup");
@@ -739,11 +811,17 @@ function updateMapLayers(): void {
   }
 
   // 5. Add layers back to Manager in correct rendering stack order
+  if (terrainLayer) {
+    controller.layerManager.addLayer(terrainLayer);
+  }
   if (tileLayer) {
     controller.layerManager.addLayer(tileLayer);
   }
   if (vectorLayer) {
     controller.layerManager.addLayer(vectorLayer);
+  }
+  if (terrainContourLayer) {
+    controller.layerManager.addLayer(terrainContourLayer);
   }
   if (gridLayer) {
     controller.layerManager.addLayer(gridLayer);
@@ -781,6 +859,8 @@ async function start() {
     initialCenterLonRad: SP_LON_RAD,
     initialZoom: 1.0,
     viewportBaseMeters: 250000.0, // 250 km base TMA size
+    altitudeMode: selectedAltitudeMode(),
+    altitudeUnknownPolicy: "use-absolute",
   });
 
   // Fetch and register compiled SVG symbols library
@@ -832,29 +912,22 @@ async function start() {
   </StyledLayerDescriptor>`;
   controller.styleRegistry = WasmStyleRegistry.parse(sldXml);
 
-  // Load mock DTED Level 0 tiles for São Paulo TMA area to support 2.5D flight profile
-  console.log("Loading mock DTED tiles...");
-  for (let lat = -25; lat <= -22; lat++) {
-    for (let lon = -48; lon <= -45; lon++) {
-      const latStr = Math.abs(lat).toString().padStart(2, "0") + "0000" + (lat < 0 ? "S" : "N");
-      const lonStr = Math.abs(lon).toString().padStart(3, "0") + "0000" + (lon < 0 ? "W" : "E");
-      const tile = createMockDted0(latStr, lonStr, 100, 100);
-      try {
-        controller.terrainEngine.load_tile(tile);
-      } catch (e) {
-        console.error(`Failed to load tile for lat=${lat}, lon=${lon}:`, e);
-      }
-    }
-  }
-  console.log("Mock DTED tiles loaded successfully!");
-
   // Set controller on window for layers to access
   (window as any).olayerController = controller;
 
   // Create static grid, navaid and radar layers (independent of base map URL)
   gridLayer = new GridLayer(controller.gl, activeProjection, "2D");
+  terrainLayer = new TerrainLayer("dted_terrain_mesh", 32);
+  terrainLayer.opacity = 0.9;
+  terrainContourLayer = new TerrainContourLayer("dted_terrain_contours");
+  terrainContourLayer.opacity = 0.95;
   navAidLayer = new NavAidLayer(controller);
   radarLayer = new RadarLayer(controller);
+
+  const selectedTerrainFile = (document.getElementById("terrainFileSelect") as HTMLSelectElement | null)?.value ?? LOCAL_TERRAIN_FILES[0];
+  if (!(await loadLocalGeoTiff(selectedTerrainFile))) {
+    loadMockDtedTerrain();
+  }
 
   // Initialize map layers based on GUI selections
   updateMapLayers();
@@ -913,7 +986,36 @@ async function start() {
   document.getElementById("geoserverHostInput")?.addEventListener("input", updateMapLayers);
   document.getElementById("geoserverLayerInput")?.addEventListener("input", updateMapLayers);
   document.getElementById("showVectorOverlayCheckbox")?.addEventListener("change", updateMapLayers);
+  document.getElementById("showTerrainCheckbox")?.addEventListener("change", updateMapLayers);
+  document.getElementById("showTerrainContoursCheckbox")?.addEventListener("change", updateMapLayers);
   document.getElementById("vectorLayerInput")?.addEventListener("input", updateMapLayers);
+  document.getElementById("terrainExaggerationRange")?.addEventListener("input", (event) => {
+    const value = Number.parseFloat((event.target as HTMLInputElement).value);
+    terrainLayer?.setVerticalExaggeration(value);
+    terrainContourLayer?.setVerticalExaggeration(value);
+    controller.triggerActive();
+  });
+  document.getElementById("terrainContourIntervalRange")?.addEventListener("input", (event) => {
+    const value = Number.parseFloat((event.target as HTMLInputElement).value);
+    terrainContourLayer?.setInterval(value);
+    controller.triggerActive();
+  });
+  document.getElementById("loadTerrainFileBtn")?.addEventListener("click", async () => {
+    const file = (document.getElementById("terrainFileSelect") as HTMLSelectElement).value;
+    await loadLocalGeoTiff(file);
+  });
+  document.getElementById("altitudeModeSelect")?.addEventListener("change", () => {
+    controller.setAltitudeMode(selectedAltitudeMode());
+    for (const target of activeSimulatedTargets) {
+      try {
+        target.alt = controller.resolveAltitude(target.lat, target.lon, target.inputAltitude, selectedAltitudeMode(), "use-absolute");
+        controller.interpolator.update_target(target.id, target.lat, target.lon, target.alt, target.speed, target.heading, 0.0, Date.now() / 1000);
+      } catch {
+        // Preserve the last valid target position if terrain is unavailable.
+      }
+    }
+    controller.triggerActive();
+  });
 
   document.getElementById("addAircraftBtn")?.addEventListener("click", () => {
     generateRandomTarget();

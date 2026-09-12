@@ -378,6 +378,50 @@ pub unsafe extern "C" fn olayer_terrain_engine_get_elevation_status(
     }
 }
 
+/// Resolves an object height against terrain.
+/// `mode`: 0 absolute, 1 clamp-to-ground, 2 relative-to-ground, 3 relative-to-mesh.
+/// `unknown_policy`: 0 reject, 1 use-absolute, 2 use-zero.
+#[no_mangle]
+pub unsafe extern "C" fn olayer_terrain_engine_resolve_altitude(
+    engine: *mut TerrainEngine,
+    lat_rad: f64,
+    lon_rad: f64,
+    input_height: f64,
+    mode: c_int,
+    unknown_policy: c_int,
+    mesh_height: f64,
+    out_height: *mut f64,
+) -> c_int {
+    if engine.is_null() || out_height.is_null() {
+        return -1;
+    }
+    let altitude_mode = match mode {
+        0 => olayer_core::terrain::AltitudeMode::Absolute,
+        1 => olayer_core::terrain::AltitudeMode::ClampToGround,
+        2 => olayer_core::terrain::AltitudeMode::RelativeToGround,
+        3 => olayer_core::terrain::AltitudeMode::RelativeToMesh,
+        _ => return -3,
+    };
+    let policy = match unknown_policy {
+        0 => olayer_core::terrain::AltitudeUnknownPolicy::Reject,
+        1 => olayer_core::terrain::AltitudeUnknownPolicy::UseAbsolute,
+        2 => olayer_core::terrain::AltitudeUnknownPolicy::UseZero,
+        _ => return -3,
+    };
+    let mesh = if mesh_height.is_finite() { Some(mesh_height) } else { None };
+    let engine_ref = &mut *engine;
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        engine_ref.resolve_altitude(lat_rad, lon_rad, input_height, altitude_mode, policy, mesh)
+    })) {
+        Ok(Ok(height)) => {
+            *out_height = height;
+            0
+        }
+        Ok(Err(_)) => -2,
+        Err(_) => -99,
+    }
+}
+
 /// Computes MSAW clearance. Returns 0 safe, 1 warning, 2 unknown terrain, or a negative error.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_terrain_engine_calculate_clearance(

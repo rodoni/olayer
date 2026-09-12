@@ -20,6 +20,7 @@ The **Geodesy Engine** is designed as a pure, high-performance mathematical libr
    * **Geodesic Buffers & Corridors:** Generate constant-width geodesic buffer polygons with vertex arc discretization.
    * **Geodesic Line-Line Intersection:** Determine exact intersection points of two airway segments on the globe using 3D great circle normals.
 7. **Multisolver Modes:** Provide high-precision resolutions (Vincenty) and optimized resolutions for massive processing (Haversine/Spherical).
+8. **Vertical Reference Types:** Represent validated heights and their vertical datum without depending on terrain sampling or rendering.
 
 ---
 
@@ -39,6 +40,18 @@ classDiagram
         +from_degrees(lat: f64, lon: f64, height: f64) LatLon
         +to_degrees() (f64, f64, f64)
         +validate() Result~() , GeodesyError~
+    }
+
+    class Height {
+        +meters: f64
+        +datum: VerticalDatum
+        +new(meters: f64, datum: VerticalDatum) Result~Height, Error~
+    }
+
+    class VerticalDatum {
+        <<enumeration>>
+        Ellipsoidal
+        Orthometric
     }
 
     class Ecef {
@@ -204,6 +217,7 @@ classDiagram
     GeodeticSolver <|.. VincentySolver : implements
     GeodeticSolver <|.. HaversineSolver : implements
     GeodeticSolver ..> GeodeticResult : generates
+    Height ..> VerticalDatum : identifies reference
 ```
 
 ---
@@ -216,6 +230,7 @@ The Rust source code organization for the component follows the framework's modu
 core/src/geodesy/
 ├── mod.rs               # Public module facade (re-exports of geodesy module)
 ├── coords.rs            # Definition of LatLon, Ecef, and Enu structs
+├── altitude.rs          # Height and VerticalDatum value objects
 ├── errors.rs            # Error enum (GeodesyError) and formatting
 ├── ellipsoid.rs         # Ellipsoidal parameters and constants (WGS84)
 ├── conversions.rs       # Conversion algorithms between LLA, ECEF, and ENU
@@ -229,6 +244,8 @@ core/src/geodesy/
 │   └── vincenty.rs      # Ellipsoidal solver (Iterative, High Precision)
 └── tests.rs             # Unit and integration tests
 ```
+
+`geodesy::altitude` owns only the vertical reference and validation of a height. It does not query `TerrainEngine` and does not implement `ClampToGround` or other scene-placement policies. Those policies belong to `core::terrain::altitude`.
 
 ---
 

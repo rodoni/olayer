@@ -23,11 +23,11 @@ Layers are drawn in strict depth order (back-to-front):
     │ Radar Targets │  <-- Layer 2: Aircraft and Vectors Drawing
     └───────────────┘
     ┌───────────────┐
-    │ Geodetic Grid │  <-- Layer 1: Longitude and Latitude Lines
-    └───────────────┘
-    ┌───────────────┐
-    │ Background    │  <-- Layer 0: ATC Screen Background Color (Clear)
-    └───────────────┘
+     │ Geodetic Grid │  <-- Layer 1: Longitude and Latitude Lines
+     └───────────────┘
+     ┌───────────────┐
+     │ Terrain Mesh  │  <-- Layer 0: Sampled elevation surface
+     └───────────────┘
        [ Bottom ]
 ```
 
@@ -51,7 +51,9 @@ sequenceDiagram
     Main->>Main: Prepares projection matrices
     Main->>WGPU: Starts CommandEncoder & RenderPass
     Main->>WGPU: Clears screen with ATC background color
-    Main->>WGPU: Draws Geodetic Grid (Vertex Buffer)
+     Main->>WGPU: Draws Terrain Mesh (Vertex Buffer)
+     Main->>WGPU: Draws Raster Map Tiles (optional)
+     Main->>WGPU: Draws Geodetic Grid (Vertex Buffer)
     Main->>Egui: Tessellates interface shapes and targets
     Main->>Egui: Renders UI and Target Overlay on GPU
     Main->>WGPU: Finalizes and sends commands to Queue
@@ -83,7 +85,8 @@ pub struct NativeLayerManager {
     pub show_grid: bool,
     pub show_targets: bool,
     pub show_hud: bool,
-    pub show_terrain: bool,
+     pub show_terrain: bool,
+     pub show_terrain_mesh: bool,
 }
 ```
 Key methods:
@@ -98,4 +101,5 @@ Key methods:
 ### 4.3 Drawing Segmentation
 Drawing is segmented by the following code areas:
 * **Grid Drawing:** `rebuild_grid_buffers` method rebuilds the `grid_vertex_buffer` dynamically based on the current projection mode (2D/2.5D/3D).
+* **Terrain Drawing:** `rebuild_terrain_buffers` samples `NativeController::terrain`, creates a triangulated elevation mesh, and `render_terrain` submits it through the WGPU terrain pipeline. `show_terrain_mesh` controls visibility independently of raster map tiles.
 * **Target and UI Drawing:** The `egui::Context::begin_frame` method initiates the context in which the screen Painter (`egui_ctx.layer_painter`) plots radar targets and data boxes, while HUD UI panels provide operational controls.

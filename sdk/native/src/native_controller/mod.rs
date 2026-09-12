@@ -1,5 +1,5 @@
 use olayer_core::geodesy::LatLon;
-use olayer_core::terrain::TerrainEngine;
+use olayer_core::terrain::{AltitudeMode, AltitudeUnknownPolicy, TerrainEngine};
 use olayer_core::interpolator::InterpolationEngine;
 use olayer_core::projections::{Projection, CameraState, Stereographic};
 
@@ -55,6 +55,20 @@ impl NativeController {
     #[inline]
     pub fn create_geoserver_source(&self, id: &str, base_url: &str, layer_name: &str) -> crate::native_map_data_stack::GeoserverWmtsSource {
         crate::native_map_data_stack::GeoserverWmtsSource::new(id, base_url, layer_name)
+    }
+
+    /// Resolves a geodetic object height using the native terrain engine.
+    #[inline]
+    pub fn resolve_altitude(
+        &self,
+        lat_rad: f64,
+        lon_rad: f64,
+        input_height: f64,
+        mode: AltitudeMode,
+        unknown_policy: AltitudeUnknownPolicy,
+        mesh_height: Option<f64>,
+    ) -> Result<f64, olayer_core::terrain::TerrainError> {
+        self.terrain.resolve_altitude(lat_rad, lon_rad, input_height, mode, unknown_policy, mesh_height)
     }
 
     #[inline]

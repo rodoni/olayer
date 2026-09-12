@@ -11,6 +11,7 @@ The **TS Controller** is the maestro and main entry point of the TypeScript SDK.
   * **Economic Mode (15 FPS):** Activated automatically after the camera stabilization or idleness timeout.
 * **User Input Processing:** Intercepts and decodes mouse clicks, movements, wheel scroll (wheel), and touch clicks.
 * **Camera Attitude Management:** Maintains camera variables (`center`, `zoom`, `bearing`, `pitch`, `roll`) and sends them to the WASM bridge for matrix computation.
+* **Altitude Resolution:** Stores the default altitude mode and unknown-terrain policy and delegates height resolution to `WasmTerrainEngine` before layers project or generate geometry.
 
 ---
 
@@ -27,6 +28,8 @@ import { LayerManager } from "../layers";
 import { MapDataStack } from "../providers";
 
 export type ViewMode = "2D" | "2.5D" | "3D";
+export type AltitudeMode = "absolute" | "clamp-to-ground" | "relative-to-ground" | "relative-to-mesh";
+export type AltitudeUnknownPolicy = "reject" | "use-absolute" | "use-zero";
 
 export interface OlayerConfig {
   glCanvas: HTMLCanvasElement;
@@ -37,6 +40,8 @@ export interface OlayerConfig {
   initialZoom?: number;
   viewportBaseMeters?: number;
   onMetrics?: (metrics: OlayerMetrics) => void;
+  altitudeMode?: AltitudeMode;
+  altitudeUnknownPolicy?: AltitudeUnknownPolicy;
 }
 
 export interface OlayerMetrics {
@@ -68,6 +73,8 @@ export class OlayerController {
   private pitch: number = 0.0;    // tilt
   private roll: number = 0.0;
   private viewportBaseMeters: number;
+  private altitudeMode: AltitudeMode;
+  private altitudeUnknownPolicy: AltitudeUnknownPolicy;
 
   private viewMode: ViewMode = "2D";
   public currentViewProjMatrix: Float32Array = new Float32Array(16);
@@ -95,6 +102,11 @@ export class OlayerController {
   public setCenter(latRad: number, lonRad: number): void;
   public setZoom(zoom: number): void;
   public setRotation(rotationRad: number): void;
+  public getAltitudeMode(): AltitudeMode;
+  public setAltitudeMode(mode: AltitudeMode): void;
+  public getAltitudeUnknownPolicy(): AltitudeUnknownPolicy;
+  public setAltitudeUnknownPolicy(policy: AltitudeUnknownPolicy): void;
+  public resolveAltitude(latRad: number, lonRad: number, inputHeightMeters: number, mode?: AltitudeMode, policy?: AltitudeUnknownPolicy, meshHeightMeters?: number): number;
   
   private setupInteractions(): void;
   private resizeCanvas(): void;

@@ -236,12 +236,13 @@ High-performance indexer for Digital Terrain Elevation Data (DTED), Civil RGB Ti
       pub fn get_elevation_rad(&self, lat_rad: f64, lon_rad: f64) -> Result<f64, TerrainError>;
       pub fn get_elevation_status(&self, lat_rad: f64, lon_rad: f64) -> Result<ElevationSample, TerrainError>;
       pub fn get_elevation_with_policy(&self, lat_rad: f64, lon_rad: f64, policy: UnknownTerrainPolicy) -> Result<Option<f64>, TerrainError>;
+      pub fn resolve_altitude(&self, lat_rad: f64, lon_rad: f64, input_height: f64, mode: AltitudeMode, policy: AltitudeUnknownPolicy, mesh_height: Option<f64>) -> Result<f64, TerrainError>;
       pub fn get_vertical_profile(&self, route: &[LatLon], step_meters: f64) -> Result<Vec<ProfilePoint>, TerrainError>;
       pub fn calculate_clearance(&self, ...) -> Result<ClearanceResult, TerrainError>;
       pub fn clear_all(&self);
   }
   ```
-* **Dependencies:** `Geodesy Engine` (to interpolate metric distances and convert angular resolutions).
+* **Dependencies:** `Geodesy Engine` (to interpolate metric distances, convert angular resolutions, and represent vertical references). Altitude placement policies remain owned by `core::terrain`.
 
 ### 📄 2.5 SLD Parser (`core::sld`)
 Translator of the OGC Styled Layer Descriptor (SLD) map styling standard.

@@ -12,6 +12,7 @@ The **wgpu GPU Pipeline** is the hardware-accelerated graphics rendering engine 
 graph LR
     Core[Rust Core Matrices] -->|Uniform Buffer| GPU[GPU Pipeline]
     Grid[Grid Vertices] -->|Vertex Buffer| GPU
+    Terrain[Sampled Terrain Vertices] -->|Vertex Buffer| GPU
     GPU -->|Render Pass| Surface[Screen Surface]
 ```
 
@@ -61,6 +62,20 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 * **Vertex Buffer:** Managed in `rebuild_grid_buffers`. Rebuilds grid line points and sends them to the GPU when the active projection is changed.
 * **Rendering Pipeline:** Configured with `LineList` topology for fast line drawing, enabled color blending (`ALPHA_BLENDING`), and writing to all color channels.
 
+### 3.3 Terrain Mesh Pipeline
+
+The terrain demo uses a separate `TriangleList` pipeline with `TerrainVertex` values:
+
+```rust
+#[repr(C)]
+pub struct TerrainVertex {
+    pub position: [f32; 3],
+    pub elevation: f32,
+}
+```
+
+`rebuild_terrain_buffers` samples `NativeController::terrain` on a 32x32 geographic grid, converts positions to the active 2D/2.5D projection or ECEF in 3D, and stores two triangles per cell. The terrain fragment shader applies a simple elevation color ramp. The GPU pipeline does not resolve object altitude and does not apply vertical exaggeration to geodetic data; it only renders the visual mesh.
+
 ---
 
 ## 4. Integration in the Frame Rendering Loop
@@ -74,6 +89,8 @@ render_pass.set_vertex_buffer(0, buffer.slice(..));
 render_pass.draw(0..(grid_vertices.len() / 3) as u32, 0..1);
 ```
 
+The native demo renders the sampled terrain mesh through `render_terrain` before optional raster tiles and grid overlays. `show_terrain_mesh` controls its visibility.
+
 ---
 
 ## 5. Unit Testing
@@ -82,4 +99,4 @@ The `WgpuGpuPipeline` module includes a suite of unit tests verifying correct ge
 * **2D Grid Verification:** Assures that vertices are populated and follow the topology rules (multiple of 6 coordinates per segment: 2 endpoints × 3 coords), and verifies that all Z components are exactly `0.0`.
 * **3D Grid Verification:** Validates that 3D globe coordinates are generated, using ECEF (Earth-Centered, Earth-Fixed) scale magnitudes where at least some points exceed the Earth's radius ($\approx 6.0 \times 10^6\text{ m}$).
 * **Coordinate Stability:** Ensures that 3D grid vertices contain non-zero Z values when the camera/controller is oriented in 3D mode.
-
+* **Terrain Mesh Verification:** Ensures that generated terrain geometry contains six vertices per grid cell and finite coordinates.
