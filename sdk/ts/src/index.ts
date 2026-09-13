@@ -33,6 +33,7 @@ export {
 export { OlayerController } from "./controller";
 export type { OlayerConfig, OlayerMetrics } from "./controller";
 export type { AltitudeMode, AltitudeUnknownPolicy, AltitudeResolver } from "./types/altitude";
+export type { TerrainRenderMode, HillshadeOptions } from "./layers/terrain";
 
 // Export SDK Layer System
 export {

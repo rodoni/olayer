@@ -12,7 +12,7 @@ import init, {
   VectorTileLayer,
   WasmStyleRegistry,
 } from "../src";
-import type { AltitudeMode } from "../src";
+import type { AltitudeMode, TerrainRenderMode } from "../src";
 
 // Pre-define coordinates for São Paulo (TMA SP) in radians
 const SP_LAT_RAD = -23.62 * (Math.PI / 180);
@@ -736,12 +736,13 @@ function updateMapLayers(): void {
 
   const terrainCheckbox = document.getElementById("showTerrainCheckbox") as HTMLInputElement;
   if (terrainLayer) {
-    terrainLayer.visible = terrainCheckbox ? terrainCheckbox.checked : true;
+    terrainLayer.visible = controller.getViewMode() !== "2D" && (terrainCheckbox ? terrainCheckbox.checked : true);
   }
   const contourCheckbox = document.getElementById("showTerrainContoursCheckbox") as HTMLInputElement;
   if (terrainContourLayer) {
-    terrainContourLayer.visible = contourCheckbox ? contourCheckbox.checked : true;
+    terrainContourLayer.visible = controller.getViewMode() !== "2D" && (contourCheckbox ? contourCheckbox.checked : true);
   }
+  updateTerrainControlsVisibility(controller.getViewMode());
 
   // Toggle DOM element visibility based on selections
   const geoserverConfigGroup = document.getElementById("geoserverConfigGroup");
@@ -919,6 +920,7 @@ async function start() {
   gridLayer = new GridLayer(controller.gl, activeProjection, "2D");
   terrainLayer = new TerrainLayer("dted_terrain_mesh", 32);
   terrainLayer.opacity = 0.9;
+  terrainLayer.setImageryTemplate("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}");
   terrainContourLayer = new TerrainContourLayer("dted_terrain_contours");
   terrainContourLayer.opacity = 0.95;
   navAidLayer = new NavAidLayer(controller);
@@ -991,6 +993,8 @@ async function start() {
   document.getElementById("vectorLayerInput")?.addEventListener("input", updateMapLayers);
   document.getElementById("terrainExaggerationRange")?.addEventListener("input", (event) => {
     const value = Number.parseFloat((event.target as HTMLInputElement).value);
+    const valText = document.getElementById("terrainExaggerationVal");
+    if (valText) valText.textContent = `${value.toFixed(2)}x`;
     terrainLayer?.setVerticalExaggeration(value);
     terrainContourLayer?.setVerticalExaggeration(value);
     controller.triggerActive();
@@ -998,6 +1002,65 @@ async function start() {
   document.getElementById("terrainContourIntervalRange")?.addEventListener("input", (event) => {
     const value = Number.parseFloat((event.target as HTMLInputElement).value);
     terrainContourLayer?.setInterval(value);
+    if (terrainLayer) {
+      terrainLayer.setContours(terrainLayer.isContoursEnabled(), value);
+    }
+    controller.triggerActive();
+  });
+  document.getElementById("shaderContoursCheckbox")?.addEventListener("change", (event) => {
+    const enabled = (event.target as HTMLInputElement).checked;
+    const intervalRange = document.getElementById("terrainContourIntervalRange") as HTMLInputElement | null;
+    const interval = intervalRange ? Number.parseFloat(intervalRange.value) : 100;
+    terrainLayer?.setContours(enabled, interval);
+    controller.triggerActive();
+  });
+  document.getElementById("terrainRenderModeSelect")?.addEventListener("change", (event) => {
+    const mode = (event.target as HTMLSelectElement).value as TerrainRenderMode;
+    terrainLayer?.setRenderMode(mode);
+    const tawsGroup = document.getElementById("tawsConfigGroup");
+    if (tawsGroup) {
+      tawsGroup.style.display = mode === "taws" ? "block" : "none";
+    }
+    const imageryCheckbox = document.getElementById("terrainImageryCheckbox") as HTMLInputElement | null;
+    if (imageryCheckbox && (mode === "textured" || mode === "hybrid")) {
+      imageryCheckbox.checked = true;
+      terrainLayer?.setImageryEnabled(true);
+    }
+    controller.triggerActive();
+  });
+  document.getElementById("tawsAltitudeRange")?.addEventListener("input", (event) => {
+    const value = Number.parseFloat((event.target as HTMLInputElement).value);
+    const valText = document.getElementById("tawsAltitudeVal");
+    if (valText) valText.textContent = `${Math.round(value)}m`;
+    terrainLayer?.setTawsReferenceAltitude(value);
+    controller.triggerActive();
+  });
+  document.getElementById("hillshadeAzimuthRange")?.addEventListener("input", (event) => {
+    terrainLayer?.setHillshade({ azimuthDeg: Number.parseFloat((event.target as HTMLInputElement).value) });
+    controller.triggerActive();
+  });
+  document.getElementById("terrainImageryCheckbox")?.addEventListener("change", (event) => {
+    const enabled = (event.target as HTMLInputElement).checked;
+    terrainLayer?.setImageryEnabled(enabled);
+    if (enabled) {
+      const modeSelect = document.getElementById("terrainRenderModeSelect") as HTMLSelectElement | null;
+      if (modeSelect && modeSelect.value !== "textured" && modeSelect.value !== "hybrid") {
+        modeSelect.value = "hybrid";
+        terrainLayer?.setRenderMode("hybrid");
+      }
+    }
+    controller.triggerActive();
+  });
+  document.getElementById("terrainImagerySourceSelect")?.addEventListener("change", (event) => {
+    const key = (event.target as HTMLSelectElement).value;
+    const sources: Record<string, string> = {
+      esri: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+      esri_topo: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}",
+      carto: "https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png",
+      osm: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+    };
+    const template = sources[key] || sources.esri;
+    terrainLayer?.setImageryTemplate(template);
     controller.triggerActive();
   });
   document.getElementById("loadTerrainFileBtn")?.addEventListener("click", async () => {
@@ -1142,6 +1205,7 @@ async function start() {
     controller.setViewMode(viewMode);
     (controller as any).projection = activeProjection;
     gridLayer.updateProjection(activeProjection, viewMode);
+    updateTerrainControlsVisibility(viewMode);
     
     // Update camera controls panel visibility
     updateCameraControlsVisibility(viewMode);
@@ -1233,6 +1297,28 @@ function updateCameraControlsVisibility(viewMode: string) {
     if (ctrlBearingGroup) ctrlBearingGroup.style.display = "block";
     if (ctrlPitchGroup) ctrlPitchGroup.style.display = "block";
     if (ctrlRollGroup) ctrlRollGroup.style.display = "block";
+  }
+}
+
+function updateTerrainControlsVisibility(viewMode: string): void {
+  const terrainGroup = document.getElementById("terrainRenderControls");
+  if (terrainGroup) terrainGroup.style.opacity = viewMode === "2D" ? "0.45" : "1";
+  for (const id of [
+    "showTerrainCheckbox",
+    "terrainFileSelect",
+    "loadTerrainFileBtn",
+    "terrainExaggerationRange",
+    "showTerrainContoursCheckbox",
+    "terrainContourIntervalRange",
+    "shaderContoursCheckbox",
+    "terrainRenderModeSelect",
+    "tawsAltitudeRange",
+    "terrainImageryCheckbox",
+    "terrainImagerySourceSelect",
+    "hillshadeAzimuthRange",
+  ]) {
+    const element = document.getElementById(id) as HTMLInputElement | HTMLSelectElement | HTMLButtonElement | null;
+    if (element) element.disabled = viewMode === "2D";
   }
 }
 

@@ -133,6 +133,10 @@ fn main() {
     let mut auto_zoom = true;
     let mut auto_fetch_tiles = false;
     let mut terrain_exaggeration = 1.0f32;
+    let mut terrain_render_mode = 0u32;
+    let mut terrain_azimuth = 315.0f32;
+    let mut terrain_taws_altitude = 1200.0f32;
+    let mut terrain_contour_interval = 0.0f32;
     let mut egui_tile_textures: std::collections::HashMap<String, egui::TextureHandle> = std::collections::HashMap::new();
 
     // Mouse drag state
@@ -246,6 +250,16 @@ fn main() {
                         queue.write_buffer(&gpu_pipeline.uniform_buffer, 0, bytemuck::cast_slice(&view_proj_matrix));
                         // Grid color: Sleek Green (0.0, 0.8, 0.4, 0.8)
                         queue.write_buffer(&gpu_pipeline.uniform_buffer, 256, bytemuck::cast_slice(&[0.0f32, 0.8f32, 0.4f32, 0.8f32]));
+                        gpu_pipeline.set_terrain_style(
+                            &queue,
+                            terrain_render_mode,
+                            0.0,
+                            2500.0,
+                            terrain_taws_altitude,
+                            terrain_azimuth,
+                            45.0,
+                            terrain_contour_interval,
+                        );
 
                         // egui rendering context
                         let raw_input = egui_state.take_egui_input(&window);
@@ -302,9 +316,29 @@ fn main() {
                                     ui.checkbox(&mut layer_manager.show_targets, "Show Radar Targets");
                                     ui.checkbox(&mut layer_manager.show_terrain_mesh, "Render Terrain Mesh");
                                     ui.checkbox(&mut layer_manager.show_terrain, "Show Raster Map");
-                                    if ui.add(egui::Slider::new(&mut terrain_exaggeration, 0.0..=5.0).text("Terrain exaggeration")).changed() {
-                                        gpu_pipeline.rebuild_terrain_buffers(&controller, &device, &queue, terrain_exaggeration);
-                                    }
+                                     if ui.add(egui::Slider::new(&mut terrain_exaggeration, 0.0..=5.0).text("Terrain exaggeration")).changed() {
+                                         gpu_pipeline.rebuild_terrain_buffers(&controller, &device, &queue, terrain_exaggeration);
+                                     }
+                                     egui::ComboBox::from_label("Terrain visualization")
+                                         .selected_text(match terrain_render_mode {
+                                             1 => "Hillshade",
+                                             2 => "Slope map",
+                                             3 => "Hybrid hillshade",
+                                             4 => "TAWS / CFIT Alert",
+                                             _ => "Hypsometric tint",
+                                         })
+                                         .show_ui(ui, |ui| {
+                                             ui.selectable_value(&mut terrain_render_mode, 0, "Hypsometric tint");
+                                             ui.selectable_value(&mut terrain_render_mode, 1, "Hillshade");
+                                             ui.selectable_value(&mut terrain_render_mode, 2, "Slope map");
+                                             ui.selectable_value(&mut terrain_render_mode, 3, "Hybrid hillshade");
+                                             ui.selectable_value(&mut terrain_render_mode, 4, "TAWS / CFIT Alert");
+                                         });
+                                     if terrain_render_mode == 4 {
+                                         ui.add(egui::Slider::new(&mut terrain_taws_altitude, 0.0..=4000.0).text("TAWS ref alt (m)"));
+                                     }
+                                     ui.add(egui::Slider::new(&mut terrain_azimuth, 0.0..=360.0).text("Hillshade azimuth"));
+                                     ui.add(egui::Slider::new(&mut terrain_contour_interval, 0.0..=500.0).text("Contour interval (0=off)"));
 
                                     ui.separator();
                                     ui.collapsing("🗺️ GeoServer WMTS Connection", |ui| {

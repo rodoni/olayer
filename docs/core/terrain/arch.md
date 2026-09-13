@@ -18,6 +18,7 @@ The **Terrain Engine** processes altimetric data passively in the Rust Core, wit
 5. **Vertical Profile Generation (2.5D View):** Calculate cumulative distance, ground elevation, and coordinate path along flight routes.
 6. **MSAW (Minimum Safe Altitude Warning):** Provide ultra-fast mathematical ground safety evaluation against aircraft altitude.
 7. **Altitude Resolution:** Resolve object heights as absolute, clamped to ground, relative to ground, or relative to the effective mesh surface.
+8. **Terrain Analysis:** Provide the elevation derivatives consumed by visual renderers for slope and hillshade. Color palettes and shader composition remain SDK responsibilities.
 
 ---
 
@@ -181,3 +182,23 @@ Altitude placement is separate from raster sampling. `TerrainEngine::resolve_alt
 | `RelativeToMesh` | Mesh elevation plus input offset; ground is the fallback when no mesh height is supplied |
 
 `AltitudeUnknownPolicy` controls missing samples. `Reject` is appropriate for safety-critical operations; `UseAbsolute` and `UseZero` are explicit compatibility fallbacks. Vertical exaggeration is visual-only and is not applied by the resolver.
+
+---
+
+## 7. Visual Terrain Analysis
+
+The current SDK renderers derive two primary visual attributes from neighboring elevation samples:
+
+- **Surface Normals:** $\vec{N} = (-dz/dx, -dz/dy, 1)$, normalized and stored per vertex for Phong fragment shading.
+- **Slope:** $\arctan(\sqrt{dz/dx^2 + dz/dy^2})$, expressed in degrees.
+
+The TypeScript `TerrainLayer` and native `WgpuGpuPipeline` support the following rendering modes via fragment shaders:
+- `hypsometric`: Elevation color ramp.
+- `hillshade`: Dynamic analytical illumination from configurable solar azimuth and altitude without mesh rebuild.
+- `slope`: Color coding based on local gradient.
+- `hybrid`: Combination of hypsometric tint and hillshade.
+- `textured`: Web Mercator XYZ raster tile draping (TypeScript SDK).
+- `taws`: Tactical / CFIT terrain awareness alert based on aircraft reference altitude.
+- `contours`: Procedural antialiased isolines rendered directly in the fragment shader via screen-space derivatives (`fwidth`).
+
+These values are visual products; they do not modify the elevation returned by `TerrainEngine` or the altitude resolver.

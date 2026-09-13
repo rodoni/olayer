@@ -3,6 +3,7 @@ import { initSync } from "olayer-wasm";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { TrajectoryRibbonLayer } from "./trajectory_ribbon";
+import { TerrainLayer } from "./terrain";
 
 beforeAll(() => {
   initSync({ module: readFileSync(resolve(__dirname, "../../wasm/pkg/olayer_wasm_bg.wasm")) });
@@ -26,5 +27,23 @@ describe("altitude mode layer integration", () => {
     const layer = new TrajectoryRibbonLayer("test", { altitudeMode: "absolute" });
     layer.addTrajectory("route", [-23.6, -46.6, 100, -23.7, -46.7, 200]);
     expect(layer.getRibbonMesh("route")?.waypointsDeg).toEqual([-23.6, -46.6, 100, -23.7, -46.7, 200]);
+  });
+
+  it("switches terrain visualization modes without changing the terrain source", () => {
+    const layer = new TerrainLayer("terrain", 16);
+    expect(layer.getRenderMode()).toBe("hypsometric");
+    layer.setRenderMode("slope");
+    layer.setElevationRange(100, 1800);
+    layer.setHillshade({ azimuthDeg: 180, altitudeDeg: 35 });
+    expect(layer.getRenderMode()).toBe("slope");
+
+    layer.setRenderMode("taws");
+    expect(layer.getRenderMode()).toBe("taws");
+    layer.setTawsReferenceAltitude(1500);
+    expect(layer.getTawsReferenceAltitude()).toBe(1500);
+
+    layer.setContours(true, 50);
+    expect(layer.isContoursEnabled()).toBe(true);
+    expect(layer.getContourInterval()).toBe(50);
   });
 });

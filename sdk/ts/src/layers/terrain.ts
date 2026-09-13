@@ -8,6 +8,13 @@ interface TerrainMesh {
   indexCount: number;
 }
 
+export type TerrainRenderMode = "hypsometric" | "hillshade" | "slope" | "hybrid" | "textured" | "taws";
+
+export interface HillshadeOptions {
+  azimuthDeg?: number;
+  altitudeDeg?: number;
+}
+
 /**
  * Renders a sampled elevation grid from the controller's TerrainEngine.
  * The layer deliberately samples the existing engine instead of owning a
@@ -23,6 +30,28 @@ export class TerrainLayer extends Layer {
   private viewProjLocation: WebGLUniformLocation | null = null;
   private opacityLocation: WebGLUniformLocation | null = null;
   private exaggerationLocation: WebGLUniformLocation | null = null;
+  private modeLocation: WebGLUniformLocation | null = null;
+  private minElevationLocation: WebGLUniformLocation | null = null;
+  private maxElevationLocation: WebGLUniformLocation | null = null;
+  private lightDirLocation: WebGLUniformLocation | null = null;
+  private aircraftAltitudeLocation: WebGLUniformLocation | null = null;
+  private contoursEnabledLocation: WebGLUniformLocation | null = null;
+  private contourIntervalLocation: WebGLUniformLocation | null = null;
+  private mode: TerrainRenderMode = "hypsometric";
+  private minElevation = 0;
+  private maxElevation = 2500;
+  private hillshadeAzimuth = 315;
+  private hillshadeAltitude = 45;
+  private aircraftAltitude = 1200;
+  private contoursEnabled = false;
+  private contourInterval = 100;
+  private imageryEnabled = false;
+  private imageryTemplate: string | null = null;
+  private imageryTexture: WebGLTexture | null = null;
+  private imageryLocation: WebGLUniformLocation | null = null;
+  private imageryEnabledLocation: WebGLUniformLocation | null = null;
+  private imageryRequestKey = "";
+  private imageryLoadedKey = "";
 
   public constructor(id: string, gridSize = 32) {
     super(id);
@@ -38,6 +67,65 @@ export class TerrainLayer extends Layer {
     return this.verticalExaggeration;
   }
 
+  public setRenderMode(mode: TerrainRenderMode): void {
+    this.mode = mode;
+  }
+
+  public getRenderMode(): TerrainRenderMode {
+    return this.mode;
+  }
+
+  public setElevationRange(minElevation: number, maxElevation: number): void {
+    if (Number.isFinite(minElevation) && Number.isFinite(maxElevation) && maxElevation > minElevation) {
+      this.minElevation = minElevation;
+      this.maxElevation = maxElevation;
+    }
+  }
+
+  public setHillshade(options: HillshadeOptions): void {
+    if (options.azimuthDeg !== undefined) this.hillshadeAzimuth = options.azimuthDeg;
+    if (options.altitudeDeg !== undefined) this.hillshadeAltitude = Math.max(1, Math.min(89, options.altitudeDeg));
+  }
+
+  public setTawsReferenceAltitude(altitudeMeters: number): void {
+    if (Number.isFinite(altitudeMeters)) {
+      this.aircraftAltitude = altitudeMeters;
+    }
+  }
+
+  public getTawsReferenceAltitude(): number {
+    return this.aircraftAltitude;
+  }
+
+  public setContours(enabled: boolean, intervalMeters = 100): void {
+    this.contoursEnabled = enabled;
+    if (intervalMeters > 1) {
+      this.contourInterval = intervalMeters;
+    }
+  }
+
+  public isContoursEnabled(): boolean {
+    return this.contoursEnabled;
+  }
+
+  public getContourInterval(): number {
+    return this.contourInterval;
+  }
+
+  public setImageryTemplate(template: string | null): void {
+    this.imageryTemplate = template;
+    this.imageryRequestKey = "";
+    this.imageryLoadedKey = "";
+  }
+
+  public setImageryEnabled(enabled: boolean): void {
+    this.imageryEnabled = enabled;
+  }
+
+  public isImageryEnabled(): boolean {
+    return this.imageryEnabled;
+  }
+
   public invalidateMesh(): void {
     this.lastKey = "";
     this.lastProjection = null;
@@ -50,11 +138,20 @@ export class TerrainLayer extends Layer {
     gl.shaderSource(vertexShader, `#version 300 es
       in vec3 a_position;
       in float a_elevation;
+      in float a_slope;
+      in vec3 a_normal;
+      in vec2 a_uv;
       uniform mat4 u_viewProjMatrix;
       out float v_elevation;
+      out float v_slope;
+      out vec3 v_normal;
+      out vec2 v_uv;
       void main() {
         gl_Position = u_viewProjMatrix * vec4(a_position, 1.0);
         v_elevation = a_elevation;
+        v_slope = a_slope;
+        v_normal = a_normal;
+        v_uv = a_uv;
       }
     `);
     gl.compileShader(vertexShader);
@@ -66,15 +163,67 @@ export class TerrainLayer extends Layer {
     gl.shaderSource(fragmentShader, `#version 300 es
       precision mediump float;
       in float v_elevation;
+      in float v_slope;
+      in vec3 v_normal;
+      in vec2 v_uv;
       uniform float u_opacity;
       uniform float u_exaggeration;
+      uniform int u_mode;
+      uniform float u_minElevation;
+      uniform float u_maxElevation;
+      uniform vec3 u_lightDir;
+      uniform float u_aircraftAltitude;
+      uniform bool u_contoursEnabled;
+      uniform float u_contourInterval;
+      uniform sampler2D u_imagery;
+      uniform bool u_imageryEnabled;
       out vec4 fragColor;
+
       void main() {
-        float normalized = clamp((v_elevation + 100.0) / 1400.0, 0.0, 1.0);
-        vec3 low = vec3(0.08, 0.18, 0.12);
-        vec3 high = vec3(0.62, 0.48, 0.22);
-        vec3 color = mix(low, high, normalized);
-        fragColor = vec4(color, u_opacity * 0.78);
+        float normalized = clamp((v_elevation - u_minElevation) / max(1.0, u_maxElevation - u_minElevation), 0.0, 1.0);
+        vec3 hypsometric = mix(vec3(0.08, 0.28, 0.12), vec3(0.72, 0.52, 0.22), normalized);
+        hypsometric = mix(hypsometric, vec3(0.95, 0.95, 0.92), smoothstep(0.78, 1.0, normalized));
+        vec3 slopeColor = mix(vec3(0.08, 0.55, 0.18), vec3(0.9, 0.08, 0.04), clamp(v_slope / 55.0, 0.0, 1.0));
+        
+        vec3 norm = normalize(v_normal);
+        float hillshade = max(0.0, dot(norm, u_lightDir));
+        vec3 shadeColor = vec3(0.12, 0.2, 0.12) + vec3(0.76, 0.72, 0.5) * hillshade;
+
+        // TAWS / CFIT mode (mode 5):
+        // Red: terrain within 150m below or above aircraft altitude (critical hazard)
+        // Yellow: terrain between 150m and 600m below aircraft (caution)
+        // Green/Muted: terrain safe (> 600m below aircraft)
+        float delta = v_elevation - u_aircraftAltitude;
+        vec3 tawsColor;
+        if (delta >= -150.0) {
+          tawsColor = vec3(0.92, 0.12, 0.12);
+        } else if (delta >= -600.0) {
+          tawsColor = vec3(0.95, 0.82, 0.15);
+        } else {
+          tawsColor = mix(vec3(0.08, 0.35, 0.14), vec3(0.15, 0.45, 0.2), clamp((delta + 1500.0) / 900.0, 0.0, 1.0));
+        }
+        tawsColor *= (0.45 + 0.55 * hillshade);
+
+        vec3 color = hypsometric;
+        if (u_mode == 1) color = shadeColor;
+        else if (u_mode == 2) color = slopeColor;
+        else if (u_mode == 3) color = mix(hypsometric, shadeColor, 0.55);
+        else if (u_mode == 5) color = tawsColor;
+
+        if (u_imageryEnabled && (u_mode == 3 || u_mode == 4)) {
+          vec3 imagery = texture(u_imagery, v_uv).rgb;
+          color = u_mode == 4 ? imagery : imagery * (0.45 + 0.75 * hillshade);
+        }
+
+        // Procedural contour lines via screen derivative fwidth
+        if (u_contoursEnabled && u_contourInterval > 1.0) {
+          float c = abs(fract(v_elevation / u_contourInterval - 0.5) - 0.5) / max(0.0001, fwidth(v_elevation / u_contourInterval));
+          float contourAlpha = 1.0 - clamp(c - 0.5, 0.0, 1.0);
+          vec3 contourColor = vec3(0.98, 0.85, 0.28);
+          color = mix(color, contourColor, contourAlpha * 0.85);
+        }
+
+        fragColor = vec4(color, u_opacity * 0.82);
       }
     `);
     gl.compileShader(fragmentShader);
@@ -93,6 +242,23 @@ export class TerrainLayer extends Layer {
     this.viewProjLocation = gl.getUniformLocation(this.program, "u_viewProjMatrix");
     this.opacityLocation = gl.getUniformLocation(this.program, "u_opacity");
     this.exaggerationLocation = gl.getUniformLocation(this.program, "u_exaggeration");
+    this.modeLocation = gl.getUniformLocation(this.program, "u_mode");
+    this.minElevationLocation = gl.getUniformLocation(this.program, "u_minElevation");
+    this.maxElevationLocation = gl.getUniformLocation(this.program, "u_maxElevation");
+    this.lightDirLocation = gl.getUniformLocation(this.program, "u_lightDir");
+    this.aircraftAltitudeLocation = gl.getUniformLocation(this.program, "u_aircraftAltitude");
+    this.contoursEnabledLocation = gl.getUniformLocation(this.program, "u_contoursEnabled");
+    this.contourIntervalLocation = gl.getUniformLocation(this.program, "u_contourInterval");
+    this.imageryLocation = gl.getUniformLocation(this.program, "u_imagery");
+    this.imageryEnabledLocation = gl.getUniformLocation(this.program, "u_imageryEnabled");
+    this.imageryTexture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, this.imageryTexture);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([70, 90, 70, 255]));
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.bindTexture(gl.TEXTURE_2D, null);
   }
 
   private disposeMesh(gl: WebGL2RenderingContext): void {
@@ -128,10 +294,13 @@ export class TerrainLayer extends Layer {
     const lonSpan = latSpan / Math.max(0.15, Math.cos(centerLat));
     const vertices: number[] = [];
     const indices: number[] = [];
+    const elevations: number[][] = [];
     const viewMode = controller.getViewMode();
     const projection = controller.projection as WasmProjection;
+    const tile = this.imageryTile(controller);
 
     for (let row = 0; row <= this.gridSize; row++) {
+      const elevationRow: number[] = [];
       const v = row / this.gridSize;
       const lat = centerLat + (0.5 - v) * latSpan;
       for (let column = 0; column <= this.gridSize; column++) {
@@ -143,6 +312,7 @@ export class TerrainLayer extends Layer {
         } catch {
           // Unknown terrain is rendered at sea level until a source is available.
         }
+        elevationRow.push(elevation);
         const height = elevation * this.verticalExaggeration;
         let position: number[];
         if (viewMode === "3D") {
@@ -151,7 +321,32 @@ export class TerrainLayer extends Layer {
           const projected = projection.project(lat, lon, 0);
           position = [projected[0], projected[1], height];
         }
-        vertices.push(position[0], position[1], position[2], elevation);
+        // Vertex layout: position(3), elevation(1), slope(1), normal(3), uv(2) -> 10 floats = 40 bytes
+        vertices.push(position[0], position[1], position[2], elevation, 0, 0, 0, 1, ...this.imageryUv(lat, lon, tile));
+      }
+      elevations.push(elevationRow);
+    }
+
+    const dx = Math.max(1, spanMeters / this.gridSize);
+    const dy = dx;
+    for (let row = 0; row <= this.gridSize; row++) {
+      for (let column = 0; column <= this.gridSize; column++) {
+        const left = elevations[row][Math.max(0, column - 1)];
+        const right = elevations[row][Math.min(this.gridSize, column + 1)];
+        const north = elevations[Math.max(0, row - 1)][column];
+        const south = elevations[Math.min(this.gridSize, row + 1)][column];
+        const dzdx = (right - left) / (column === 0 || column === this.gridSize ? dx : 2 * dx);
+        const dzdy = (south - north) / (row === 0 || row === this.gridSize ? dy : 2 * dy);
+        const slope = Math.atan(Math.hypot(dzdx, dzdy)) * 180 / Math.PI;
+        const nx = -dzdx;
+        const ny = -dzdy;
+        const nz = 1;
+        const length = Math.hypot(nx, ny, nz);
+        const offset = (row * (this.gridSize + 1) + column) * 10;
+        vertices[offset + 4] = slope;
+        vertices[offset + 5] = nx / length;
+        vertices[offset + 6] = ny / length;
+        vertices[offset + 7] = nz / length;
       }
     }
 
@@ -175,22 +370,84 @@ export class TerrainLayer extends Layer {
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.DYNAMIC_DRAW);
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint32Array(indices), gl.STATIC_DRAW);
+
+    // Stride: 10 floats = 40 bytes
+    const stride = 40;
     const positionLocation = gl.getAttribLocation(this.program!, "a_position");
     const elevationLocation = gl.getAttribLocation(this.program!, "a_elevation");
+    const slopeLocation = gl.getAttribLocation(this.program!, "a_slope");
+    const normalLocation = gl.getAttribLocation(this.program!, "a_normal");
+    const uvLocation = gl.getAttribLocation(this.program!, "a_uv");
+
     gl.enableVertexAttribArray(positionLocation);
-    gl.vertexAttribPointer(positionLocation, 3, gl.FLOAT, false, 16, 0);
+    gl.vertexAttribPointer(positionLocation, 3, gl.FLOAT, false, stride, 0);
     gl.enableVertexAttribArray(elevationLocation);
-    gl.vertexAttribPointer(elevationLocation, 1, gl.FLOAT, false, 16, 12);
+    gl.vertexAttribPointer(elevationLocation, 1, gl.FLOAT, false, stride, 12);
+    gl.enableVertexAttribArray(slopeLocation);
+    gl.vertexAttribPointer(slopeLocation, 1, gl.FLOAT, false, stride, 16);
+    gl.enableVertexAttribArray(normalLocation);
+    gl.vertexAttribPointer(normalLocation, 3, gl.FLOAT, false, stride, 20);
+    gl.enableVertexAttribArray(uvLocation);
+    gl.vertexAttribPointer(uvLocation, 2, gl.FLOAT, false, stride, 32);
     gl.bindVertexArray(null);
     this.mesh = { vao, vertexBuffer, indexBuffer, indexCount: indices.length };
+  }
+
+  private imageryTile(controller: any): { z: number; x: number; y: number } {
+    const camera = controller.getCameraState();
+    const spanMeters = camera.viewport_base_meters / camera.zoom;
+    const latSpan = Math.min(Math.PI / 3, spanMeters / 111_000.0 / 2 * Math.PI / 180);
+    const centerLat = controller.getCenterLat();
+    const lonSpan = latSpan / Math.max(0.15, Math.cos(centerLat));
+    const lonSpanDeg = lonSpan * (180 / Math.PI) * 2;
+    // Calibrate zoom so that 1 tile closely matches the geographic footprint of the mesh
+    const z = Math.max(1, Math.min(18, Math.floor(Math.log2(360 / Math.max(0.001, lonSpanDeg)))));
+    const lat = centerLat;
+    const lon = controller.getCenterLon();
+    const n = 2 ** z;
+    const x = Math.floor((lon * 180 / Math.PI + 180) / 360 * n);
+    const mercatorY = (1 - Math.asinh(Math.tan(lat)) / Math.PI) / 2;
+    const y = Math.floor(mercatorY * n);
+    camera.free();
+    return { z, x: Math.max(0, Math.min(n - 1, x)), y: Math.max(0, Math.min(n - 1, y)) };
+  }
+
+  private imageryUv(lat: number, lon: number, tile: { z: number; x: number; y: number }): [number, number] {
+    const n = 2 ** tile.z;
+    const u = (lon * 180 / Math.PI + 180) / 360 * n - tile.x;
+    const v = (1 - Math.asinh(Math.tan(lat)) / Math.PI) / 2 * n - tile.y;
+    return [u, v];
+  }
+
+  private ensureImagery(gl: WebGL2RenderingContext, controller: any): void {
+    if (!this.imageryTemplate || !this.imageryEnabled || !this.imageryTexture) return;
+    const tile = this.imageryTile(controller);
+    const key = `${tile.z}/${tile.x}/${tile.y}`;
+    if (this.imageryRequestKey === key) return;
+    this.imageryRequestKey = key;
+    const image = new Image();
+    image.crossOrigin = "anonymous";
+    image.onload = () => {
+      gl.bindTexture(gl.TEXTURE_2D, this.imageryTexture);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
+      gl.generateMipmap(gl.TEXTURE_2D);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+      gl.bindTexture(gl.TEXTURE_2D, null);
+      this.imageryLoadedKey = key;
+      controller.triggerActive();
+    };
+    image.onerror = () => { this.imageryLoadedKey = ""; };
+    image.src = this.imageryTemplate.replace("{z}", String(tile.z)).replace("{x}", String(tile.x)).replace("{y}", String(tile.y));
   }
 
   public renderStatic(gl: WebGL2RenderingContext, viewProjMatrix: Float32Array): void {
     if (!this.visible || this.opacity <= 0.01) return;
     const controller = (window as any).olayerController;
     if (!controller) return;
+    if (controller.getViewMode() === "2D") return;
 
     this.initWebGL(gl);
+    this.ensureImagery(gl, controller);
     const key = this.getMeshKey(controller);
     if (key !== this.lastKey || this.lastProjection !== controller.projection || !this.mesh) {
       this.rebuildMesh(gl, controller);
@@ -203,12 +460,41 @@ export class TerrainLayer extends Layer {
     gl.uniformMatrix4fv(this.viewProjLocation, false, viewProjMatrix);
     gl.uniform1f(this.opacityLocation, this.opacity);
     gl.uniform1f(this.exaggerationLocation, this.verticalExaggeration);
+    const modes: Record<TerrainRenderMode, number> = {
+      hypsometric: 0,
+      hillshade: 1,
+      slope: 2,
+      hybrid: 3,
+      textured: 4,
+      taws: 5,
+    };
+    gl.uniform1i(this.modeLocation, modes[this.mode]);
+    gl.uniform1f(this.minElevationLocation, this.minElevation);
+    gl.uniform1f(this.maxElevationLocation, this.maxElevation);
+
+    // Dynamic light direction (Phong hillshade)
+    const azimuth = this.hillshadeAzimuth * Math.PI / 180;
+    const altitude = this.hillshadeAltitude * Math.PI / 180;
+    const lightX = Math.sin(azimuth) * Math.cos(altitude);
+    const lightY = Math.cos(azimuth) * Math.cos(altitude);
+    const lightZ = Math.sin(altitude);
+    gl.uniform3f(this.lightDirLocation, lightX, lightY, lightZ);
+
+    gl.uniform1f(this.aircraftAltitudeLocation, this.aircraftAltitude);
+    gl.uniform1i(this.contoursEnabledLocation, this.contoursEnabled ? 1 : 0);
+    gl.uniform1f(this.contourIntervalLocation, this.contourInterval);
+
+    gl.uniform1i(this.imageryLocation, 0);
+    gl.uniform1i(this.imageryEnabledLocation, this.imageryEnabled && this.imageryLoadedKey !== "" ? 1 : 0);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.imageryTexture);
     gl.enable(gl.DEPTH_TEST);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     gl.bindVertexArray(this.mesh.vao);
     gl.drawElements(gl.TRIANGLES, this.mesh.indexCount, gl.UNSIGNED_INT, 0);
     gl.bindVertexArray(null);
+    gl.bindTexture(gl.TEXTURE_2D, null);
   }
 
   public renderDynamic(_ctx: CanvasRenderingContext2D, _currentTime: number): void {
@@ -386,6 +672,7 @@ export class TerrainContourLayer extends Layer {
     if (!this.visible || this.opacity <= 0.01) return;
     const controller = (window as any).olayerController;
     if (!controller) return;
+    if (controller.getViewMode() === "2D") return;
     this.initWebGL(gl);
     const key = this.meshKey(controller);
     if (key !== this.lastKey || this.lastProjection !== controller.projection || !this.vertexBuffer) {

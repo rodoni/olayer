@@ -13,7 +13,9 @@ pub struct RasterVertex {
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct TerrainVertex {
     pub position: [f32; 3],
+    pub normal: [f32; 3],
     pub elevation: f32,
+    pub slope: f32,
 }
 
 pub struct WgpuRasterTile {
@@ -61,6 +63,7 @@ pub struct WgpuGpuPipeline {
     pub terrain_pipeline: wgpu::RenderPipeline,
     pub terrain_vertex_buffer: Option<wgpu::Buffer>,
     pub terrain_vertices_len: usize,
+    pub terrain_style_buffer: wgpu::Buffer,
     terrain_cache_key: Option<String>,
 }
 
@@ -102,7 +105,24 @@ impl WgpuGpuPipeline {
                     },
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
             ],
+        });
+
+        let terrain_style_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Terrain Style Uniform Buffer"),
+            size: 32,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
         });
 
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -123,6 +143,14 @@ impl WgpuGpuPipeline {
                         buffer: &uniform_buffer,
                         offset: 256,
                         size: Some(std::num::NonZeroU64::new(16).unwrap()),
+                    }),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: &terrain_style_buffer,
+                        offset: 0,
+                        size: Some(std::num::NonZeroU64::new(32).unwrap()),
                     }),
                 },
             ],
@@ -299,33 +327,80 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
         let terrain_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Terrain Mesh Shader"),
-            source: wgpu::ShaderSource::Wgsl("\nstruct VertexInput {
+            source: wgpu::ShaderSource::Wgsl("\nstruct TerrainStyle {
+    mode: f32,
+    min_elevation: f32,
+    max_elevation: f32,
+    aircraft_altitude: f32,
+    light_dir: vec3<f32>,
+    contour_interval: f32,
+};
+
+struct VertexInput {
     @location(0) position: vec3<f32>,
-    @location(1) elevation: f32,
+    @location(1) normal: vec3<f32>,
+    @location(2) elevation: f32,
+    @location(3) slope: f32,
 };
 
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
-    @location(0) elevation: f32,
+    @location(0) normal: vec3<f32>,
+    @location(1) elevation: f32,
+    @location(2) slope: f32,
 };
 
 @group(0) @binding(0)
 var<uniform> view_proj: mat4x4<f32>;
+@group(0) @binding(2)
+var<uniform> terrain_style: TerrainStyle;
 
 @vertex
 fn vs_main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
     out.position = view_proj * vec4<f32>(in.position, 1.0);
+    out.normal = in.normal;
     out.elevation = in.elevation;
+    out.slope = in.slope;
     return out;
 }
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    let amount = clamp((in.elevation + 100.0) / 1400.0, 0.0, 1.0);
-    let low = vec3<f32>(0.08, 0.18, 0.12);
-    let high = vec3<f32>(0.62, 0.48, 0.22);
-    return vec4<f32>(mix(low, high, amount), 0.82);
+    let amount = clamp((in.elevation - terrain_style.min_elevation) / max(1.0, terrain_style.max_elevation - terrain_style.min_elevation), 0.0, 1.0);
+    let hypsometric = mix(vec3<f32>(0.08, 0.28, 0.12), vec3<f32>(0.72, 0.52, 0.22), amount);
+    let slope_color = mix(vec3<f32>(0.08, 0.55, 0.18), vec3<f32>(0.9, 0.08, 0.04), clamp(in.slope / 55.0, 0.0, 1.0));
+    let norm = normalize(in.normal);
+    let hillshade = max(0.0, dot(norm, normalize(terrain_style.light_dir)));
+    let shade_color = vec3<f32>(0.12, 0.2, 0.12) + vec3<f32>(0.76, 0.72, 0.5) * hillshade;
+
+    // TAWS / CFIT alert mode (mode == 4.0):
+    let delta = in.elevation - terrain_style.aircraft_altitude;
+    var taws_color = mix(vec3<f32>(0.08, 0.35, 0.14), vec3<f32>(0.15, 0.45, 0.2), clamp((delta + 1500.0) / 900.0, 0.0, 1.0));
+    if (delta >= -600.0) {
+        taws_color = vec3<f32>(0.95, 0.82, 0.15);
+    }
+    if (delta >= -150.0) {
+        taws_color = vec3<f32>(0.92, 0.12, 0.12);
+    }
+    taws_color = taws_color * (0.45 + 0.55 * hillshade);
+
+    var color = hypsometric;
+    if (terrain_style.mode == 1.0) { color = shade_color; }
+    if (terrain_style.mode == 2.0) { color = slope_color; }
+    if (terrain_style.mode == 3.0) { color = mix(hypsometric, shade_color, 0.55); }
+    if (terrain_style.mode == 4.0) { color = taws_color; }
+
+    // Procedural contour lines via screen derivative (fwidth) in WGSL
+    if (terrain_style.contour_interval > 1.0) {
+        let val = in.elevation / terrain_style.contour_interval;
+        let c = abs(fract(val - 0.5) - 0.5) / max(0.0001, fwidth(val));
+        let contour_alpha = 1.0 - clamp(c - 0.5, 0.0, 1.0);
+        let contour_color = vec3<f32>(0.98, 0.85, 0.28);
+        color = mix(color, contour_color, contour_alpha * 0.85);
+    }
+
+    return vec4<f32>(color, 0.82);
 }
 ".into()),
         });
@@ -347,7 +422,9 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                     step_mode: wgpu::VertexStepMode::Vertex,
                     attributes: &[
                         wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x3, offset: 0, shader_location: 0 },
-                        wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32, offset: 12, shader_location: 1 },
+                        wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x3, offset: 12, shader_location: 1 },
+                        wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32, offset: 24, shader_location: 2 },
+                        wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32, offset: 28, shader_location: 3 },
                     ],
                 }],
             },
@@ -387,6 +464,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             terrain_pipeline,
             terrain_vertex_buffer: None,
             terrain_vertices_len: 0,
+            terrain_style_buffer,
             terrain_cache_key: None,
         }
     }
@@ -501,12 +579,14 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         )
     }
 
+    #[allow(clippy::needless_range_loop)]
     pub fn generate_terrain_vertices(controller: &NativeController, exaggeration: f32) -> Vec<TerrainVertex> {
         let grid = 32usize;
         let span_meters = controller.camera.viewport_base_meters / controller.camera.zoom;
         let lat_span = (span_meters / 111_000.0 / 2.0).to_radians().min(60.0f64.to_radians());
         let lon_span = lat_span / controller.camera.center.lat.cos().abs().max(0.15);
         let mut grid_vertices = Vec::with_capacity((grid + 1) * (grid + 1));
+        let mut elevations = vec![vec![0.0f64; grid + 1]; grid + 1];
 
         for row in 0..=grid {
             let v = row as f64 / grid as f64;
@@ -515,6 +595,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                 let u = column as f64 / grid as f64;
                 let lon = controller.camera.center.lon + (u - 0.5) * lon_span;
                 let elevation = controller.terrain.get_elevation(lat.to_degrees(), lon.to_degrees()).unwrap_or(0.0);
+                elevations[row][column] = elevation;
                 let height = elevation * exaggeration as f64;
                 let position = if controller.view_mode == "3D" {
                     let ecef = olayer_core::geodesy::lla_to_ecef(
@@ -526,7 +607,36 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                     let projected = controller.projection.project(&LatLon::new(lat, lon, 0.0)).unwrap_or((0.0, 0.0));
                     [projected.0 as f32, projected.1 as f32, height as f32]
                 };
-                grid_vertices.push(TerrainVertex { position, elevation: elevation as f32 });
+                grid_vertices.push(TerrainVertex {
+                    position,
+                    normal: [0.0, 0.0, 1.0],
+                    elevation: elevation as f32,
+                    slope: 0.0,
+                });
+            }
+        }
+
+        let spacing = (span_meters / grid as f64).max(1.0);
+        for row in 0..=grid {
+            for column in 0..=grid {
+                let left = elevations[row][column.saturating_sub(1)];
+                let right = elevations[row][(column + 1).min(grid)];
+                let north = elevations[row.saturating_sub(1)][column];
+                let south = elevations[(row + 1).min(grid)][column];
+                let dx = (right - left) / if column == 0 || column == grid { spacing } else { 2.0 * spacing };
+                let dy = (south - north) / if row == 0 || row == grid { spacing } else { 2.0 * spacing };
+                let slope = dx.hypot(dy).atan().to_degrees();
+                let nx = -dx;
+                let ny = -dy;
+                let nz = 1.0;
+                let normal_len = (nx * nx + ny * ny + nz * nz).sqrt();
+                let vertex = &mut grid_vertices[row * (grid + 1) + column];
+                vertex.slope = slope as f32;
+                vertex.normal = [
+                    (nx / normal_len) as f32,
+                    (ny / normal_len) as f32,
+                    (nz / normal_len) as f32,
+                ];
             }
         }
 
@@ -562,6 +672,35 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         self.terrain_vertex_buffer = Some(buffer);
         self.terrain_vertices_len = vertices.len();
         self.terrain_cache_key = Some(key);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn set_terrain_style(
+        &self,
+        queue: &wgpu::Queue,
+        mode: u32,
+        min_elevation: f32,
+        max_elevation: f32,
+        aircraft_altitude: f32,
+        light_azimuth_deg: f32,
+        light_altitude_deg: f32,
+        contour_interval: f32,
+    ) {
+        let az = (light_azimuth_deg as f64).to_radians();
+        let alt = (light_altitude_deg as f64).to_radians();
+        let lx = (az.sin() * alt.cos()) as f32;
+        let ly = (az.cos() * alt.cos()) as f32;
+        let lz = alt.sin() as f32;
+        queue.write_buffer(&self.terrain_style_buffer, 0, bytemuck::cast_slice(&[
+            mode as f32,
+            min_elevation,
+            max_elevation,
+            aircraft_altitude,
+            lx,
+            ly,
+            lz,
+            contour_interval,
+        ]));
     }
 
     pub fn render_terrain<'a>(&'a self, render_pass: &mut wgpu::RenderPass<'a>) {
@@ -770,7 +909,12 @@ mod tests {
         let controller = NativeController::new((-23.62f64).to_radians(), (-46.65f64).to_radians());
         let vertices = WgpuGpuPipeline::generate_terrain_vertices(&controller, 1.0);
         assert_eq!(vertices.len(), 32 * 32 * 6);
-        assert!(vertices.iter().all(|vertex| vertex.position.iter().all(|value| value.is_finite())));
+        assert!(vertices.iter().all(|vertex| {
+            vertex.position.iter().all(|value| value.is_finite())
+                && vertex.normal.iter().all(|value| value.is_finite())
+                && vertex.elevation.is_finite()
+                && vertex.slope.is_finite()
+        }));
     }
 
     #[test]

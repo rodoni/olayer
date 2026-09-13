@@ -934,6 +934,12 @@ class TileLayer extends Layer {
 
 class TerrainLayer extends Layer {
   constructor(id: string, gridSize?: number)
+  setRenderMode(mode: "hypsometric" | "hillshade" | "slope" | "hybrid" | "textured"): void
+  getRenderMode(): "hypsometric" | "hillshade" | "slope" | "hybrid" | "textured"
+  setElevationRange(minElevation: number, maxElevation: number): void
+  setHillshade(options: { azimuthDeg?: number; altitudeDeg?: number }): void
+  setImageryTemplate(template: string | null): void
+  setImageryEnabled(enabled: boolean): void
   setVerticalExaggeration(value: number): void
   getVerticalExaggeration(): number
   invalidateMesh(): void

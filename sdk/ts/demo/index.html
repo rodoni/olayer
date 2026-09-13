@@ -252,19 +252,20 @@
           </select>
         </div>
 
-        <div class="form-group">
+        <div id="terrainRenderControls" class="form-group">
           <label>
             <input id="showTerrainCheckbox" type="checkbox" checked style="accent-color: var(--accent); margin-right: 6px;">
-            Render DTED Terrain Mesh
+            Render Elevation Terrain Mesh
           </label>
           <select id="terrainFileSelect" style="width: 100%; margin-top: 8px;">
             <option value="23S48_ZN.tif" selected>23S48_ZN.tif (São Paulo)</option>
             <option value="22S465ZN.tif">22S465ZN.tif</option>
             <option value="22S48_ZN.tif">22S48_ZN.tif</option>
-            <option value="23S48_ZN.tif">23S48_ZN.tif</option>
+            <option value="23S465ZN.tif">23S465ZN.tif</option>
           </select>
           <button id="loadTerrainFileBtn" type="button" style="width: 100%; margin-top: 6px;">Load GeoTIFF Elevation</button>
           <small id="terrainFileStatus" style="display: block; margin-top: 5px; color: var(--text-muted);">Loading local elevation...</small>
+          <label for="terrainExaggerationRange" style="display: block; margin-top: 8px; font-size: 0.8rem;">Vertical exaggeration: <span id="terrainExaggerationVal">1.00x</span></label>
           <input id="terrainExaggerationRange" type="range" min="0" max="5" step="0.25" value="1" style="width: 100%; accent-color: var(--accent);">
           <label style="display: block; margin-top: 8px;">
             <input id="showTerrainContoursCheckbox" type="checkbox" checked style="accent-color: var(--accent); margin-right: 6px;">
@@ -278,6 +279,36 @@
             <option value="relative-to-ground">Relative to ground</option>
             <option value="relative-to-mesh">Relative to mesh</option>
           </select>
+          <label for="terrainRenderModeSelect" style="display: block; margin-top: 8px;">Terrain visualization</label>
+          <select id="terrainRenderModeSelect" style="width: 100%;">
+            <option value="hypsometric" selected>Hypsometric tint</option>
+            <option value="hillshade">Hillshade</option>
+            <option value="slope">Slope map</option>
+            <option value="hybrid">Hybrid hillshade</option>
+            <option value="textured">Textured terrain</option>
+            <option value="taws">TAWS / CFIT Alert</option>
+          </select>
+          <div id="tawsConfigGroup" style="display: none; margin-top: 6px;">
+            <label for="tawsAltitudeRange" style="display: block; font-size: 0.8rem;">TAWS ref altitude: <span id="tawsAltitudeVal">1200m</span></label>
+            <input id="tawsAltitudeRange" type="range" min="0" max="4000" step="50" value="1200" style="width: 100%; accent-color: var(--accent);">
+          </div>
+          <label style="display: block; margin-top: 6px;">
+            <input id="shaderContoursCheckbox" type="checkbox" style="accent-color: var(--accent); margin-right: 6px;">
+            GPU procedural contours
+          </label>
+          <label style="display: block; margin-top: 6px;">
+            <input id="terrainImageryCheckbox" type="checkbox" style="accent-color: var(--accent); margin-right: 6px;">
+            Drape texture imagery over terrain
+          </label>
+          <label for="terrainImagerySourceSelect" style="display: block; margin-top: 6px; font-size: 0.8rem;">Texture provider:</label>
+          <select id="terrainImagerySourceSelect" style="width: 100%;">
+            <option value="esri" selected>ESRI World Satellite (Aerial)</option>
+            <option value="esri_topo">ESRI World Topo / Shaded Relief</option>
+            <option value="carto">CartoDB Voyager (Clean)</option>
+            <option value="osm">OpenStreetMap (Street Map)</option>
+          </select>
+          <label for="hillshadeAzimuthRange" style="display: block; margin-top: 6px;">Hillshade azimuth</label>
+          <input id="hillshadeAzimuthRange" type="range" min="0" max="360" step="5" value="315" style="width: 100%; accent-color: var(--accent);">
         </div>
 
         <div id="geoserverConfigGroup" style="display: none;">

@@ -81,6 +81,10 @@ export class LayerManager {
 
 ### 2.1 Terrain and altitude-aware layers
 
-`TerrainLayer` samples `WasmTerrainEngine` and renders the elevation mesh. `TerrainContourLayer` applies marching squares to the same samples and renders isolines above the mesh. Both layers invalidate their cached geometry when the camera, projection, DEM, or vertical exaggeration changes.
+`TerrainLayer` samples `WasmTerrainEngine` and renders the elevation mesh. It supports `hypsometric`, `hillshade`, `slope`, `hybrid`, and `textured` modes. Elevation, slope, hillshade intensity, and geospatial UVs are carried as vertex attributes so the fragment shader can switch style without changing terrain data. In textured/hybrid modes it can load one XYZ imagery tile and drape it over the mesh. `TerrainContourLayer` applies marching squares to the same samples and renders isolines above the mesh. Both layers invalidate their cached geometry when the camera, projection, DEM, render mode, imagery tile, or vertical exaggeration changes.
+
+Terrain mesh and contour rendering are intentionally disabled in camera view mode `2D`; flat 2D projections render cartographic layers without vertical relief geometry.
+
+`TerrainLayer.setHillshade` configures sun azimuth and altitude. `setElevationRange` controls the hypsometric normalization range. The current palette is shader-defined and does not yet upload arbitrary user palettes or imagery textures.
 
 Object-producing layers do not implement terrain lookup themselves. `TrajectoryRibbonLayer` and `VolumetricAirspaceLayer` can receive an `AltitudeResolver` callback and an `AltitudeMode`; the callback is normally `OlayerController.resolveAltitude`. This keeps altitude policy outside WebGL shaders and preserves `Absolute` as the default.

@@ -71,10 +71,12 @@ The terrain demo uses a separate `TriangleList` pipeline with `TerrainVertex` va
 pub struct TerrainVertex {
     pub position: [f32; 3],
     pub elevation: f32,
+    pub slope: f32,
+    pub hillshade: f32,
 }
 ```
 
-`rebuild_terrain_buffers` samples `NativeController::terrain` on a 32x32 geographic grid, converts positions to the active 2D/2.5D projection or ECEF in 3D, and stores two triangles per cell. The terrain fragment shader applies a simple elevation color ramp. The GPU pipeline does not resolve object altitude and does not apply vertical exaggeration to geodetic data; it only renders the visual mesh.
+`rebuild_terrain_buffers` samples `NativeController::terrain` on a 32x32 geographic grid, converts positions to the active 2D/2.5D projection or ECEF in 3D, computes slope and hillshade attributes, and stores two triangles per cell. `set_terrain_style` writes the current mode and elevation range to a style uniform. The terrain fragment shader supports hypsometric tinting, hillshade, slope coloring, and a hybrid mode. It does not resolve object altitude or apply vertical exaggeration to geodetic data.
 
 ---
 
