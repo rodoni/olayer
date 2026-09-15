@@ -4,18 +4,22 @@ use crate::terrain::errors::TerrainError;
 ///
 /// Stores elevations in a flat column-major array indexed by
 /// `col * num_rows + row`.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DtedTile {
-    pub origin_lat: i32,           // Southwest corner latitude (whole degrees)
-    pub origin_lon: i32,           // Southwest corner longitude (whole degrees)
-    pub num_rows: usize,           // Number of latitude points
-    pub num_cols: usize,           // Number of longitude points
-    pub lat_spacing_arcsec: u32,   // Grid spacing in arc-seconds (latitude)
-    pub lon_spacing_arcsec: u32,   // Grid spacing in arc-seconds (longitude)
-    pub elevations: Vec<i16>,       // Altitudes in metres (flat col-major)
+    pub origin_lat: i32,         // Southwest corner latitude (whole degrees)
+    pub origin_lon: i32,         // Southwest corner longitude (whole degrees)
+    pub num_rows: usize,         // Number of latitude points
+    pub num_cols: usize,         // Number of longitude points
+    pub lat_spacing_arcsec: u32, // Grid spacing in arc-seconds (latitude)
+    pub lon_spacing_arcsec: u32, // Grid spacing in arc-seconds (longitude)
+    pub elevations: Box<[i16]>,  // Altitudes in metres (flat col-major)
 }
 
 impl DtedTile {
     /// Parses a DTED Level 0/1/2 buffer from raw bytes.
+    ///
+    /// # Errors
+    /// Returns [`TerrainError`] when the header, dimensions, or elevation records are invalid.
     #[inline]
     pub fn from_bytes(data: &[u8]) -> Result<Self, TerrainError> {
         if data.len() < 3428 {
@@ -44,26 +48,30 @@ impl DtedTile {
         let origin_lat = parsed_lat.floor() as i32;
 
         // Parse grid dimensions
-        let num_cols = parse_ascii_usize(&data[47..51]).map_err(|e| {
-            TerrainError::InvalidHeader(format!("Invalid column count: {e}"))
-        })?;
+        let num_cols = parse_ascii_usize(&data[47..51])
+            .map_err(|e| TerrainError::InvalidHeader(format!("Invalid column count: {e}")))?;
 
-        let num_rows = parse_ascii_usize(&data[51..55]).map_err(|e| {
-            TerrainError::InvalidHeader(format!("Invalid row count: {e}"))
-        })?;
+        let num_rows = parse_ascii_usize(&data[51..55])
+            .map_err(|e| TerrainError::InvalidHeader(format!("Invalid row count: {e}")))?;
 
         // Parse grid spacing (arc-seconds)
-        let lat_spacing_arcsec = parse_ascii_u32(&data[20..24]).map_err(|e| {
-            TerrainError::InvalidHeader(format!("Invalid latitude spacing: {e}"))
-        })?;
+        let lat_spacing_arcsec = parse_ascii_u32(&data[20..24])
+            .map_err(|e| TerrainError::InvalidHeader(format!("Invalid latitude spacing: {e}")))?;
 
-        let lon_spacing_arcsec = parse_ascii_u32(&data[24..28]).map_err(|e| {
-            TerrainError::InvalidHeader(format!("Invalid longitude spacing: {e}"))
-        })?;
+        let lon_spacing_arcsec = parse_ascii_u32(&data[24..28])
+            .map_err(|e| TerrainError::InvalidHeader(format!("Invalid longitude spacing: {e}")))?;
 
         // Each data column: 1 sentinel + 3 lon idx + 3 lat idx + num_rows * 2 bytes + 4 checksum
-        let col_size = 11 + num_rows * 2;
-        let expected_size = 3428 + num_cols * col_size;
+        let col_size = 11usize
+            .checked_add(num_rows.checked_mul(2).ok_or_else(|| {
+                TerrainError::MalformedData("DTED row count overflows column size".to_string())
+            })?)
+            .ok_or_else(|| TerrainError::MalformedData("DTED column size overflow".to_string()))?;
+        let expected_size = 3428usize
+            .checked_add(num_cols.checked_mul(col_size).ok_or_else(|| {
+                TerrainError::MalformedData("DTED dimensions overflow buffer size".to_string())
+            })?)
+            .ok_or_else(|| TerrainError::MalformedData("DTED buffer size overflow".to_string()))?;
 
         if data.len() < expected_size {
             return Err(TerrainError::MalformedData(format!(
@@ -76,7 +84,10 @@ impl DtedTile {
         }
 
         // Read elevation columns sequentially
-        let mut elevations = vec![0; num_cols * num_rows];
+        let elevation_count = num_cols.checked_mul(num_rows).ok_or_else(|| {
+            TerrainError::MalformedData("DTED dimensions overflow elevation count".to_string())
+        })?;
+        let mut elevations = vec![0; elevation_count];
         let mut offset = 3428;
 
         for c in 0..num_cols {
@@ -106,14 +117,16 @@ impl DtedTile {
             num_cols,
             lat_spacing_arcsec,
             lon_spacing_arcsec,
-            elevations,
+            elevations: elevations.into_boxed_slice(),
         })
     }
 
-    /// Returns the elevation at a specific grid cell.
+    /// Returns the elevation at a specific grid cell, or `None` if it is out of bounds.
     #[inline]
-    pub fn get_cell_elevation(&self, row: usize, col: usize) -> i16 {
-        self.elevations[col * self.num_rows + row]
+    pub fn get_cell_elevation(&self, row: usize, col: usize) -> Option<i16> {
+        col.checked_mul(self.num_rows)
+            .and_then(|index| index.checked_add(row))
+            .and_then(|index| self.elevations.get(index).copied())
     }
 }
 
@@ -219,6 +232,10 @@ fn parse_uhl_lat(bytes: &[u8]) -> Result<f64, String> {
 /// Trims leading and trailing ASCII whitespace from a byte slice.
 fn trim_ascii(bytes: &[u8]) -> &[u8] {
     let start = bytes.iter().position(|&b| b != b' ').unwrap_or(bytes.len());
-    let end = bytes.iter().rposition(|&b| b != b' ').map(|i| i + 1).unwrap_or(bytes.len());
+    let end = bytes
+        .iter()
+        .rposition(|&b| b != b' ')
+        .map(|i| i + 1)
+        .unwrap_or(bytes.len());
     &bytes[start..end]
 }

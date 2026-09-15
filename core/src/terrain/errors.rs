@@ -1,32 +1,21 @@
-use std::fmt;
+use thiserror::Error;
 
 /// Errors that can occur during terrain processing.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum TerrainError {
     /// The DTED header is malformed or the buffer is too short.
+    #[error("Invalid DTED header: {0}")]
     InvalidHeader(String),
     /// The DTED data records are corrupted or incomplete.
+    #[error("Corrupted DTED data: {0}")]
     MalformedData(String),
     /// The requested tile has not been loaded into the engine.
+    #[error("DTED tile not loaded for coordinate ({0}, {1})")]
     TileNotLoaded(i32, i32),
     /// An error occurred decoding an RGB/Terrarium elevation tile.
+    #[error("RGB terrain decode error: {0}")]
     RgbDecodeError(String),
     /// An error occurred parsing a GeoTIFF / Cloud-Optimized GeoTIFF raster.
+    #[error("GeoTIFF terrain error: {0}")]
     GeoTiffError(String),
 }
-
-impl fmt::Display for TerrainError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            TerrainError::InvalidHeader(err) => write!(f, "Invalid DTED header: {err}"),
-            TerrainError::MalformedData(err) => write!(f, "Corrupted DTED data: {err}"),
-            TerrainError::TileNotLoaded(lat, lon) => {
-                write!(f, "DTED tile not loaded for coordinate ({lat}, {lon})")
-            }
-            TerrainError::RgbDecodeError(err) => write!(f, "RGB terrain decode error: {err}"),
-            TerrainError::GeoTiffError(err) => write!(f, "GeoTIFF terrain error: {err}"),
-        }
-    }
-}
-
-impl std::error::Error for TerrainError {}

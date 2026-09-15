@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use crate::terrain::errors::TerrainError;
+use serde::{Deserialize, Serialize};
 
 /// Color encoding schema for RGB raster elevation tiles.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
@@ -69,13 +69,21 @@ pub fn decode_rgb_elevation(r: u8, g: u8, b: u8, encoding: RgbElevationEncoding)
 
 /// Decodes a raw RGBA (4 bytes per pixel) image buffer of dimensions `width * height` into a flat `Vec<f32>`
 /// elevation raster (row-major order).
+///
+/// # Errors
+/// Returns [`TerrainError`] when dimensions overflow or the buffer is too short.
 pub fn decode_rgba_buffer(
     buffer: &[u8],
     width: usize,
     height: usize,
     encoding: RgbElevationEncoding,
 ) -> Result<Vec<f32>, TerrainError> {
-    let expected_len = width * height * 4;
+    let pixel_count = width
+        .checked_mul(height)
+        .ok_or_else(|| TerrainError::RgbDecodeError("image dimensions overflow".to_string()))?;
+    let expected_len = pixel_count
+        .checked_mul(4)
+        .ok_or_else(|| TerrainError::RgbDecodeError("RGBA buffer size overflows".to_string()))?;
     if buffer.len() < expected_len {
         return Err(TerrainError::RgbDecodeError(format!(
             "RGBA buffer length ({}) is less than expected ({}) for {}x{} image",
@@ -86,8 +94,9 @@ pub fn decode_rgba_buffer(
         )));
     }
 
-    let mut elevations = Vec::with_capacity(width * height);
-    for chunk in buffer[..expected_len].chunks_exact(4) {
+    let mut elevations = Vec::with_capacity(pixel_count);
+    let (chunks, _) = buffer[..expected_len].as_chunks::<4>();
+    for chunk in chunks {
         let r = chunk[0];
         let g = chunk[1];
         let b = chunk[2];
@@ -100,13 +109,21 @@ pub fn decode_rgba_buffer(
 
 /// Decodes a raw RGB (3 bytes per pixel) image buffer of dimensions `width * height` into a flat `Vec<f32>`
 /// elevation raster (row-major order).
+///
+/// # Errors
+/// Returns [`TerrainError`] when dimensions overflow or the buffer is too short.
 pub fn decode_rgb_buffer(
     buffer: &[u8],
     width: usize,
     height: usize,
     encoding: RgbElevationEncoding,
 ) -> Result<Vec<f32>, TerrainError> {
-    let expected_len = width * height * 3;
+    let pixel_count = width
+        .checked_mul(height)
+        .ok_or_else(|| TerrainError::RgbDecodeError("image dimensions overflow".to_string()))?;
+    let expected_len = pixel_count
+        .checked_mul(3)
+        .ok_or_else(|| TerrainError::RgbDecodeError("RGB buffer size overflows".to_string()))?;
     if buffer.len() < expected_len {
         return Err(TerrainError::RgbDecodeError(format!(
             "RGB buffer length ({}) is less than expected ({}) for {}x{} image",
@@ -117,8 +134,9 @@ pub fn decode_rgb_buffer(
         )));
     }
 
-    let mut elevations = Vec::with_capacity(width * height);
-    for chunk in buffer[..expected_len].chunks_exact(3) {
+    let mut elevations = Vec::with_capacity(pixel_count);
+    let (chunks, _) = buffer[..expected_len].as_chunks::<3>();
+    for chunk in chunks {
         let r = chunk[0];
         let g = chunk[1];
         let b = chunk[2];

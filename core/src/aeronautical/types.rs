@@ -1,5 +1,6 @@
-use serde::{Deserialize, Serialize};
+use crate::aeronautical::errors::AeronauticalError;
 use crate::geodesy::coords::LatLon;
+use serde::{Deserialize, Serialize};
 
 /// Standard classification of controlled, uncontrolled, or special-use airspace.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -49,25 +50,39 @@ pub enum AltitudeReference {
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct AltitudeLimit {
     /// Height in meters above the datum.
-    pub value_m: f64,
+    value_m: f64,
     /// Vertical reference datum.
-    pub reference: AltitudeReference,
+    reference: AltitudeReference,
     /// Flight Level number if defined (e.g. FL245 = 245).
-    pub flight_level: Option<u32>,
+    flight_level: Option<u32>,
 }
 
 impl AltitudeLimit {
     /// Creates an altitude limit in meters AMSL.
-    pub const fn amsl(value_m: f64) -> Self {
-        Self {
+    ///
+    /// # Errors
+    /// Returns [`AeronauticalError::InvalidAltitude`] for non-finite or negative values.
+    ///
+    /// # Panics
+    /// This function does not panic for valid Rust inputs.
+    ///
+    /// # Safety
+    /// This function does not use unsafe operations.
+    pub fn amsl(value_m: f64) -> Result<Self, AeronauticalError> {
+        if !value_m.is_finite() || value_m < 0.0 {
+            return Err(AeronauticalError::InvalidAltitude(format!(
+                "invalid AMSL value: {value_m}"
+            )));
+        }
+        Ok(Self {
             value_m,
             reference: AltitudeReference::Amsl,
             flight_level: None,
-        }
+        })
     }
 
     /// Creates an altitude limit from a Flight Level (e.g. FL195 = 19500 ft = 5943.6 m).
-    pub fn flight_level(fl: u32) -> Self {
+    pub fn from_flight_level(fl: u32) -> Self {
         let value_m = f64::from(fl) * 100.0 * 0.3048;
         Self {
             value_m,
@@ -92,6 +107,67 @@ impl AltitudeLimit {
             reference: AltitudeReference::Uncapped,
             flight_level: None,
         }
+    }
+
+    /// Returns the altitude in meters relative to the stored datum.
+    ///
+    /// # Errors
+    /// This function does not return errors.
+    ///
+    /// # Panics
+    /// This function does not panic.
+    ///
+    /// # Safety
+    /// This function does not use unsafe operations.
+    pub const fn value_m(&self) -> f64 {
+        self.value_m
+    }
+
+    /// Returns the vertical datum reference.
+    ///
+    /// # Errors
+    /// This function does not return errors.
+    ///
+    /// # Panics
+    /// This function does not panic.
+    ///
+    /// # Safety
+    /// This function does not use unsafe operations.
+    pub const fn reference(&self) -> AltitudeReference {
+        self.reference
+    }
+    /// Returns the flight level, when this limit uses a flight-level datum.
+    ///
+    /// # Errors
+    /// This function does not return errors.
+    ///
+    /// # Panics
+    /// This function does not panic.
+    ///
+    /// # Safety
+    /// This function does not use unsafe operations.
+    pub const fn flight_level(&self) -> Option<u32> {
+        self.flight_level
+    }
+
+    /// Validates a deserialized altitude limit.
+    ///
+    /// # Errors
+    /// Returns [`AeronauticalError::InvalidAltitude`] when the stored value is invalid.
+    ///
+    /// # Panics
+    /// This function does not panic.
+    ///
+    /// # Safety
+    /// This function does not use unsafe operations.
+    pub fn validate(&self) -> Result<(), AeronauticalError> {
+        if !self.value_m.is_finite() || self.value_m < 0.0 {
+            return Err(AeronauticalError::InvalidAltitude(format!(
+                "invalid value: {}",
+                self.value_m
+            )));
+        }
+        Ok(())
     }
 }
 

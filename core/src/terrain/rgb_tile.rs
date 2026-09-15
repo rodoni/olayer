@@ -1,6 +1,6 @@
-use serde::{Deserialize, Serialize};
 use crate::terrain::errors::TerrainError;
 use crate::terrain::rgb_decoder::{decode_rgba_buffer, RgbElevationEncoding};
+use serde::{Deserialize, Serialize};
 
 /// Slippy Map (Web Mercator) tile identifier $(Z, X, Y)$.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -25,14 +25,19 @@ impl SlippyTileKey {
         let lat_deg = lat_rad.to_degrees().clamp(-85.05112878, 85.05112878);
         let lon_deg = lon_rad.to_degrees();
 
+        let zoom = zoom.min(31);
         let n = 2.0_f64.powi(zoom as i32);
         let x = (((lon_deg + 180.0) / 360.0) * n).floor() as u32;
-        let x = x.min((1 << zoom) - 1);
+        let max_index = (1u32 << zoom) - 1;
+        let x = x.min(max_index);
 
         let lat_rad_clamped = lat_deg.to_radians();
-        let y_val = (1.0 - (lat_rad_clamped.tan() + 1.0 / lat_rad_clamped.cos()).ln() / std::f64::consts::PI) / 2.0 * n;
+        let y_val = (1.0
+            - (lat_rad_clamped.tan() + 1.0 / lat_rad_clamped.cos()).ln() / std::f64::consts::PI)
+            / 2.0
+            * n;
         let y = y_val.floor().max(0.0) as u32;
-        let y = y.min((1 << zoom) - 1);
+        let y = y.min(max_index);
 
         Self { z: zoom, x, y }
     }
@@ -44,16 +49,21 @@ impl SlippyTileKey {
 
         // Longitude bounds
         let min_lon_deg = (self.x as f64 / n) * 360.0 - 180.0;
-        let max_lon_deg = ((self.x + 1) as f64 / n) * 360.0 - 180.0;
+        let max_lon_deg = (self.x.saturating_add(1) as f64 / n) * 360.0 - 180.0;
 
         // Latitude bounds using inverse Web Mercator gudermannian
         let n_north = std::f64::consts::PI * (1.0 - 2.0 * (self.y as f64) / n);
         let max_lat_rad = n_north.sinh().atan();
 
-        let n_south = std::f64::consts::PI * (1.0 - 2.0 * ((self.y + 1) as f64) / n);
+        let n_south = std::f64::consts::PI * (1.0 - 2.0 * (self.y.saturating_add(1) as f64) / n);
         let min_lat_rad = n_south.sinh().atan();
 
-        (min_lat_rad, min_lon_deg.to_radians(), max_lat_rad, max_lon_deg.to_radians())
+        (
+            min_lat_rad,
+            min_lon_deg.to_radians(),
+            max_lat_rad,
+            max_lon_deg.to_radians(),
+        )
     }
 }
 
@@ -67,13 +77,16 @@ pub struct RgbElevationTile {
     /// Raster height in pixels (e.g. 256 or 512).
     pub height: usize,
     /// Decoded elevation grid in meters (row-major from North to South, West to East).
-    pub elevations: Vec<f32>,
+    pub elevations: Box<[f32]>,
     /// Bounding box `(min_lat_rad, min_lon_rad, max_lat_rad, max_lon_rad)`.
     pub bounds_rad: (f64, f64, f64, f64),
 }
 
 impl RgbElevationTile {
     /// Creates an `RgbElevationTile` from a raw RGBA byte buffer and encoding format.
+    ///
+    /// # Errors
+    /// Returns [`TerrainError`] when dimensions are zero or the RGBA buffer is invalid.
     pub fn from_rgba(
         key: SlippyTileKey,
         width: usize,
@@ -81,7 +94,13 @@ impl RgbElevationTile {
         rgba_buffer: &[u8],
         encoding: RgbElevationEncoding,
     ) -> Result<Self, TerrainError> {
-        let elevations = decode_rgba_buffer(rgba_buffer, width, height, encoding)?;
+        if width == 0 || height == 0 {
+            return Err(TerrainError::RgbDecodeError(
+                "tile dimensions must be non-zero".to_string(),
+            ));
+        }
+        let elevations =
+            decode_rgba_buffer(rgba_buffer, width, height, encoding)?.into_boxed_slice();
         let bounds_rad = key.bounds_rad();
         Ok(Self {
             key,
@@ -118,8 +137,12 @@ impl RgbElevationTile {
         // Web Mercator latitude fraction (v) in [0, 1] where 0 is North (top) and 1 is South (bottom)
         let lat_clamped = lat_rad.clamp(-1.4844, 1.4844); // ~85.051 deg
         let q = (std::f64::consts::FRAC_PI_4 + lat_clamped / 2.0).tan().ln();
-        let q_min = (std::f64::consts::FRAC_PI_4 + min_lat.clamp(-1.4844, 1.4844) / 2.0).tan().ln();
-        let q_max = (std::f64::consts::FRAC_PI_4 + max_lat.clamp(-1.4844, 1.4844) / 2.0).tan().ln();
+        let q_min = (std::f64::consts::FRAC_PI_4 + min_lat.clamp(-1.4844, 1.4844) / 2.0)
+            .tan()
+            .ln();
+        let q_max = (std::f64::consts::FRAC_PI_4 + max_lat.clamp(-1.4844, 1.4844) / 2.0)
+            .tan()
+            .ln();
 
         let v = if (q_max - q_min).abs() > 1e-12 {
             ((q_max - q) / (q_max - q_min)).clamp(0.0, 1.0)
@@ -127,6 +150,10 @@ impl RgbElevationTile {
             0.0
         };
 
+        let expected_len = self.width.checked_mul(self.height)?;
+        if self.width == 0 || self.height == 0 || self.elevations.len() != expected_len {
+            return None;
+        }
         let col_f = u * ((self.width - 1) as f64);
         let row_f = v * ((self.height - 1) as f64);
 

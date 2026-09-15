@@ -109,7 +109,7 @@ fn test_parse_aixm_51_basic() {
     let asp = &dataset.airspaces[0];
     assert_eq!(asp.uid, "LFFF_TMA_PARIS");
     assert_eq!(asp.airspace_type, AirspaceType::Tma);
-    assert_eq!(asp.upper_limit.flight_level, Some(195));
+    assert_eq!(asp.upper_limit.flight_level(), Some(195));
     assert_eq!(asp.boundary.len(), 5);
 
     let nav = &dataset.navaids[0];
@@ -133,13 +133,17 @@ fn test_parse_geojson_aviation_and_roundtrip() {
     let airspace = &dataset.airspaces[0];
     assert_eq!(airspace.uid, "EGLL_CTR");
     assert_eq!(airspace.airspace_type, AirspaceType::Ctr);
-    assert_eq!(airspace.upper_limit.flight_level, Some(60));
+    assert_eq!(airspace.upper_limit.flight_level(), Some(60));
 
-    let navaid = dataset.find_navaid("LON").expect("LON navaid should be found");
+    let navaid = dataset
+        .find_navaid("LON")
+        .expect("LON navaid should be found");
     assert_eq!(navaid.navaid_type, NavaidType::Vor);
     assert_eq!(navaid.frequency_mhz, Some(113.6));
 
-    let airport = dataset.find_airport("EGLL").expect("EGLL airport should be found");
+    let airport = dataset
+        .find_airport("EGLL")
+        .expect("EGLL airport should be found");
     assert_eq!(airport.iata.as_deref(), Some("LHR"));
 
     // Roundtrip back to GeoJSON
@@ -159,13 +163,13 @@ fn test_spatial_queries_in_dataset() {
     let lhr = LatLon::from_degrees(51.47, -0.46, 25.0);
 
     // Navaids within 50 km of Heathrow
-    let nearby_navaids = dataset.find_navaids_within_radius(&lhr, 50_000.0);
+    let nearby_navaids = dataset.find_navaids_within_radius(&lhr, 50_000.0).unwrap();
     assert_eq!(nearby_navaids.len(), 1);
     assert_eq!(nearby_navaids[0].ident, "LON");
 
     // Navaids within 10 meters of a distant point (Paris)
     let paris = LatLon::from_degrees(48.8566, 2.3522, 50.0);
-    let empty_navaids = dataset.find_navaids_within_radius(&paris, 100.0);
+    let empty_navaids = dataset.find_navaids_within_radius(&paris, 100.0).unwrap();
     assert!(empty_navaids.is_empty());
 
     // Containment query: point inside Heathrow CTR
@@ -173,4 +177,35 @@ fn test_spatial_queries_in_dataset() {
     let containing = dataset.find_airspaces_containing_point(&inside_ctr);
     assert_eq!(containing.len(), 1);
     assert_eq!(containing[0].uid, "EGLL_CTR");
+}
+
+#[test]
+fn rejects_invalid_navaid_search_radius() {
+    let dataset = parse_geojson_aviation_str(SAMPLE_GEOJSON_AVIATION).unwrap();
+    let center = LatLon::from_degrees(51.47, -0.46, 0.0);
+    assert!(dataset.find_navaids_within_radius(&center, -1.0).is_err());
+    assert!(dataset
+        .find_navaids_within_radius(&center, f64::NAN)
+        .is_err());
+}
+
+#[test]
+fn rejects_invalid_geojson_coordinates_and_altitudes() {
+    let invalid_coordinate = r#"{
+        "type":"FeatureCollection",
+        "features":[{"type":"Feature","properties":{"aero_type":"Navaid"},"geometry":{"type":"Point","coordinates":[999,51]}}]
+    }"#;
+    assert!(parse_geojson_aviation_str(invalid_coordinate).is_err());
+
+    let invalid_altitude = r#"{
+        "type":"FeatureCollection",
+        "features":[{"type":"Feature","properties":{"aero_type":"Airspace","lower_limit_m":-1},"geometry":{"type":"Polygon","coordinates":[[[-1,50],[-1,51],[0,51],[-1,50]]]}}]
+    }"#;
+    assert!(parse_geojson_aviation_str(invalid_altitude).is_err());
+}
+
+#[test]
+fn rejects_malformed_aixm_coordinates() {
+    let malformed = r#"<aixm:Message xmlns:aixm="urn:aixm"><aixm:Airspace gml:id="A"><aixm:type>CTR</aixm:type><gml:posList xmlns:gml="urn:gml">51.0 invalid 52.0</gml:posList></aixm:Airspace></aixm:Message>"#;
+    assert!(parse_aixm_51_str(malformed).is_err());
 }

@@ -22,6 +22,10 @@ pub enum AltitudeUnknownPolicy {
 }
 
 /// Resolves an object's final height without applying a projection or vertical exaggeration.
+///
+/// # Errors
+/// Returns an error when the input or selected terrain height is not finite, or when the
+/// unknown-terrain policy rejects a missing sample.
 pub fn resolve_altitude(
     input_height: f64,
     ground_height: Option<f64>,
@@ -62,16 +66,83 @@ mod tests {
 
     #[test]
     fn resolves_supported_modes() {
-        assert_eq!(resolve_altitude(120.0, Some(800.0), Some(850.0), AltitudeMode::Absolute, AltitudeUnknownPolicy::Reject).unwrap(), 120.0);
-        assert_eq!(resolve_altitude(120.0, Some(800.0), Some(850.0), AltitudeMode::ClampToGround, AltitudeUnknownPolicy::Reject).unwrap(), 800.0);
-        assert_eq!(resolve_altitude(120.0, Some(800.0), Some(850.0), AltitudeMode::RelativeToGround, AltitudeUnknownPolicy::Reject).unwrap(), 920.0);
-        assert_eq!(resolve_altitude(120.0, Some(800.0), Some(850.0), AltitudeMode::RelativeToMesh, AltitudeUnknownPolicy::Reject).unwrap(), 970.0);
+        assert_eq!(
+            resolve_altitude(
+                120.0,
+                Some(800.0),
+                Some(850.0),
+                AltitudeMode::Absolute,
+                AltitudeUnknownPolicy::Reject
+            )
+            .unwrap(),
+            120.0
+        );
+        assert_eq!(
+            resolve_altitude(
+                120.0,
+                Some(800.0),
+                Some(850.0),
+                AltitudeMode::ClampToGround,
+                AltitudeUnknownPolicy::Reject
+            )
+            .unwrap(),
+            800.0
+        );
+        assert_eq!(
+            resolve_altitude(
+                120.0,
+                Some(800.0),
+                Some(850.0),
+                AltitudeMode::RelativeToGround,
+                AltitudeUnknownPolicy::Reject
+            )
+            .unwrap(),
+            920.0
+        );
+        assert_eq!(
+            resolve_altitude(
+                120.0,
+                Some(800.0),
+                Some(850.0),
+                AltitudeMode::RelativeToMesh,
+                AltitudeUnknownPolicy::Reject
+            )
+            .unwrap(),
+            970.0
+        );
     }
 
     #[test]
     fn applies_unknown_terrain_policy() {
-        assert!(resolve_altitude(120.0, None, None, AltitudeMode::RelativeToGround, AltitudeUnknownPolicy::Reject).is_err());
-        assert_eq!(resolve_altitude(120.0, None, None, AltitudeMode::RelativeToGround, AltitudeUnknownPolicy::UseAbsolute).unwrap(), 120.0);
-        assert_eq!(resolve_altitude(120.0, None, None, AltitudeMode::RelativeToGround, AltitudeUnknownPolicy::UseZero).unwrap(), 120.0);
+        assert!(resolve_altitude(
+            120.0,
+            None,
+            None,
+            AltitudeMode::RelativeToGround,
+            AltitudeUnknownPolicy::Reject
+        )
+        .is_err());
+        assert_eq!(
+            resolve_altitude(
+                120.0,
+                None,
+                None,
+                AltitudeMode::RelativeToGround,
+                AltitudeUnknownPolicy::UseAbsolute
+            )
+            .unwrap(),
+            120.0
+        );
+        assert_eq!(
+            resolve_altitude(
+                120.0,
+                None,
+                None,
+                AltitudeMode::RelativeToGround,
+                AltitudeUnknownPolicy::UseZero
+            )
+            .unwrap(),
+            120.0
+        );
     }
 }

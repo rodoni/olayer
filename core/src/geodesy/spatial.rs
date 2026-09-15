@@ -138,7 +138,12 @@ impl GeodesicPolygon {
     /// This method is exact on the sphere and free of coordinate singularities
     /// at the antimeridian ($180^\circ / -180^\circ$) and both poles.
     pub fn contains_point(&self, point: &LatLon) -> bool {
-        let n = self.vertices.len();
+        Self::contains_point_vertices(&self.vertices, point)
+    }
+
+    /// Evaluates a borrowed vertex slice without allocating a polygon object.
+    pub fn contains_point_vertices(vertices: &[LatLon], point: &LatLon) -> bool {
+        let n = vertices.len();
         if n < 3 {
             return false;
         }
@@ -148,8 +153,8 @@ impl GeodesicPolygon {
 
         for i in 0..n {
             let next_idx = (i + 1) % n;
-            let v1 = to_unit_vector(&self.vertices[i]);
-            let v2 = to_unit_vector(&self.vertices[next_idx]);
+            let v1 = to_unit_vector(&vertices[i]);
+            let v2 = to_unit_vector(&vertices[next_idx]);
 
             // Tangent vectors to the sphere at p pointing toward v1 and v2
             let dot1 = dot_product(&v1, &p);

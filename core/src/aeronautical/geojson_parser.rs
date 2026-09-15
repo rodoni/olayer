@@ -1,21 +1,43 @@
-use serde_json::{json, Value};
 use crate::aeronautical::dataset::AeronauticalDataset;
 use crate::aeronautical::errors::AeronauticalError;
 use crate::aeronautical::types::{
     AeronauticalAirport, AeronauticalAirspace, AeronauticalAirway, AeronauticalNavaid,
-    AirspaceType, AirwaySegment, AirwayType, AltitudeLimit,
-    NavaidType,
+    AirspaceType, AirwaySegment, AirwayType, AltitudeLimit, NavaidType,
 };
 use crate::geodesy::coords::LatLon;
+use serde_json::{json, Value};
 
 /// Parses a GeoJSON-Aviation formatted string into an [`AeronauticalDataset`].
-pub fn parse_geojson_aviation_str(json_str: &str) -> Result<AeronauticalDataset, AeronauticalError> {
+///
+/// # Errors
+/// Returns [`AeronauticalError`] when the JSON is malformed, is not a
+/// `FeatureCollection`, or contains invalid coordinates for a recognized
+/// aeronautical feature.
+///
+/// # Panics
+/// This function does not panic for valid Rust inputs.
+///
+/// # Safety
+/// This function does not use unsafe operations and requires no caller-held
+/// memory invariants.
+pub fn parse_geojson_aviation_str(
+    json_str: &str,
+) -> Result<AeronauticalDataset, AeronauticalError> {
     let root: Value = serde_json::from_str(json_str)
         .map_err(|e| AeronauticalError::JsonParseError(e.to_string()))?;
 
-    let features = root.get("features")
+    let features = root
+        .get("features")
         .and_then(Value::as_array)
-        .ok_or_else(|| AeronauticalError::JsonParseError("GeoJSON must contain a 'features' array".to_string()))?;
+        .ok_or_else(|| {
+            AeronauticalError::JsonParseError("GeoJSON must contain a 'features' array".to_string())
+        })?;
+
+    if root.get("type").and_then(Value::as_str) != Some("FeatureCollection") {
+        return Err(AeronauticalError::JsonParseError(
+            "GeoJSON root must have type 'FeatureCollection'".to_string(),
+        ));
+    }
 
     let mut dataset = AeronauticalDataset::new();
 
@@ -23,17 +45,36 @@ pub fn parse_geojson_aviation_str(json_str: &str) -> Result<AeronauticalDataset,
         let properties = feature.get("properties").and_then(Value::as_object);
         let geometry = feature.get("geometry").and_then(Value::as_object);
 
-        let geom_type = geometry.and_then(|g| g.get("type")).and_then(Value::as_str).unwrap_or("");
+        let geom_type = geometry
+            .and_then(|g| g.get("type"))
+            .and_then(Value::as_str)
+            .unwrap_or("");
         let coords_val = geometry.and_then(|g| g.get("coordinates"));
 
         let aero_type = properties
-            .and_then(|p| p.get("aero_type").or_else(|| p.get("feature_type")).or_else(|| p.get("type")))
+            .and_then(|p| {
+                p.get("aero_type")
+                    .or_else(|| p.get("feature_type"))
+                    .or_else(|| p.get("type"))
+            })
             .and_then(Value::as_str)
             .unwrap_or("");
 
+        let recognized = matches!(geom_type, "Point" | "LineString" | "Polygon")
+            || matches!(aero_type, "Airspace" | "Navaid" | "Airway" | "Airport");
+        if recognized && properties.is_none() {
+            return Err(AeronauticalError::MissingRequiredField("properties".into()));
+        }
+
+        if matches!(geom_type, "Point" | "LineString" | "Polygon")
+            || matches!(aero_type, "Airspace" | "Navaid" | "Airway")
+        {
+            validate_feature_coordinates(geom_type, coords_val)?;
+        }
+
         match (geom_type, aero_type) {
             ("Polygon", _) | (_, "Airspace") => {
-                if let Some(airspace) = parse_airspace_feature(properties, coords_val) {
+                if let Some(airspace) = parse_airspace_feature(properties, coords_val)? {
                     dataset.add_airspace(airspace);
                 }
             }
@@ -59,21 +100,108 @@ pub fn parse_geojson_aviation_str(json_str: &str) -> Result<AeronauticalDataset,
     Ok(dataset)
 }
 
+fn validate_feature_coordinates(
+    geometry_type: &str,
+    coordinates: Option<&Value>,
+) -> Result<(), AeronauticalError> {
+    let coordinates = coordinates.ok_or_else(|| {
+        AeronauticalError::InvalidCoordinateString(format!(
+            "missing coordinates for {geometry_type}"
+        ))
+    })?;
+    match geometry_type {
+        "Point" => validate_position(coordinates),
+        "LineString" => coordinates
+            .as_array()
+            .ok_or_else(|| {
+                AeronauticalError::InvalidCoordinateString(
+                    "LineString coordinates must be an array".into(),
+                )
+            })?
+            .iter()
+            .try_for_each(validate_position),
+        "Polygon" => coordinates
+            .as_array()
+            .ok_or_else(|| {
+                AeronauticalError::InvalidCoordinateString(
+                    "Polygon coordinates must be an array".into(),
+                )
+            })?
+            .iter()
+            .map(|ring| {
+                ring.as_array().ok_or_else(|| {
+                    AeronauticalError::InvalidCoordinateString(
+                        "Polygon ring must be an array".into(),
+                    )
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .flatten()
+            .try_for_each(validate_position),
+        _ => Err(AeronauticalError::FormatError(format!(
+            "unsupported aeronautical geometry: {geometry_type}"
+        ))),
+    }
+}
+
+fn validate_position(position: &Value) -> Result<(), AeronauticalError> {
+    let values = position.as_array().ok_or_else(|| {
+        AeronauticalError::InvalidCoordinateString("position must be an array".into())
+    })?;
+    if values.len() < 2 {
+        return Err(AeronauticalError::InvalidCoordinateString(
+            "position must contain longitude and latitude".into(),
+        ));
+    }
+    let longitude = values[0].as_f64().ok_or_else(|| {
+        AeronauticalError::InvalidCoordinateString("longitude must be numeric".into())
+    })?;
+    let latitude = values[1].as_f64().ok_or_else(|| {
+        AeronauticalError::InvalidCoordinateString("latitude must be numeric".into())
+    })?;
+    if !longitude.is_finite() || !(-180.0..=180.0).contains(&longitude) {
+        return Err(AeronauticalError::InvalidCoordinateString(
+            "longitude is outside [-180, 180]".into(),
+        ));
+    }
+    if !latitude.is_finite() || !(-90.0..=90.0).contains(&latitude) {
+        return Err(AeronauticalError::InvalidCoordinateString(
+            "latitude is outside [-90, 90]".into(),
+        ));
+    }
+    if let Some(height) = values.get(2).and_then(Value::as_f64) {
+        if !height.is_finite() {
+            return Err(AeronauticalError::InvalidCoordinateString(
+                "height must be finite".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn parse_airspace_feature(
     properties: Option<&serde_json::Map<String, Value>>,
     coordinates: Option<&Value>,
-) -> Option<AeronauticalAirspace> {
-    let props = properties?;
-    let uid = props.get("uid").or_else(|| props.get("id"))
+) -> Result<Option<AeronauticalAirspace>, AeronauticalError> {
+    let Some(props) = properties else {
+        return Ok(None);
+    };
+    let uid = props
+        .get("uid")
+        .or_else(|| props.get("id"))
         .and_then(Value::as_str)
         .unwrap_or("AIRSPACE")
         .to_string();
-    let name = props.get("name")
+    let name = props
+        .get("name")
         .and_then(Value::as_str)
         .unwrap_or(&uid)
         .to_string();
 
-    let type_str = props.get("airspace_type").or_else(|| props.get("sub_type"))
+    let type_str = props
+        .get("airspace_type")
+        .or_else(|| props.get("sub_type"))
         .and_then(Value::as_str)
         .unwrap_or("SECTOR");
     let airspace_type = match type_str.to_uppercase().as_str() {
@@ -89,24 +217,24 @@ fn parse_airspace_feature(
         other => AirspaceType::Other(other.to_string()),
     };
 
-    let lower_val = props.get("lower_limit_m").and_then(Value::as_f64)
-        .or_else(|| props.get("lower_limit").and_then(Value::as_f64))
+    let lower_val = optional_altitude(props, "lower_limit_m")?
+        .or(optional_altitude(props, "lower_limit")?)
         .unwrap_or(0.0);
-    let lower_fl = props.get("lower_limit_fl").and_then(Value::as_u64).map(|v| v as u32);
+    let lower_fl = optional_flight_level(props, "lower_limit_fl")?;
     let lower_limit = if let Some(fl) = lower_fl {
-        AltitudeLimit::flight_level(fl)
+        AltitudeLimit::from_flight_level(fl)
     } else {
-        AltitudeLimit::amsl(lower_val)
+        AltitudeLimit::amsl(lower_val)?
     };
 
-    let upper_val = props.get("upper_limit_m").and_then(Value::as_f64)
-        .or_else(|| props.get("upper_limit").and_then(Value::as_f64))
+    let upper_val = optional_altitude(props, "upper_limit_m")?
+        .or(optional_altitude(props, "upper_limit")?)
         .unwrap_or(10000.0);
-    let upper_fl = props.get("upper_limit_fl").and_then(Value::as_u64).map(|v| v as u32);
+    let upper_fl = optional_flight_level(props, "upper_limit_fl")?;
     let upper_limit = if let Some(fl) = upper_fl {
-        AltitudeLimit::flight_level(fl)
+        AltitudeLimit::from_flight_level(fl)
     } else {
-        AltitudeLimit::amsl(upper_val)
+        AltitudeLimit::amsl(upper_val)?
     };
 
     let mut boundary = Vec::new();
@@ -116,9 +244,18 @@ fn parse_airspace_feature(
             for pt in exterior {
                 if let Some(coords) = pt.as_array() {
                     if coords.len() >= 2 {
-                        let lon_deg = coords[0].as_f64().unwrap_or(0.0);
-                        let lat_deg = coords[1].as_f64().unwrap_or(0.0);
-                        let height_m = if coords.len() >= 3 { coords[2].as_f64().unwrap_or(0.0) } else { 0.0 };
+                        let lon_deg = coords[0].as_f64().ok_or_else(|| {
+                            AeronauticalError::InvalidCoordinateString("longitude".into())
+                        })?;
+                        let lat_deg = coords[1].as_f64().ok_or_else(|| {
+                            AeronauticalError::InvalidCoordinateString("latitude".into())
+                        })?;
+                        let height_m = match coords.get(2) {
+                            Some(value) => value.as_f64().ok_or_else(|| {
+                                AeronauticalError::InvalidCoordinateString("height".into())
+                            })?,
+                            None => 0.0,
+                        };
                         boundary.push(LatLon::from_degrees(lat_deg, lon_deg, height_m));
                     }
                 }
@@ -126,14 +263,47 @@ fn parse_airspace_feature(
         }
     }
 
-    Some(AeronauticalAirspace {
+    Ok(Some(AeronauticalAirspace {
         uid,
         name,
         airspace_type,
         lower_limit,
         upper_limit,
         boundary,
-    })
+    }))
+}
+
+fn optional_altitude(
+    props: &serde_json::Map<String, Value>,
+    key: &str,
+) -> Result<Option<f64>, AeronauticalError> {
+    let Some(value) = props.get(key).filter(|value| !value.is_null()) else {
+        return Ok(None);
+    };
+    let altitude = value
+        .as_f64()
+        .ok_or_else(|| AeronauticalError::InvalidAltitude(format!("{key} must be numeric")))?;
+    if !altitude.is_finite() || altitude < 0.0 {
+        return Err(AeronauticalError::InvalidAltitude(format!(
+            "{key} must be finite and non-negative"
+        )));
+    }
+    Ok(Some(altitude))
+}
+
+fn optional_flight_level(
+    props: &serde_json::Map<String, Value>,
+    key: &str,
+) -> Result<Option<u32>, AeronauticalError> {
+    let Some(value) = props.get(key).filter(|value| !value.is_null()) else {
+        return Ok(None);
+    };
+    let level = value.as_u64().ok_or_else(|| {
+        AeronauticalError::InvalidAltitude(format!("{key} must be an unsigned integer"))
+    })?;
+    let level = u32::try_from(level)
+        .map_err(|_| AeronauticalError::InvalidAltitude(format!("{key} is too large")))?;
+    Ok(Some(level))
 }
 
 fn parse_navaid_feature(
@@ -141,16 +311,21 @@ fn parse_navaid_feature(
     coordinates: Option<&Value>,
 ) -> Option<AeronauticalNavaid> {
     let props = properties?;
-    let ident = props.get("ident").or_else(|| props.get("id"))
+    let ident = props
+        .get("ident")
+        .or_else(|| props.get("id"))
         .and_then(Value::as_str)
         .unwrap_or("FIX")
         .to_string();
-    let name = props.get("name")
+    let name = props
+        .get("name")
         .and_then(Value::as_str)
         .unwrap_or(&ident)
         .to_string();
 
-    let type_str = props.get("navaid_type").or_else(|| props.get("type"))
+    let type_str = props
+        .get("navaid_type")
+        .or_else(|| props.get("type"))
         .and_then(Value::as_str)
         .unwrap_or("WAYPOINT");
     let navaid_type = match type_str.to_uppercase().as_str() {
@@ -170,13 +345,29 @@ fn parse_navaid_feature(
     }
     let lon_deg = coords_arr[0].as_f64().unwrap_or(0.0);
     let lat_deg = coords_arr[1].as_f64().unwrap_or(0.0);
-    let height_m = if coords_arr.len() >= 3 { coords_arr[2].as_f64().unwrap_or(0.0) } else { 0.0 };
+    let height_m = if coords_arr.len() >= 3 {
+        coords_arr[2].as_f64().unwrap_or(0.0)
+    } else {
+        0.0
+    };
     let coords = LatLon::from_degrees(lat_deg, lon_deg, height_m);
 
-    let frequency_mhz = props.get("frequency_mhz").or_else(|| props.get("frequency")).and_then(Value::as_f64);
-    let channel = props.get("channel").and_then(Value::as_str).map(String::from);
-    let elevation_m = props.get("elevation_m").or_else(|| props.get("elevation")).and_then(Value::as_f64);
-    let magnetic_variation_deg = props.get("magnetic_variation_deg").or_else(|| props.get("mag_var")).and_then(Value::as_f64);
+    let frequency_mhz = props
+        .get("frequency_mhz")
+        .or_else(|| props.get("frequency"))
+        .and_then(Value::as_f64);
+    let channel = props
+        .get("channel")
+        .and_then(Value::as_str)
+        .map(String::from);
+    let elevation_m = props
+        .get("elevation_m")
+        .or_else(|| props.get("elevation"))
+        .and_then(Value::as_f64);
+    let magnetic_variation_deg = props
+        .get("magnetic_variation_deg")
+        .or_else(|| props.get("mag_var"))
+        .and_then(Value::as_f64);
 
     Some(AeronauticalNavaid {
         ident,
@@ -195,12 +386,17 @@ fn parse_airway_feature(
     coordinates: Option<&Value>,
 ) -> Option<AeronauticalAirway> {
     let props = properties?;
-    let ident = props.get("ident").or_else(|| props.get("id"))
+    let ident = props
+        .get("ident")
+        .or_else(|| props.get("id"))
         .and_then(Value::as_str)
         .unwrap_or("AIRWAY")
         .to_string();
 
-    let type_str = props.get("route_type").and_then(Value::as_str).unwrap_or("CONVENTIONAL");
+    let type_str = props
+        .get("route_type")
+        .and_then(Value::as_str)
+        .unwrap_or("CONVENTIONAL");
     let route_type = match type_str.to_uppercase().as_str() {
         "RNAV5" => AirwayType::Rnav5,
         "RNAV1" => AirwayType::Rnav1,
@@ -216,7 +412,11 @@ fn parse_airway_feature(
             if coords.len() >= 2 {
                 let lon_deg = coords[0].as_f64().unwrap_or(0.0);
                 let lat_deg = coords[1].as_f64().unwrap_or(0.0);
-                let height_m = if coords.len() >= 3 { coords[2].as_f64().unwrap_or(0.0) } else { 0.0 };
+                let height_m = if coords.len() >= 3 {
+                    coords[2].as_f64().unwrap_or(0.0)
+                } else {
+                    0.0
+                };
                 waypoints.push(LatLon::from_degrees(lat_deg, lon_deg, height_m));
             }
         }
@@ -232,7 +432,10 @@ fn parse_airway_feature(
             mea_m: props.get("mea_m").and_then(Value::as_f64),
             maa_m: props.get("maa_m").and_then(Value::as_f64),
             inbound_bearing_deg: None,
-            is_unidirectional: props.get("is_unidirectional").and_then(Value::as_bool).unwrap_or(false),
+            is_unidirectional: props
+                .get("is_unidirectional")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
         });
     }
 
@@ -248,11 +451,18 @@ fn parse_airport_feature(
     coordinates: Option<&Value>,
 ) -> Option<AeronauticalAirport> {
     let props = properties?;
-    let icao = props.get("icao").or_else(|| props.get("ident")).or_else(|| props.get("id"))
+    let icao = props
+        .get("icao")
+        .or_else(|| props.get("ident"))
+        .or_else(|| props.get("id"))
         .and_then(Value::as_str)?
         .to_string();
     let iata = props.get("iata").and_then(Value::as_str).map(String::from);
-    let name = props.get("name").and_then(Value::as_str).unwrap_or(&icao).to_string();
+    let name = props
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or(&icao)
+        .to_string();
 
     let coords_arr = coordinates.and_then(Value::as_array)?;
     if coords_arr.len() < 2 {
@@ -260,10 +470,17 @@ fn parse_airport_feature(
     }
     let lon_deg = coords_arr[0].as_f64().unwrap_or(0.0);
     let lat_deg = coords_arr[1].as_f64().unwrap_or(0.0);
-    let height_m = if coords_arr.len() >= 3 { coords_arr[2].as_f64().unwrap_or(0.0) } else { 0.0 };
+    let height_m = if coords_arr.len() >= 3 {
+        coords_arr[2].as_f64().unwrap_or(0.0)
+    } else {
+        0.0
+    };
     let coords = LatLon::from_degrees(lat_deg, lon_deg, height_m);
 
-    let elevation_m = props.get("elevation_m").and_then(Value::as_f64).unwrap_or(height_m);
+    let elevation_m = props
+        .get("elevation_m")
+        .and_then(Value::as_f64)
+        .unwrap_or(height_m);
 
     Some(AeronauticalAirport {
         icao,
@@ -276,7 +493,19 @@ fn parse_airport_feature(
 }
 
 /// Exports an [`AeronauticalDataset`] to a standard GeoJSON FeatureCollection string.
-pub fn export_dataset_to_geojson(dataset: &AeronauticalDataset) -> Result<String, AeronauticalError> {
+///
+/// # Errors
+/// Returns [`AeronauticalError::JsonParseError`] if serialization fails.
+///
+/// # Panics
+/// This function does not panic for valid Rust inputs.
+///
+/// # Safety
+/// This function does not use unsafe operations and requires no caller-held
+/// memory invariants.
+pub fn export_dataset_to_geojson(
+    dataset: &AeronauticalDataset,
+) -> Result<String, AeronauticalError> {
     let mut features = Vec::new();
 
     // 1. Export Airspaces as Polygons
@@ -316,10 +545,10 @@ pub fn export_dataset_to_geojson(dataset: &AeronauticalDataset) -> Result<String
                 "uid": airspace.uid,
                 "name": airspace.name,
                 "airspace_type": type_str,
-                "lower_limit_m": airspace.lower_limit.value_m,
-                "lower_limit_fl": airspace.lower_limit.flight_level,
-                "upper_limit_m": airspace.upper_limit.value_m,
-                "upper_limit_fl": airspace.upper_limit.flight_level,
+                "lower_limit_m": airspace.lower_limit.value_m(),
+                "lower_limit_fl": airspace.lower_limit.flight_level(),
+                "upper_limit_m": airspace.upper_limit.value_m(),
+                "upper_limit_fl": airspace.upper_limit.flight_level(),
             },
             "geometry": {
                 "type": "Polygon",
@@ -367,10 +596,18 @@ pub fn export_dataset_to_geojson(dataset: &AeronauticalDataset) -> Result<String
         }
         let mut line_coords = Vec::new();
         if let Some(first_seg) = airway.segments.first() {
-            line_coords.push(vec![first_seg.from_coords.lon.to_degrees(), first_seg.from_coords.lat.to_degrees(), first_seg.from_coords.height]);
+            line_coords.push(vec![
+                first_seg.from_coords.lon.to_degrees(),
+                first_seg.from_coords.lat.to_degrees(),
+                first_seg.from_coords.height,
+            ]);
         }
         for seg in &airway.segments {
-            line_coords.push(vec![seg.to_coords.lon.to_degrees(), seg.to_coords.lat.to_degrees(), seg.to_coords.height]);
+            line_coords.push(vec![
+                seg.to_coords.lon.to_degrees(),
+                seg.to_coords.lat.to_degrees(),
+                seg.to_coords.height,
+            ]);
         }
 
         let type_str = match airway.route_type {
@@ -420,6 +657,5 @@ pub fn export_dataset_to_geojson(dataset: &AeronauticalDataset) -> Result<String
         "features": features
     });
 
-    serde_json::to_string(&root)
-        .map_err(|e| AeronauticalError::JsonParseError(e.to_string()))
+    serde_json::to_string(&root).map_err(|e| AeronauticalError::JsonParseError(e.to_string()))
 }

@@ -1,7 +1,7 @@
-pub mod aixm_parser;
+mod aixm_parser;
 pub mod dataset;
 pub mod errors;
-pub mod geojson_parser;
+mod geojson_parser;
 pub mod types;
 
 #[cfg(test)]

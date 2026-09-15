@@ -1,16 +1,16 @@
-use std::cell::RefCell;
-use std::num::NonZeroUsize;
-use serde::{Deserialize, Serialize};
-use lru::LruCache;
 use crate::geodesy::coords::LatLon;
 use crate::geodesy::ellipsoid::Ellipsoid;
 use crate::geodesy::solvers::{GeodeticSolver, VincentySolver};
+use crate::terrain::altitude::{resolve_altitude, AltitudeMode, AltitudeUnknownPolicy};
 use crate::terrain::errors::TerrainError;
 use crate::terrain::geotiff::GeoTiffTile;
 use crate::terrain::rgb_decoder::RgbElevationEncoding;
 use crate::terrain::rgb_tile::{RgbElevationTile, SlippyTileKey};
 use crate::terrain::tile::DtedTile;
-use crate::terrain::altitude::{resolve_altitude, AltitudeMode, AltitudeUnknownPolicy};
+use lru::LruCache;
+use serde::{Deserialize, Serialize};
+use std::cell::RefCell;
+use std::num::NonZeroUsize;
 
 /// Default maximum number of DTED and RGB tiles kept in memory.
 const DEFAULT_TILE_CAPACITY: usize = 64;
@@ -79,13 +79,10 @@ impl TerrainEngine {
 
     /// Creates a new terrain engine with a custom tile cache capacity.
     ///
-    /// # Panics
-    ///
-    /// Panics if `capacity` is zero.
+    /// A zero capacity is treated as a capacity of one.
     #[inline]
     pub fn with_capacity(capacity: usize) -> Self {
-        let cap = NonZeroUsize::new(capacity)
-            .expect("terrain tile cache capacity must be non-zero");
+        let cap = NonZeroUsize::new(capacity.max(1)).expect("capacity.max(1) is non-zero");
         Self {
             tiles: RefCell::new(LruCache::new(cap)),
             rgb_tiles: RefCell::new(LruCache::new(cap)),
@@ -95,13 +92,10 @@ impl TerrainEngine {
 
     /// Changes the tile cache capacity.
     ///
-    /// # Panics
-    ///
-    /// Panics if `capacity` is zero.
+    /// A zero capacity is treated as a capacity of one.
     #[inline]
     pub fn set_cache_capacity(&self, capacity: usize) {
-        let cap = NonZeroUsize::new(capacity)
-            .expect("terrain tile cache capacity must be non-zero");
+        let cap = NonZeroUsize::new(capacity.max(1)).expect("capacity.max(1) is non-zero");
         self.tiles.borrow_mut().resize(cap);
         self.rgb_tiles.borrow_mut().resize(cap);
     }
@@ -151,6 +145,9 @@ impl TerrainEngine {
     }
 
     /// Parses a raw DTED buffer and registers the resulting tile.
+    ///
+    /// # Errors
+    /// Returns [`TerrainError`] when the DTED buffer cannot be parsed.
     #[inline]
     pub fn load_tile(&mut self, data: &[u8]) -> Result<TileKey, TerrainError> {
         let tile = DtedTile::from_bytes(data)?;
@@ -163,7 +160,13 @@ impl TerrainEngine {
     }
 
     /// Loads and registers a Web Mercator $(Z, X, Y)$ RGB elevation tile.
-    #[allow(clippy::too_many_arguments)]
+    ///
+    /// # Errors
+    /// Returns [`TerrainError`] when the raster dimensions or pixel buffer is invalid.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Public tile-loading API preserves its established argument layout"
+    )]
     pub fn load_rgb_tile(
         &self,
         z: u32,
@@ -182,6 +185,9 @@ impl TerrainEngine {
 
     /// Loads and registers a GeoTIFF / Cloud-Optimized GeoTIFF elevation raster.
     /// Returns the geographic bounding box `(min_lat_rad, min_lon_rad, max_lat_rad, max_lon_rad)`.
+    ///
+    /// # Errors
+    /// Returns [`TerrainError`] when the GeoTIFF cannot be parsed.
     pub fn load_geotiff_tile(&self, data: &[u8]) -> Result<(f64, f64, f64, f64), TerrainError> {
         let tile = GeoTiffTile::from_bytes(data)?;
         let bounds = tile.bounds_rad;
@@ -203,6 +209,9 @@ impl TerrainEngine {
 
     /// Returns the interpolated ground elevation (metres) for the given
     /// latitude and longitude in **degrees** using bilinear interpolation.
+    ///
+    /// # Errors
+    /// Returns [`TerrainError`] when no loaded source covers the coordinate.
     #[inline]
     pub fn get_elevation(&self, lat_deg: f64, lon_deg: f64) -> Result<f64, TerrainError> {
         Ok(self
@@ -213,15 +222,28 @@ impl TerrainEngine {
 
     /// Returns the interpolated ground elevation (metres) for the given
     /// latitude and longitude in **radians** using bilinear interpolation.
+    ///
+    /// # Errors
+    /// Returns [`TerrainError`] when no loaded source covers the coordinate.
     #[inline]
     pub fn get_elevation_rad(&self, lat_rad: f64, lon_rad: f64) -> Result<f64, TerrainError> {
-        Ok(self.get_elevation_status(lat_rad, lon_rad)?.elevation_meters.unwrap_or(0.0))
+        Ok(self
+            .get_elevation_status(lat_rad, lon_rad)?
+            .elevation_meters
+            .unwrap_or(0.0))
     }
 
     /// Returns elevation quality without converting missing DTED samples to zero.
     /// Queries DTED cache first, followed by Web Mercator RGB elevation tiles, and GeoTIFF rasters.
+    ///
+    /// # Errors
+    /// Returns [`TerrainError::TileNotLoaded`] when no loaded source covers the coordinate.
     #[inline]
-    pub fn get_elevation_status(&self, lat_rad: f64, lon_rad: f64) -> Result<ElevationSample, TerrainError> {
+    pub fn get_elevation_status(
+        &self,
+        lat_rad: f64,
+        lon_rad: f64,
+    ) -> Result<ElevationSample, TerrainError> {
         let lat_deg = lat_rad.to_degrees();
         let lon_deg = lon_rad.to_degrees();
         let lat_floor = tile_key_floor(lat_deg);
@@ -239,6 +261,11 @@ impl TerrainEngine {
             let delta_lat = (lat_deg - lat_floor as f64).clamp(0.0, 1.0);
             let delta_lon = (lon_deg - lon_floor as f64).clamp(0.0, 1.0);
 
+            if tile.num_rows == 0 || tile.num_cols == 0 {
+                return Err(TerrainError::MalformedData(
+                    "DTED tile has empty dimensions".to_string(),
+                ));
+            }
             let row_f = delta_lat * (tile.num_rows - 1) as f64;
             let col_f = delta_lon * (tile.num_cols - 1) as f64;
 
@@ -252,24 +279,37 @@ impl TerrainEngine {
             let ty = (row_f - row0 as f64).clamp(0.0, 1.0);
 
             // A bilinear result is unknown if any contributing DTED sample is null.
-            let z00 = get_elevation_val(tile.get_cell_elevation(row0, col0));
-            let z01 = get_elevation_val(tile.get_cell_elevation(row0, col1));
-            let z10 = get_elevation_val(tile.get_cell_elevation(row1, col0));
-            let z11 = get_elevation_val(tile.get_cell_elevation(row1, col1));
+            let z00 = tile
+                .get_cell_elevation(row0, col0)
+                .and_then(get_elevation_val);
+            let z01 = tile
+                .get_cell_elevation(row0, col1)
+                .and_then(get_elevation_val);
+            let z10 = tile
+                .get_cell_elevation(row1, col0)
+                .and_then(get_elevation_val);
+            let z11 = tile
+                .get_cell_elevation(row1, col1)
+                .and_then(get_elevation_val);
             if [z00, z01, z10, z11].iter().any(Option::is_none) {
-                return Ok(ElevationSample { elevation_meters: None });
+                return Ok(ElevationSample {
+                    elevation_meters: None,
+                });
             }
-            let z00 = z00.unwrap();
-            let z01 = z01.unwrap();
-            let z10 = z10.unwrap();
-            let z11 = z11.unwrap();
+            let (Some(z00), Some(z01), Some(z10), Some(z11)) = (z00, z01, z10, z11) else {
+                return Ok(ElevationSample {
+                    elevation_meters: None,
+                });
+            };
 
             // Bilinear interpolation
             let z_left = z00 * (1.0 - ty) + z10 * ty;
             let z_right = z01 * (1.0 - ty) + z11 * ty;
             let z_final = z_left * (1.0 - tx) + z_right * tx;
 
-            return Ok(ElevationSample { elevation_meters: Some(z_final) });
+            return Ok(ElevationSample {
+                elevation_meters: Some(z_final),
+            });
         }
         drop(tiles);
 
@@ -278,13 +318,15 @@ impl TerrainEngine {
         let mut best_rgb_sample: Option<(u32, f64)> = None;
         for (k, tile) in rgb_tiles.iter() {
             if let Some(elev) = tile.get_elevation_rad(lat_rad, lon_rad) {
-                if best_rgb_sample.is_none() || k.z > best_rgb_sample.unwrap().0 {
+                if best_rgb_sample.is_none_or(|(best_zoom, _)| k.z > best_zoom) {
                     best_rgb_sample = Some((k.z, elev));
                 }
             }
         }
         if let Some((_, elev)) = best_rgb_sample {
-            return Ok(ElevationSample { elevation_meters: Some(elev) });
+            return Ok(ElevationSample {
+                elevation_meters: Some(elev),
+            });
         }
         drop(rgb_tiles);
 
@@ -292,19 +334,21 @@ impl TerrainEngine {
         let geotiffs = self.geotiff_tiles.borrow();
         for gt in geotiffs.iter() {
             if let Some(elev) = gt.get_elevation_rad(lat_rad, lon_rad) {
-                return Ok(ElevationSample { elevation_meters: Some(elev) });
+                return Ok(ElevationSample {
+                    elevation_meters: Some(elev),
+                });
             }
         }
         drop(geotiffs);
 
         // 4. Not found in any loaded terrain source
-        Err(TerrainError::TileNotLoaded(
-            lat_floor,
-            lon_floor,
-        ))
+        Err(TerrainError::TileNotLoaded(lat_floor, lon_floor))
     }
 
     /// Applies an explicit policy to unknown terrain samples.
+    ///
+    /// # Errors
+    /// Returns [`TerrainError`] when terrain is unavailable or the policy rejects an unknown sample.
     #[inline]
     pub fn get_elevation_with_policy(
         &self,
@@ -312,7 +356,9 @@ impl TerrainEngine {
         lon_rad: f64,
         policy: UnknownTerrainPolicy,
     ) -> Result<Option<f64>, TerrainError> {
-        let elevation = self.get_elevation_status(lat_rad, lon_rad)?.elevation_meters;
+        let elevation = self
+            .get_elevation_status(lat_rad, lon_rad)?
+            .elevation_meters;
         if elevation.is_none() && policy == UnknownTerrainPolicy::Reject {
             return Err(TerrainError::MalformedData(
                 "Unknown terrain elevation".to_string(),
@@ -323,6 +369,10 @@ impl TerrainEngine {
 
     /// Resolves an object's height against the sampled terrain. Vertical
     /// exaggeration is intentionally not applied here because it is visual-only.
+    ///
+    /// # Errors
+    /// Returns [`TerrainError`] when terrain is unavailable under the selected policy or an
+    /// input height is invalid.
     pub fn resolve_altitude(
         &self,
         lat_rad: f64,
@@ -344,11 +394,20 @@ impl TerrainEngine {
                 AltitudeUnknownPolicy::UseAbsolute | AltitudeUnknownPolicy::UseZero => None,
             },
         };
-        resolve_altitude(input_height, ground_height, mesh_height, mode, unknown_policy)
-            .map_err(|error| TerrainError::MalformedData(error.to_string()))
+        resolve_altitude(
+            input_height,
+            ground_height,
+            mesh_height,
+            mode,
+            unknown_policy,
+        )
+        .map_err(|error| TerrainError::MalformedData(error.to_string()))
     }
 
     /// Builds a profile while preserving unknown samples or rejecting them by policy.
+    ///
+    /// # Errors
+    /// Returns [`TerrainError`] when the route, step size, geodesic solving, or terrain sample is invalid.
     #[inline]
     pub fn get_vertical_profile_status(
         &self,
@@ -361,10 +420,15 @@ impl TerrainEngine {
                 "Route must contain at least 2 points".to_string(),
             ));
         }
+        if !step_meters.is_finite() || step_meters <= 0.0 {
+            return Err(TerrainError::MalformedData(
+                "Profile step must be finite and positive".to_string(),
+            ));
+        }
 
         let solver = VincentySolver;
         let ellipsoid = Ellipsoid::wgs84();
-        let mut profile = Vec::new();
+        let mut profile = Vec::with_capacity(route.len());
         let mut accumulated_distance = 0.0;
 
         for i in 0..route.len() - 1 {
@@ -374,12 +438,22 @@ impl TerrainEngine {
                 TerrainError::MalformedData(format!("Failed to compute route distance: {e}"))
             })?;
             let segment_dist = res.distance;
-            let num_steps = (segment_dist / step_meters).floor() as usize;
+            let steps_f = (segment_dist / step_meters).floor();
+            if steps_f > usize::MAX as f64 {
+                return Err(TerrainError::MalformedData(
+                    "Profile contains too many samples".to_string(),
+                ));
+            }
+            let num_steps = steps_f as usize;
             for s in 0..num_steps {
                 let d = s as f64 * step_meters;
-                let pt = solver.direct(p1, res.initial_bearing, d, &ellipsoid).map_err(|e| {
-                    TerrainError::MalformedData(format!("Failed to interpolate route point: {e}"))
-                })?;
+                let pt = solver
+                    .direct(p1, res.initial_bearing, d, &ellipsoid)
+                    .map_err(|e| {
+                        TerrainError::MalformedData(format!(
+                            "Failed to interpolate route point: {e}"
+                        ))
+                    })?;
                 profile.push(ProfilePointStatus {
                     distance_meters: accumulated_distance + d,
                     ground_elevation: self.get_elevation_with_policy(pt.lat, pt.lon, policy)?,
@@ -389,7 +463,9 @@ impl TerrainEngine {
             accumulated_distance += segment_dist;
         }
 
-        let last_pt = route.last().unwrap();
+        let last_pt = route.last().ok_or_else(|| {
+            TerrainError::MalformedData("Route must contain at least 2 points".to_string())
+        })?;
         profile.push(ProfilePointStatus {
             distance_meters: accumulated_distance,
             ground_elevation: self.get_elevation_with_policy(last_pt.lat, last_pt.lon, policy)?,
@@ -399,6 +475,9 @@ impl TerrainEngine {
     }
 
     /// Computes aircraft-to-ground clearance and applies an explicit unknown-terrain policy.
+    ///
+    /// # Errors
+    /// Returns [`TerrainError`] when an input is invalid or terrain is unavailable under the policy.
     #[inline]
     pub fn calculate_clearance(
         &self,
@@ -408,7 +487,8 @@ impl TerrainEngine {
         minimum_clearance_meters: f64,
         policy: UnknownTerrainPolicy,
     ) -> Result<ClearanceResult, TerrainError> {
-        if !aircraft_height_meters.is_finite() || !minimum_clearance_meters.is_finite()
+        if !aircraft_height_meters.is_finite()
+            || !minimum_clearance_meters.is_finite()
             || minimum_clearance_meters < 0.0
         {
             return Err(TerrainError::MalformedData(
@@ -438,6 +518,9 @@ impl TerrainEngine {
     /// For each segment, samples are taken every `step_meters`.  If a tile is
     /// missing for any intermediate point, the error is propagated instead of
     /// silently defaulting to sea level.
+    ///
+    /// # Errors
+    /// Returns [`TerrainError`] when the route, step size, geodesic solving, or elevation sample is invalid.
     #[inline]
     pub fn get_vertical_profile(
         &self,
@@ -449,10 +532,15 @@ impl TerrainEngine {
                 "Route must contain at least 2 points".to_string(),
             ));
         }
+        if !step_meters.is_finite() || step_meters <= 0.0 {
+            return Err(TerrainError::MalformedData(
+                "Profile step must be finite and positive".to_string(),
+            ));
+        }
 
         let solver = VincentySolver;
         let ellipsoid = Ellipsoid::wgs84();
-        let mut profile = Vec::new();
+        let mut profile = Vec::with_capacity(route.len());
         let mut accumulated_distance = 0.0;
 
         for i in 0..route.len() - 1 {
@@ -464,13 +552,23 @@ impl TerrainEngine {
             })?;
 
             let segment_dist = res.distance;
-            let num_steps = (segment_dist / step_meters).floor() as usize;
+            let steps_f = (segment_dist / step_meters).floor();
+            if steps_f > usize::MAX as f64 {
+                return Err(TerrainError::MalformedData(
+                    "Profile contains too many samples".to_string(),
+                ));
+            }
+            let num_steps = steps_f as usize;
 
             for s in 0..num_steps {
                 let d = s as f64 * step_meters;
-                let pt = solver.direct(p1, res.initial_bearing, d, &ellipsoid).map_err(|e| {
-                    TerrainError::MalformedData(format!("Failed to interpolate route point: {e}"))
-                })?;
+                let pt = solver
+                    .direct(p1, res.initial_bearing, d, &ellipsoid)
+                    .map_err(|e| {
+                        TerrainError::MalformedData(format!(
+                            "Failed to interpolate route point: {e}"
+                        ))
+                    })?;
 
                 let elev = self.get_elevation_rad(pt.lat, pt.lon)?;
                 profile.push(ProfilePoint {
@@ -484,7 +582,9 @@ impl TerrainEngine {
         }
 
         // Add the exact final route point
-        let last_pt = route.last().unwrap();
+        let last_pt = route.last().ok_or_else(|| {
+            TerrainError::MalformedData("Route must contain at least 2 points".to_string())
+        })?;
         let elev = self.get_elevation_rad(last_pt.lat, last_pt.lon)?;
         profile.push(ProfilePoint {
             distance_meters: accumulated_distance,
