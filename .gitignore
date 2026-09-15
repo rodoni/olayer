@@ -28,3 +28,9 @@ Thumbs.db
 *.sln
 *.sw?
 .lock-wscript
+
+# Kilo/KiloCode local configuration and session state
+/kilo.json
+/kilo.jsonc
+/.kilocode/
+/.kilo/agent-manager.json
