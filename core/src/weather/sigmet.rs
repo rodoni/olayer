@@ -1,7 +1,7 @@
-use serde::{Deserialize, Serialize};
 use crate::geodesy::coords::LatLon;
 use crate::geodesy::spatial::GeodesicPolygon;
 use crate::weather::errors::WeatherError;
+use serde::{Deserialize, Serialize};
 
 /// Type of meteorological warning / hazard.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -99,7 +99,9 @@ pub struct SigmetDataset {
 
 impl SigmetDataset {
     pub fn new() -> Self {
-        Self { features: Vec::new() }
+        Self {
+            features: Vec::new(),
+        }
     }
 
     pub fn add_feature(&mut self, feature: SigmetFeature) {
@@ -115,7 +117,12 @@ impl SigmetDataset {
     }
 
     /// Finds all hazard features containing a 2D or 3D point.
-    pub fn find_hazards_at_point(&self, lat_rad: f64, lon_rad: f64, alt_m: Option<f64>) -> Vec<&SigmetFeature> {
+    pub fn find_hazards_at_point(
+        &self,
+        lat_rad: f64,
+        lon_rad: f64,
+        alt_m: Option<f64>,
+    ) -> Vec<&SigmetFeature> {
         let pt = LatLon::new(lat_rad, lon_rad, alt_m.unwrap_or(0.0));
         self.features
             .iter()
@@ -135,9 +142,12 @@ impl SigmetDataset {
             .map_err(|e| WeatherError::ParseError(format!("Invalid GeoJSON: {e}")))?;
 
         let mut dataset = Self::new();
-        let features = parsed.get("features")
+        let features = parsed
+            .get("features")
             .and_then(|f| f.as_array())
-            .ok_or_else(|| WeatherError::ParseError("Missing 'features' array in GeoJSON".to_string()))?;
+            .ok_or_else(|| {
+                WeatherError::ParseError("Missing 'features' array in GeoJSON".to_string())
+            })?;
 
         for feat in features {
             let props = feat.get("properties").and_then(|p| p.as_object());
@@ -149,39 +159,46 @@ impl SigmetDataset {
                     continue;
                 }
 
-                let id = props.get("id")
+                let id = props
+                    .get("id")
                     .or_else(|| props.get("uid"))
                     .or_else(|| props.get("sigmet_id"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("SIGMET")
                     .to_string();
 
-                let name = props.get("name")
+                let name = props
+                    .get("name")
                     .or_else(|| props.get("hazard"))
                     .and_then(|v| v.as_str())
                     .unwrap_or(&id)
                     .to_string();
 
-                let hazard_str = props.get("hazard_type")
+                let hazard_str = props
+                    .get("hazard_type")
                     .or_else(|| props.get("type"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("OTHER");
                 let hazard_type = SigmetHazardType::from_str_name(hazard_str);
 
-                let severity_str = props.get("severity")
+                let severity_str = props
+                    .get("severity")
                     .and_then(|v| v.as_str())
                     .unwrap_or("MODERATE");
                 let severity = SigmetSeverity::from_str_name(severity_str);
 
-                let floor_m = props.get("lower_limit_m")
+                let floor_m = props
+                    .get("lower_limit_m")
                     .or_else(|| props.get("floor_m"))
                     .and_then(|v| v.as_f64());
 
-                let ceiling_m = props.get("upper_limit_m")
+                let ceiling_m = props
+                    .get("upper_limit_m")
                     .or_else(|| props.get("ceiling_m"))
                     .and_then(|v| v.as_f64());
 
-                let coords_arr = geom.get("coordinates")
+                let coords_arr = geom
+                    .get("coordinates")
                     .and_then(|c| c.as_array())
                     .and_then(|rings| rings.first())
                     .and_then(|outer| outer.as_array());
@@ -224,7 +241,8 @@ impl SigmetDataset {
         let mut features_json = Vec::new();
 
         for feat in &self.features {
-            let coords: Vec<Vec<f64>> = feat.polygon
+            let coords: Vec<Vec<f64>> = feat
+                .polygon
                 .iter()
                 .map(|p| vec![p.lon.to_degrees(), p.lat.to_degrees(), p.height])
                 .collect();

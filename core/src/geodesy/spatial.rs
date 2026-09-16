@@ -24,25 +24,33 @@ pub struct RouteDeviation {
 /// # Sign Convention
 /// * **Cross-Track Error (XTK):** Positive = Right of track, Negative = Left of track.
 /// * **Along-Track Distance (ATD):** Positive = Ahead of start point, Negative = Behind start point.
-pub fn compute_route_deviation(segment_start: &LatLon, segment_end: &LatLon, pos: &LatLon) -> RouteDeviation {
+pub fn compute_route_deviation(
+    segment_start: &LatLon,
+    segment_end: &LatLon,
+    pos: &LatLon,
+) -> RouteDeviation {
     let ell = Ellipsoid::wgs84();
     let solver = VincentySolver;
     let earth_radius = ell.a;
 
     // Segment bearing theta12 and distance
-    let seg_res = solver.inverse(segment_start, segment_end, &ell).unwrap_or_else(|_| {
-        let (p1, p2) = (to_unit_vector(segment_start), to_unit_vector(segment_end));
-        let dist = angle_between(&p1, &p2) * earth_radius;
-        crate::geodesy::solvers::GeodeticResult::new(dist, 0.0, 0.0)
-    });
+    let seg_res = solver
+        .inverse(segment_start, segment_end, &ell)
+        .unwrap_or_else(|_| {
+            let (p1, p2) = (to_unit_vector(segment_start), to_unit_vector(segment_end));
+            let dist = angle_between(&p1, &p2) * earth_radius;
+            crate::geodesy::solvers::GeodeticResult::new(dist, 0.0, 0.0)
+        });
     let theta12 = seg_res.initial_bearing;
 
     // Bearing and distance from start to position pos
-    let pos_res = solver.inverse(segment_start, pos, &ell).unwrap_or_else(|_| {
-        let (p1, p3) = (to_unit_vector(segment_start), to_unit_vector(pos));
-        let dist = angle_between(&p1, &p3) * earth_radius;
-        crate::geodesy::solvers::GeodeticResult::new(dist, 0.0, 0.0)
-    });
+    let pos_res = solver
+        .inverse(segment_start, pos, &ell)
+        .unwrap_or_else(|_| {
+            let (p1, p3) = (to_unit_vector(segment_start), to_unit_vector(pos));
+            let dist = angle_between(&p1, &p3) * earth_radius;
+            crate::geodesy::solvers::GeodeticResult::new(dist, 0.0, 0.0)
+        });
     let d13 = pos_res.distance;
     let theta13 = pos_res.initial_bearing;
 
@@ -69,11 +77,15 @@ pub fn compute_route_deviation(segment_start: &LatLon, segment_end: &LatLon, pos
 
     // Projected nearest point on the route segment
     let nearest_point = if atd_meters >= 0.0 {
-        solver.direct(segment_start, theta12, atd_meters, &ell).unwrap_or(*segment_start)
+        solver
+            .direct(segment_start, theta12, atd_meters, &ell)
+            .unwrap_or(*segment_start)
     } else {
         // Project backwards along reciprocal bearing
         let back_bearing = normalize_bearing(theta12 + PI);
-        solver.direct(segment_start, back_bearing, -atd_meters, &ell).unwrap_or(*segment_start)
+        solver
+            .direct(segment_start, back_bearing, -atd_meters, &ell)
+            .unwrap_or(*segment_start)
     };
 
     RouteDeviation {
@@ -160,8 +172,16 @@ impl GeodesicPolygon {
             let dot1 = dot_product(&v1, &p);
             let dot2 = dot_product(&v2, &p);
 
-            let t1 = [v1[0] - dot1 * p[0], v1[1] - dot1 * p[1], v1[2] - dot1 * p[2]];
-            let t2 = [v2[0] - dot2 * p[0], v2[1] - dot2 * p[1], v2[2] - dot2 * p[2]];
+            let t1 = [
+                v1[0] - dot1 * p[0],
+                v1[1] - dot1 * p[1],
+                v1[2] - dot1 * p[2],
+            ];
+            let t2 = [
+                v2[0] - dot2 * p[0],
+                v2[1] - dot2 * p[1],
+                v2[2] - dot2 * p[2],
+            ];
 
             let len1 = norm(&t1);
             let len2 = norm(&t2);
@@ -195,7 +215,8 @@ impl GeodesicPolygon {
         if n == 1 {
             let solver = VincentySolver;
             let ell = Ellipsoid::wgs84();
-            return solver.inverse(point, &self.vertices[0], &ell)
+            return solver
+                .inverse(point, &self.vertices[0], &ell)
                 .map(|r| r.distance)
                 .unwrap_or(0.0);
         }
@@ -209,16 +230,25 @@ impl GeodesicPolygon {
             let v2 = &self.vertices[(i + 1) % n];
 
             let dev = compute_route_deviation(v1, v2, point);
-            let seg_len = solver.inverse(v1, v2, &ell)
+            let seg_len = solver
+                .inverse(v1, v2, &ell)
                 .map(|r| r.distance)
                 .unwrap_or(0.0);
 
-            let edge_dist = if dev.along_track_distance_meters >= 0.0 && dev.along_track_distance_meters <= seg_len {
+            let edge_dist = if dev.along_track_distance_meters >= 0.0
+                && dev.along_track_distance_meters <= seg_len
+            {
                 dev.cross_track_error_meters.abs()
             } else if dev.along_track_distance_meters < 0.0 {
-                solver.inverse(point, v1, &ell).map(|r| r.distance).unwrap_or(0.0)
+                solver
+                    .inverse(point, v1, &ell)
+                    .map(|r| r.distance)
+                    .unwrap_or(0.0)
             } else {
-                solver.inverse(point, v2, &ell).map(|r| r.distance).unwrap_or(0.0)
+                solver
+                    .inverse(point, v2, &ell)
+                    .map(|r| r.distance)
+                    .unwrap_or(0.0)
             };
 
             if edge_dist < min_distance {
@@ -257,12 +287,12 @@ impl GeodesicPolygon {
             let curr = &self.vertices[i];
             let next = &self.vertices[next_idx];
 
-            let leg_in_res = solver.inverse(&self.vertices[prev_idx], curr, &ell).unwrap_or_else(|_| {
-                crate::geodesy::solvers::GeodeticResult::new(0.0, 0.0, 0.0)
-            });
-            let leg_out_res = solver.inverse(curr, next, &ell).unwrap_or_else(|_| {
-                crate::geodesy::solvers::GeodeticResult::new(0.0, 0.0, 0.0)
-            });
+            let leg_in_res = solver
+                .inverse(&self.vertices[prev_idx], curr, &ell)
+                .unwrap_or_else(|_| crate::geodesy::solvers::GeodeticResult::new(0.0, 0.0, 0.0));
+            let leg_out_res = solver
+                .inverse(curr, next, &ell)
+                .unwrap_or_else(|_| crate::geodesy::solvers::GeodeticResult::new(0.0, 0.0, 0.0));
 
             let normal_in = normalize_bearing(leg_in_res.final_bearing + offset_angle);
             let normal_out = normalize_bearing(leg_out_res.initial_bearing + offset_angle);

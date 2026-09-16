@@ -23,5 +23,9 @@ fn bench_generate_grid_vertices_3d(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, bench_generate_grid_vertices_2d, bench_generate_grid_vertices_3d);
+criterion_group!(
+    benches,
+    bench_generate_grid_vertices_2d,
+    bench_generate_grid_vertices_3d
+);
 criterion_main!(benches);

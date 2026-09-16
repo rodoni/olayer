@@ -1,8 +1,10 @@
-use std::collections::HashMap;
-use std::sync::Arc;
 use crate::geodesy::{Ellipsoid, GeodeticSolver, HaversineSolver, VincentySolver};
 use crate::interpolator::errors::InterpolatorError;
-use crate::interpolator::state::{InterpolatedTarget, InterpolationBatch, PredictionQuality, SkippedTarget, TargetState};
+use crate::interpolator::state::{
+    InterpolatedTarget, InterpolationBatch, PredictionQuality, SkippedTarget, TargetState,
+};
+use std::collections::HashMap;
+use std::sync::Arc;
 
 pub struct InterpolationEngine {
     targets: HashMap<Arc<str>, TargetState>,
@@ -70,13 +72,19 @@ impl InterpolationEngine {
     /// Returns `Err` only if a geodetic calculation fails unexpectedly (e.g. numeric
     /// instability in the Vincenty solver that also fails in the Haversine fallback).
     #[inline]
-    pub fn interpolate_all(&self, current_time: f64) -> Result<Vec<InterpolatedTarget>, InterpolatorError> {
+    pub fn interpolate_all(
+        &self,
+        current_time: f64,
+    ) -> Result<Vec<InterpolatedTarget>, InterpolatorError> {
         Ok(self.interpolate_all_with_status(current_time)?.targets)
     }
 
     /// Interpolates all targets and reports targets excluded from the batch.
     #[inline]
-    pub fn interpolate_all_with_status(&self, current_time: f64) -> Result<InterpolationBatch, InterpolatorError> {
+    pub fn interpolate_all_with_status(
+        &self,
+        current_time: f64,
+    ) -> Result<InterpolationBatch, InterpolatorError> {
         let mut results = Vec::with_capacity(self.targets.len());
         let mut skipped = Vec::new();
 
@@ -115,11 +123,19 @@ impl InterpolationEngine {
             let dist = state.speed_mps * dt;
             let next_pos = if dist > 0.0 {
                 // Try VincentySolver first, fallback to HaversineSolver if it fails
-                match self.vincenty.direct(&state.last_position, state.track_heading_rad, dist, &self.ellipsoid) {
+                match self.vincenty.direct(
+                    &state.last_position,
+                    state.track_heading_rad,
+                    dist,
+                    &self.ellipsoid,
+                ) {
                     Ok(pos) => pos,
-                    Err(_) => {
-                        self.haversine.direct(&state.last_position, state.track_heading_rad, dist, &self.ellipsoid)?
-                    }
+                    Err(_) => self.haversine.direct(
+                        &state.last_position,
+                        state.track_heading_rad,
+                        dist,
+                        &self.ellipsoid,
+                    )?,
                 }
             } else {
                 state.last_position
@@ -137,7 +153,10 @@ impl InterpolationEngine {
             });
         }
 
-        Ok(InterpolationBatch { targets: results, skipped })
+        Ok(InterpolationBatch {
+            targets: results,
+            skipped,
+        })
     }
 }
 

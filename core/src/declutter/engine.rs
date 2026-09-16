@@ -32,14 +32,20 @@ impl DeclutterEngine {
         let diag = leader_length * std::f32::consts::FRAC_1_SQRT_2;
 
         let (rect_x, rect_y, end_x, end_y) = match octant {
-            OctantDirection::North => (tx - w * 0.5, ty - leader_length - h, tx, ty - leader_length),
+            OctantDirection::North => {
+                (tx - w * 0.5, ty - leader_length - h, tx, ty - leader_length)
+            }
             OctantDirection::NorthEast => (tx + diag, ty - diag - h * 0.5, tx + diag, ty - diag),
             OctantDirection::East => (tx + leader_length, ty - h * 0.5, tx + leader_length, ty),
             OctantDirection::SouthEast => (tx + diag, ty + diag - h * 0.5, tx + diag, ty + diag),
             OctantDirection::South => (tx - w * 0.5, ty + leader_length, tx, ty + leader_length),
-            OctantDirection::SouthWest => (tx - diag - w, ty + diag - h * 0.5, tx - diag, ty + diag),
+            OctantDirection::SouthWest => {
+                (tx - diag - w, ty + diag - h * 0.5, tx - diag, ty + diag)
+            }
             OctantDirection::West => (tx - leader_length - w, ty - h * 0.5, tx - leader_length, ty),
-            OctantDirection::NorthWest => (tx - diag - w, ty - diag - h * 0.5, tx - diag, ty - diag),
+            OctantDirection::NorthWest => {
+                (tx - diag - w, ty - diag - h * 0.5, tx - diag, ty - diag)
+            }
         };
 
         let rect = Rect2D::new(rect_x, rect_y, w, h);
@@ -94,11 +100,8 @@ impl DeclutterEngine {
             let mut best_end = [0.0, 0.0];
 
             for octant in OctantDirection::all() {
-                let (rect, start, end) = Self::compute_candidate_geometry(
-                    target,
-                    octant,
-                    self.config.leader_length_px,
-                );
+                let (rect, start, end) =
+                    Self::compute_candidate_geometry(target, octant, self.config.leader_length_px);
                 let expanded_rect = rect.expanded(self.config.safety_margin_px);
 
                 // 1. Preference cost
@@ -119,7 +122,12 @@ impl DeclutterEngine {
                     }
                     if let Some(ref other_p) = placements[other_idx] {
                         overlap_area += expanded_rect.intersection_area(&other_p.rect);
-                        if line_segments_intersect(start, end, other_p.leader_start, other_p.leader_end) {
+                        if line_segments_intersect(
+                            start,
+                            end,
+                            other_p.leader_start,
+                            other_p.leader_end,
+                        ) {
                             leader_crossings += 1;
                         }
                     }
@@ -196,7 +204,12 @@ impl DeclutterEngine {
                         }
                         if let Some(ref other_p) = placements[other_idx] {
                             overlap_area += expanded_rect.intersection_area(&other_p.rect);
-                            if line_segments_intersect(start, end, other_p.leader_start, other_p.leader_end) {
+                            if line_segments_intersect(
+                                start,
+                                end,
+                                other_p.leader_start,
+                                other_p.leader_end,
+                            ) {
                                 leader_crossings += 1;
                             }
                         }

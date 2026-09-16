@@ -109,7 +109,10 @@ impl NativeLayerManager {
     ///
     /// Returns `Err` if the layer is not found or the target index is out of bounds.
     pub fn reorder_layer(&mut self, id: &str, new_index: usize) -> Result<(), String> {
-        let current_idx = *self.index.get(id).ok_or_else(|| format!("Layer '{}' not found.", id))?;
+        let current_idx = *self
+            .index
+            .get(id)
+            .ok_or_else(|| format!("Layer '{}' not found.", id))?;
         if new_index >= self.layers.len() {
             return Err(format!(
                 "Invalid target index: {} (max {})",
@@ -137,13 +140,21 @@ impl NativeLayerManager {
     /// Returns all visible static layers.
     #[inline]
     pub fn visible_static_layers(&self) -> Vec<&dyn Layer> {
-        self.layers.iter().filter(|l| l.is_visible() && l.is_static()).map(|b| b.as_ref()).collect()
+        self.layers
+            .iter()
+            .filter(|l| l.is_visible() && l.is_static())
+            .map(|b| b.as_ref())
+            .collect()
     }
 
     /// Returns all visible dynamic layers.
     #[inline]
     pub fn visible_dynamic_layers(&self) -> Vec<&dyn Layer> {
-        self.layers.iter().filter(|l| l.is_visible() && !l.is_static()).map(|b| b.as_ref()).collect()
+        self.layers
+            .iter()
+            .filter(|l| l.is_visible() && !l.is_static())
+            .map(|b| b.as_ref())
+            .collect()
     }
 
     /// Toggles visibility for a specific layer.
@@ -151,7 +162,11 @@ impl NativeLayerManager {
     /// Returns `Err` if the layer is not found.
     #[inline]
     pub fn set_layer_visibility(&mut self, id: &str, visible: bool) -> Result<(), String> {
-        let idx = self.index.get(id).copied().ok_or_else(|| format!("Layer '{}' not found.", id))?;
+        let idx = self
+            .index
+            .get(id)
+            .copied()
+            .ok_or_else(|| format!("Layer '{}' not found.", id))?;
         self.layers[idx].set_visible(visible);
         Ok(())
     }

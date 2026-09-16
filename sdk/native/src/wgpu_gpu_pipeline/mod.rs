@@ -1,5 +1,5 @@
-use olayer_core::geodesy::LatLon;
 use crate::native_controller::NativeController;
+use olayer_core::geodesy::LatLon;
 use wgpu::util::DeviceExt;
 
 #[repr(C)]
@@ -204,10 +204,11 @@ impl WgpuGpuPipeline {
         // ---------------------------------------------------------------------
         // RASTER TILE RENDERING SETUP
         // ---------------------------------------------------------------------
-        
+
         let raster_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Raster Tile Shader"),
-            source: wgpu::ShaderSource::Wgsl("
+            source: wgpu::ShaderSource::Wgsl(
+                "
 struct VertexInput {
     @location(0) position: vec3<f32>,
     @location(1) tex_coords: vec2<f32>,
@@ -238,7 +239,9 @@ var s_diffuse: sampler;
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     return textureSample(t_diffuse, s_diffuse, in.tex_coords);
 }
-            ".into()),
+            "
+                .into(),
+            ),
         });
 
         let raster_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -251,33 +254,35 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             ..Default::default()
         });
 
-        let raster_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("Raster Bind Group Layout"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        multisampled: false,
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+        let raster_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Raster Bind Group Layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-            ],
-        });
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            });
 
-        let raster_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("Raster Pipeline Layout"),
-            bind_group_layouts: &[&bind_group_layout, &raster_bind_group_layout],
-            push_constant_ranges: &[],
-        });
+        let raster_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Raster Pipeline Layout"),
+                bind_group_layouts: &[&bind_group_layout, &raster_bind_group_layout],
+                push_constant_ranges: &[],
+            });
 
         let raster_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Raster Render Pipeline"),
@@ -405,11 +410,12 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 ".into()),
         });
 
-        let terrain_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("Terrain Pipeline Layout"),
-            bind_group_layouts: &[&bind_group_layout],
-            push_constant_ranges: &[],
-        });
+        let terrain_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Terrain Pipeline Layout"),
+                bind_group_layouts: &[&bind_group_layout],
+                push_constant_ranges: &[],
+            });
 
         let terrain_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Terrain Mesh Pipeline"),
@@ -421,10 +427,26 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                     array_stride: std::mem::size_of::<TerrainVertex>() as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
                     attributes: &[
-                        wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x3, offset: 0, shader_location: 0 },
-                        wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x3, offset: 12, shader_location: 1 },
-                        wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32, offset: 24, shader_location: 2 },
-                        wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32, offset: 28, shader_location: 3 },
+                        wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32x3,
+                            offset: 0,
+                            shader_location: 0,
+                        },
+                        wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32x3,
+                            offset: 12,
+                            shader_location: 1,
+                        },
+                        wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32,
+                            offset: 24,
+                            shader_location: 2,
+                        },
+                        wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32,
+                            offset: 28,
+                            shader_location: 3,
+                        },
                     ],
                 }],
             },
@@ -483,10 +505,20 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                 for i in 0..density {
                     let lat0 = -90.0 + (180.0 / density as f64) * i as f64;
                     let lat1 = -90.0 + (180.0 / density as f64) * (i + 1) as f64;
-                    let p0 = olayer_core::geodesy::lla_to_ecef(&LatLon::new(lat0.to_radians(), lon_rad, 0.0), &olayer_core::geodesy::ellipsoid::Ellipsoid::wgs84());
-                    let p1 = olayer_core::geodesy::lla_to_ecef(&LatLon::new(lat1.to_radians(), lon_rad, 0.0), &olayer_core::geodesy::ellipsoid::Ellipsoid::wgs84());
-                    coords.push(p0.x as f32); coords.push(p0.y as f32); coords.push(p0.z as f32);
-                    coords.push(p1.x as f32); coords.push(p1.y as f32); coords.push(p1.z as f32);
+                    let p0 = olayer_core::geodesy::lla_to_ecef(
+                        &LatLon::new(lat0.to_radians(), lon_rad, 0.0),
+                        &olayer_core::geodesy::ellipsoid::Ellipsoid::wgs84(),
+                    );
+                    let p1 = olayer_core::geodesy::lla_to_ecef(
+                        &LatLon::new(lat1.to_radians(), lon_rad, 0.0),
+                        &olayer_core::geodesy::ellipsoid::Ellipsoid::wgs84(),
+                    );
+                    coords.push(p0.x as f32);
+                    coords.push(p0.y as f32);
+                    coords.push(p0.z as f32);
+                    coords.push(p1.x as f32);
+                    coords.push(p1.y as f32);
+                    coords.push(p1.z as f32);
                 }
             }
             for lat in (-80..=80).step_by(step) {
@@ -494,10 +526,20 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                 for i in 0..density {
                     let lon0 = -180.0 + (360.0 / density as f64) * i as f64;
                     let lon1 = -180.0 + (360.0 / density as f64) * (i + 1) as f64;
-                    let p0 = olayer_core::geodesy::lla_to_ecef(&LatLon::new(lat_rad, lon0.to_radians(), 0.0), &olayer_core::geodesy::ellipsoid::Ellipsoid::wgs84());
-                    let p1 = olayer_core::geodesy::lla_to_ecef(&LatLon::new(lat_rad, lon1.to_radians(), 0.0), &olayer_core::geodesy::ellipsoid::Ellipsoid::wgs84());
-                    coords.push(p0.x as f32); coords.push(p0.y as f32); coords.push(p0.z as f32);
-                    coords.push(p1.x as f32); coords.push(p1.y as f32); coords.push(p1.z as f32);
+                    let p0 = olayer_core::geodesy::lla_to_ecef(
+                        &LatLon::new(lat_rad, lon0.to_radians(), 0.0),
+                        &olayer_core::geodesy::ellipsoid::Ellipsoid::wgs84(),
+                    );
+                    let p1 = olayer_core::geodesy::lla_to_ecef(
+                        &LatLon::new(lat_rad, lon1.to_radians(), 0.0),
+                        &olayer_core::geodesy::ellipsoid::Ellipsoid::wgs84(),
+                    );
+                    coords.push(p0.x as f32);
+                    coords.push(p0.y as f32);
+                    coords.push(p0.z as f32);
+                    coords.push(p1.x as f32);
+                    coords.push(p1.y as f32);
+                    coords.push(p1.z as f32);
                 }
             }
         } else {
@@ -508,9 +550,24 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                 for i in 0..density {
                     let lat0 = -80.0 + (160.0 / density as f64) * i as f64;
                     let lat1 = -80.0 + (160.0 / density as f64) * (i + 1) as f64;
-                    if let (Ok(p0), Ok(p1)) = (controller.projection.project(&LatLon::new(lat0.to_radians(), lon_rad, 0.0)), controller.projection.project(&LatLon::new(lat1.to_radians(), lon_rad, 0.0))) {
-                        coords.push(p0.0 as f32); coords.push(p0.1 as f32); coords.push(0.0);
-                        coords.push(p1.0 as f32); coords.push(p1.1 as f32); coords.push(0.0);
+                    if let (Ok(p0), Ok(p1)) = (
+                        controller.projection.project(&LatLon::new(
+                            lat0.to_radians(),
+                            lon_rad,
+                            0.0,
+                        )),
+                        controller.projection.project(&LatLon::new(
+                            lat1.to_radians(),
+                            lon_rad,
+                            0.0,
+                        )),
+                    ) {
+                        coords.push(p0.0 as f32);
+                        coords.push(p0.1 as f32);
+                        coords.push(0.0);
+                        coords.push(p1.0 as f32);
+                        coords.push(p1.1 as f32);
+                        coords.push(0.0);
                     }
                 }
             }
@@ -519,9 +576,24 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                 for i in 0..density {
                     let lon0 = -180.0 + (360.0 / density as f64) * i as f64;
                     let lon1 = -180.0 + (360.0 / density as f64) * (i + 1) as f64;
-                    if let (Ok(p0), Ok(p1)) = (controller.projection.project(&LatLon::new(lat_rad, lon0.to_radians(), 0.0)), controller.projection.project(&LatLon::new(lat_rad, lon1.to_radians(), 0.0))) {
-                        coords.push(p0.0 as f32); coords.push(p0.1 as f32); coords.push(0.0);
-                        coords.push(p1.0 as f32); coords.push(p1.1 as f32); coords.push(0.0);
+                    if let (Ok(p0), Ok(p1)) = (
+                        controller.projection.project(&LatLon::new(
+                            lat_rad,
+                            lon0.to_radians(),
+                            0.0,
+                        )),
+                        controller.projection.project(&LatLon::new(
+                            lat_rad,
+                            lon1.to_radians(),
+                            0.0,
+                        )),
+                    ) {
+                        coords.push(p0.0 as f32);
+                        coords.push(p0.1 as f32);
+                        coords.push(0.0);
+                        coords.push(p1.0 as f32);
+                        coords.push(p1.1 as f32);
+                        coords.push(0.0);
                     }
                 }
             }
@@ -580,10 +652,15 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     }
 
     #[allow(clippy::needless_range_loop)]
-    pub fn generate_terrain_vertices(controller: &NativeController, exaggeration: f32) -> Vec<TerrainVertex> {
+    pub fn generate_terrain_vertices(
+        controller: &NativeController,
+        exaggeration: f32,
+    ) -> Vec<TerrainVertex> {
         let grid = 32usize;
         let span_meters = controller.camera.viewport_base_meters / controller.camera.zoom;
-        let lat_span = (span_meters / 111_000.0 / 2.0).to_radians().min(60.0f64.to_radians());
+        let lat_span = (span_meters / 111_000.0 / 2.0)
+            .to_radians()
+            .min(60.0f64.to_radians());
         let lon_span = lat_span / controller.camera.center.lat.cos().abs().max(0.15);
         let mut grid_vertices = Vec::with_capacity((grid + 1) * (grid + 1));
         let mut elevations = vec![vec![0.0f64; grid + 1]; grid + 1];
@@ -594,7 +671,10 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             for column in 0..=grid {
                 let u = column as f64 / grid as f64;
                 let lon = controller.camera.center.lon + (u - 0.5) * lon_span;
-                let elevation = controller.terrain.get_elevation(lat.to_degrees(), lon.to_degrees()).unwrap_or(0.0);
+                let elevation = controller
+                    .terrain
+                    .get_elevation(lat.to_degrees(), lon.to_degrees())
+                    .unwrap_or(0.0);
                 elevations[row][column] = elevation;
                 let height = elevation * exaggeration as f64;
                 let position = if controller.view_mode == "3D" {
@@ -604,7 +684,10 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                     );
                     [ecef.x as f32, ecef.y as f32, ecef.z as f32]
                 } else {
-                    let projected = controller.projection.project(&LatLon::new(lat, lon, 0.0)).unwrap_or((0.0, 0.0));
+                    let projected = controller
+                        .projection
+                        .project(&LatLon::new(lat, lon, 0.0))
+                        .unwrap_or((0.0, 0.0));
                     [projected.0 as f32, projected.1 as f32, height as f32]
                 };
                 grid_vertices.push(TerrainVertex {
@@ -623,8 +706,18 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                 let right = elevations[row][(column + 1).min(grid)];
                 let north = elevations[row.saturating_sub(1)][column];
                 let south = elevations[(row + 1).min(grid)][column];
-                let dx = (right - left) / if column == 0 || column == grid { spacing } else { 2.0 * spacing };
-                let dy = (south - north) / if row == 0 || row == grid { spacing } else { 2.0 * spacing };
+                let dx = (right - left)
+                    / if column == 0 || column == grid {
+                        spacing
+                    } else {
+                        2.0 * spacing
+                    };
+                let dy = (south - north)
+                    / if row == 0 || row == grid {
+                        spacing
+                    } else {
+                        2.0 * spacing
+                    };
                 let slope = dx.hypot(dy).atan().to_degrees();
                 let nx = -dx;
                 let ny = -dy;
@@ -648,15 +741,25 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                 let bottom_left = top_left + grid + 1;
                 let bottom_right = bottom_left + 1;
                 vertices.extend_from_slice(&[
-                    grid_vertices[top_left], grid_vertices[top_right], grid_vertices[bottom_left],
-                    grid_vertices[top_right], grid_vertices[bottom_right], grid_vertices[bottom_left],
+                    grid_vertices[top_left],
+                    grid_vertices[top_right],
+                    grid_vertices[bottom_left],
+                    grid_vertices[top_right],
+                    grid_vertices[bottom_right],
+                    grid_vertices[bottom_left],
                 ]);
             }
         }
         vertices
     }
 
-    pub fn rebuild_terrain_buffers(&mut self, controller: &NativeController, device: &wgpu::Device, queue: &wgpu::Queue, exaggeration: f32) {
+    pub fn rebuild_terrain_buffers(
+        &mut self,
+        controller: &NativeController,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        exaggeration: f32,
+    ) {
         let key = Self::terrain_cache_key(controller, exaggeration);
         if self.terrain_cache_key.as_deref() == Some(key.as_str()) {
             return;
@@ -691,16 +794,20 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         let lx = (az.sin() * alt.cos()) as f32;
         let ly = (az.cos() * alt.cos()) as f32;
         let lz = alt.sin() as f32;
-        queue.write_buffer(&self.terrain_style_buffer, 0, bytemuck::cast_slice(&[
-            mode as f32,
-            min_elevation,
-            max_elevation,
-            aircraft_altitude,
-            lx,
-            ly,
-            lz,
-            contour_interval,
-        ]));
+        queue.write_buffer(
+            &self.terrain_style_buffer,
+            0,
+            bytemuck::cast_slice(&[
+                mode as f32,
+                min_elevation,
+                max_elevation,
+                aircraft_altitude,
+                lx,
+                ly,
+                lz,
+                contour_interval,
+            ]),
+        );
     }
 
     pub fn render_terrain<'a>(&'a self, render_pass: &mut wgpu::RenderPass<'a>) {
@@ -772,18 +879,22 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
         // 4. Create Buffers
         let vertices = get_tile_vertices(upload.x, upload.y, upload.z, upload.controller);
-        let vertex_buffer = upload.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some(&format!("Tile Vertex Buffer {}", upload.key)),
-            contents: bytemuck::cast_slice(&vertices),
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-        });
+        let vertex_buffer = upload
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(&format!("Tile Vertex Buffer {}", upload.key)),
+                contents: bytemuck::cast_slice(&vertices),
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            });
 
         let indices: [u16; 6] = [0, 1, 2, 0, 2, 3];
-        let index_buffer = upload.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some(&format!("Tile Index Buffer {}", upload.key)),
-            contents: bytemuck::cast_slice(&indices),
-            usage: wgpu::BufferUsages::INDEX,
-        });
+        let index_buffer = upload
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(&format!("Tile Index Buffer {}", upload.key)),
+                contents: bytemuck::cast_slice(&indices),
+                usage: wgpu::BufferUsages::INDEX,
+            });
 
         self.loaded_gpu_tiles.insert(
             upload.key.to_string(),
@@ -801,7 +912,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     }
 
     /// Rebuilds the quad vertex buffers for all uploaded tiles (e.g. when projection changes).
-    pub fn rebuild_raster_tile_buffers(&mut self, device: &wgpu::Device, controller: &NativeController) {
+    pub fn rebuild_raster_tile_buffers(
+        &mut self,
+        device: &wgpu::Device,
+        controller: &NativeController,
+    ) {
         for tile in self.loaded_gpu_tiles.values_mut() {
             let vertices = get_tile_vertices(tile.x, tile.y, tile.z, controller);
             let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -834,7 +949,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             if visible_keys.contains(&tile.key) {
                 render_pass.set_bind_group(1, &tile.bind_group, &[]); // Texture
                 render_pass.set_vertex_buffer(0, tile.vertex_buffer.slice(..));
-                render_pass.set_index_buffer(tile.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                render_pass
+                    .set_index_buffer(tile.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
                 render_pass.draw_indexed(0..6, 0, 0..1);
             }
         }
@@ -849,10 +965,14 @@ fn tile_bounds_rad(x: u32, y: u32, z: u32) -> (f64, f64, f64, f64) {
     let n = 2.0f64.powi(z as i32);
     let lon_west = (x as f64 / n) * 360.0 - 180.0;
     let lon_east = ((x + 1) as f64 / n) * 360.0 - 180.0;
-    
-    let lat_north_rad = (std::f64::consts::PI * (1.0 - 2.0 * (y as f64) / n)).sinh().atan();
-    let lat_south_rad = (std::f64::consts::PI * (1.0 - 2.0 * ((y + 1) as f64) / n)).sinh().atan();
-    
+
+    let lat_north_rad = (std::f64::consts::PI * (1.0 - 2.0 * (y as f64) / n))
+        .sinh()
+        .atan();
+    let lat_south_rad = (std::f64::consts::PI * (1.0 - 2.0 * ((y + 1) as f64) / n))
+        .sinh()
+        .atan();
+
     (
         lat_south_rad,
         lon_west.to_radians(),
@@ -863,7 +983,7 @@ fn tile_bounds_rad(x: u32, y: u32, z: u32) -> (f64, f64, f64, f64) {
 
 fn get_tile_vertices(x: u32, y: u32, z: u32, controller: &NativeController) -> [RasterVertex; 4] {
     let (lat_south, lon_west, lat_north, lon_east) = tile_bounds_rad(x, y, z);
-    
+
     let get_pos = |lat: f64, lon: f64| {
         if controller.view_mode == "3D" {
             let ecef = olayer_core::geodesy::lla_to_ecef(
@@ -872,7 +992,10 @@ fn get_tile_vertices(x: u32, y: u32, z: u32, controller: &NativeController) -> [
             );
             [ecef.x as f32, ecef.y as f32, ecef.z as f32]
         } else {
-            let proj = controller.projection.project(&LatLon::new(lat, lon, 0.0)).unwrap_or((0.0, 0.0));
+            let proj = controller
+                .projection
+                .project(&LatLon::new(lat, lon, 0.0))
+                .unwrap_or((0.0, 0.0));
             [proj.0 as f32, proj.1 as f32, 0.0]
         }
     };
@@ -883,10 +1006,22 @@ fn get_tile_vertices(x: u32, y: u32, z: u32, controller: &NativeController) -> [
     let p_tr = get_pos(lat_north, lon_east);
 
     [
-        RasterVertex { position: p_tl, tex_coords: [0.0, 0.0] },
-        RasterVertex { position: p_bl, tex_coords: [0.0, 1.0] },
-        RasterVertex { position: p_br, tex_coords: [1.0, 1.0] },
-        RasterVertex { position: p_tr, tex_coords: [1.0, 0.0] },
+        RasterVertex {
+            position: p_tl,
+            tex_coords: [0.0, 0.0],
+        },
+        RasterVertex {
+            position: p_bl,
+            tex_coords: [0.0, 1.0],
+        },
+        RasterVertex {
+            position: p_br,
+            tex_coords: [1.0, 1.0],
+        },
+        RasterVertex {
+            position: p_tr,
+            tex_coords: [1.0, 0.0],
+        },
     ]
 }
 
@@ -901,7 +1036,11 @@ mod tests {
         let vertices = WgpuGpuPipeline::generate_grid_vertices(&controller);
         assert!(!vertices.is_empty(), "2D grid should produce vertices");
         // Each vertex is 3 floats (x, y, z); each line segment is 2 vertices = 6 floats
-        assert_eq!(vertices.len() % 6, 0, "Vertex count must be a multiple of 6 (2 endpoints × 3 coords)");
+        assert_eq!(
+            vertices.len() % 6,
+            0,
+            "Vertex count must be a multiple of 6 (2 endpoints × 3 coords)"
+        );
     }
 
     #[test]
@@ -923,7 +1062,11 @@ mod tests {
         controller.view_mode = "3D".to_string();
         let vertices = WgpuGpuPipeline::generate_grid_vertices(&controller);
         assert!(!vertices.is_empty(), "3D grid should produce vertices");
-        assert_eq!(vertices.len() % 6, 0, "Vertex count must be a multiple of 6 (2 endpoints × 3 coords)");
+        assert_eq!(
+            vertices.len() % 6,
+            0,
+            "Vertex count must be a multiple of 6 (2 endpoints × 3 coords)"
+        );
     }
 
     #[test]
@@ -934,7 +1077,10 @@ mod tests {
         // ECEF coordinates for Earth surface should be on the order of millions of meters.
         // Check that at least one vertex has a magnitude > 6_000_000 (roughly Earth radius).
         let max_abs = vertices.iter().fold(0.0f32, |a, &v| a.max(v.abs()));
-        assert!(max_abs > 6_000_000.0, "3D grid vertices should be in ECEF scale, max abs = {max_abs}");
+        assert!(
+            max_abs > 6_000_000.0,
+            "3D grid vertices should be in ECEF scale, max abs = {max_abs}"
+        );
     }
 
     #[test]
@@ -954,6 +1100,9 @@ mod tests {
         let vertices = WgpuGpuPipeline::generate_grid_vertices(&controller);
         // 3D grid uses ECEF so at least some z components should be non-zero
         let has_nonzero_z = vertices.chunks_exact(3).any(|c| c[2] != 0.0);
-        assert!(has_nonzero_z, "3D grid should have non-zero z components (ECEF)");
+        assert!(
+            has_nonzero_z,
+            "3D grid should have non-zero z components (ECEF)"
+        );
     }
 }

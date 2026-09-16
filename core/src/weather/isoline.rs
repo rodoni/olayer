@@ -33,12 +33,16 @@ pub fn generate_isolines_rad(
     }
 
     if isovalues.is_empty() {
-        return Err(WeatherError::InvalidIsovalues("Isovalues slice cannot be empty".to_string()));
+        return Err(WeatherError::InvalidIsovalues(
+            "Isovalues slice cannot be empty".to_string(),
+        ));
     }
 
     for &iso in isovalues {
         if !iso.is_finite() {
-            return Err(WeatherError::InvalidIsovalues(format!("Non-finite isovalue: {iso}")));
+            return Err(WeatherError::InvalidIsovalues(format!(
+                "Non-finite isovalue: {iso}"
+            )));
         }
     }
 
@@ -85,10 +89,18 @@ pub fn generate_isolines_rad(
                 let v3 = grid[row1_idx + c0];
 
                 let mut bitmask = 0u8;
-                if v0 >= iso { bitmask |= 8; }
-                if v1 >= iso { bitmask |= 4; }
-                if v2 >= iso { bitmask |= 2; }
-                if v3 >= iso { bitmask |= 1; }
+                if v0 >= iso {
+                    bitmask |= 8;
+                }
+                if v1 >= iso {
+                    bitmask |= 4;
+                }
+                if v2 >= iso {
+                    bitmask |= 2;
+                }
+                if v3 >= iso {
+                    bitmask |= 1;
+                }
 
                 if bitmask == 0 || bitmask == 15 {
                     continue;
@@ -119,37 +131,77 @@ pub fn generate_isolines_rad(
                 match bitmask {
                     1 | 14 => {
                         // Bottom to Left
-                        segments.push(IsolineSegment { isovalue: iso, start: bottom_pt(), end: left_pt() });
+                        segments.push(IsolineSegment {
+                            isovalue: iso,
+                            start: bottom_pt(),
+                            end: left_pt(),
+                        });
                     }
                     2 | 13 => {
                         // Right to Bottom
-                        segments.push(IsolineSegment { isovalue: iso, start: right_pt(), end: bottom_pt() });
+                        segments.push(IsolineSegment {
+                            isovalue: iso,
+                            start: right_pt(),
+                            end: bottom_pt(),
+                        });
                     }
                     3 | 12 => {
                         // Right to Left
-                        segments.push(IsolineSegment { isovalue: iso, start: right_pt(), end: left_pt() });
+                        segments.push(IsolineSegment {
+                            isovalue: iso,
+                            start: right_pt(),
+                            end: left_pt(),
+                        });
                     }
                     4 | 11 => {
                         // Top to Right
-                        segments.push(IsolineSegment { isovalue: iso, start: top_pt(), end: right_pt() });
+                        segments.push(IsolineSegment {
+                            isovalue: iso,
+                            start: top_pt(),
+                            end: right_pt(),
+                        });
                     }
                     5 => {
                         // Saddle point: Top to Left & Bottom to Right
-                        segments.push(IsolineSegment { isovalue: iso, start: top_pt(), end: left_pt() });
-                        segments.push(IsolineSegment { isovalue: iso, start: bottom_pt(), end: right_pt() });
+                        segments.push(IsolineSegment {
+                            isovalue: iso,
+                            start: top_pt(),
+                            end: left_pt(),
+                        });
+                        segments.push(IsolineSegment {
+                            isovalue: iso,
+                            start: bottom_pt(),
+                            end: right_pt(),
+                        });
                     }
                     6 | 9 => {
                         // Top to Bottom
-                        segments.push(IsolineSegment { isovalue: iso, start: top_pt(), end: bottom_pt() });
+                        segments.push(IsolineSegment {
+                            isovalue: iso,
+                            start: top_pt(),
+                            end: bottom_pt(),
+                        });
                     }
                     7 | 8 => {
                         // Top to Left
-                        segments.push(IsolineSegment { isovalue: iso, start: top_pt(), end: left_pt() });
+                        segments.push(IsolineSegment {
+                            isovalue: iso,
+                            start: top_pt(),
+                            end: left_pt(),
+                        });
                     }
                     10 => {
                         // Saddle point: Top to Right & Bottom to Left
-                        segments.push(IsolineSegment { isovalue: iso, start: top_pt(), end: right_pt() });
-                        segments.push(IsolineSegment { isovalue: iso, start: bottom_pt(), end: left_pt() });
+                        segments.push(IsolineSegment {
+                            isovalue: iso,
+                            start: top_pt(),
+                            end: right_pt(),
+                        });
+                        segments.push(IsolineSegment {
+                            isovalue: iso,
+                            start: bottom_pt(),
+                            end: left_pt(),
+                        });
                     }
                     _ => {}
                 }

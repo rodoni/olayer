@@ -98,14 +98,20 @@ impl MagneticCoefficients {
 
         let header_tokens: Vec<&str> = header.split_whitespace().collect();
         if header_tokens.is_empty() {
-            return Err(GeodesyError::MagneticModelError("Missing COF header".to_string()));
+            return Err(GeodesyError::MagneticModelError(
+                "Missing COF header".to_string(),
+            ));
         }
 
-        let epoch = header_tokens[0]
-            .parse::<f64>()
-            .map_err(|e| GeodesyError::MagneticModelError(format!("Invalid COF epoch in header '{header}': {e}")))?;
+        let epoch = header_tokens[0].parse::<f64>().map_err(|e| {
+            GeodesyError::MagneticModelError(format!("Invalid COF epoch in header '{header}': {e}"))
+        })?;
 
-        let model_name = header_tokens.get(1).copied().unwrap_or("CUSTOM").to_string();
+        let model_name = header_tokens
+            .get(1)
+            .copied()
+            .unwrap_or("CUSTOM")
+            .to_string();
         let release_date = header_tokens.get(2).copied().unwrap_or("").to_string();
 
         let mut entries = Vec::new();
@@ -128,24 +134,24 @@ impl MagneticCoefficients {
                 )));
             }
 
-            let n = tokens[0]
-                .parse::<usize>()
-                .map_err(|e| GeodesyError::MagneticModelError(format!("Invalid degree n in line '{line}': {e}")))?;
-            let m = tokens[1]
-                .parse::<usize>()
-                .map_err(|e| GeodesyError::MagneticModelError(format!("Invalid order m in line '{line}': {e}")))?;
-            let g = tokens[2]
-                .parse::<f64>()
-                .map_err(|e| GeodesyError::MagneticModelError(format!("Invalid g_nm in line '{line}': {e}")))?;
-            let h = tokens[3]
-                .parse::<f64>()
-                .map_err(|e| GeodesyError::MagneticModelError(format!("Invalid h_nm in line '{line}': {e}")))?;
-            let g_dot = tokens[4]
-                .parse::<f64>()
-                .map_err(|e| GeodesyError::MagneticModelError(format!("Invalid g_dot_nm in line '{line}': {e}")))?;
-            let h_dot = tokens[5]
-                .parse::<f64>()
-                .map_err(|e| GeodesyError::MagneticModelError(format!("Invalid h_dot_nm in line '{line}': {e}")))?;
+            let n = tokens[0].parse::<usize>().map_err(|e| {
+                GeodesyError::MagneticModelError(format!("Invalid degree n in line '{line}': {e}"))
+            })?;
+            let m = tokens[1].parse::<usize>().map_err(|e| {
+                GeodesyError::MagneticModelError(format!("Invalid order m in line '{line}': {e}"))
+            })?;
+            let g = tokens[2].parse::<f64>().map_err(|e| {
+                GeodesyError::MagneticModelError(format!("Invalid g_nm in line '{line}': {e}"))
+            })?;
+            let h = tokens[3].parse::<f64>().map_err(|e| {
+                GeodesyError::MagneticModelError(format!("Invalid h_nm in line '{line}': {e}"))
+            })?;
+            let g_dot = tokens[4].parse::<f64>().map_err(|e| {
+                GeodesyError::MagneticModelError(format!("Invalid g_dot_nm in line '{line}': {e}"))
+            })?;
+            let h_dot = tokens[5].parse::<f64>().map_err(|e| {
+                GeodesyError::MagneticModelError(format!("Invalid h_dot_nm in line '{line}': {e}"))
+            })?;
 
             if m > n {
                 return Err(GeodesyError::MagneticModelError(format!(
@@ -182,8 +188,12 @@ impl MagneticCoefficients {
     /// Loads magnetic coefficients from a `WMM.COF` formatted file on the filesystem.
     pub fn from_cof_file<P: AsRef<std::path::Path>>(path: P) -> Result<Self, GeodesyError> {
         let p = path.as_ref();
-        let content = std::fs::read_to_string(p)
-            .map_err(|e| GeodesyError::MagneticModelError(format!("Failed to read COF file '{}': {e}", p.display())))?;
+        let content = std::fs::read_to_string(p).map_err(|e| {
+            GeodesyError::MagneticModelError(format!(
+                "Failed to read COF file '{}': {e}",
+                p.display()
+            ))
+        })?;
         Self::from_cof_str(&content)
     }
 }
@@ -191,107 +201,737 @@ impl MagneticCoefficients {
 /// Official built-in WMM-2025 spherical harmonic coefficients.
 pub(crate) const WMM2025_COEFFS: [MagneticCoeffEntry; 90] = [
     // Degree 1
-    MagneticCoeffEntry { n: 1, m: 0, g: -29396.6, h: 0.0, g_dot: 11.6, h_dot: 0.0 },
-    MagneticCoeffEntry { n: 1, m: 1, g: -1404.9, h: 4589.6, g_dot: 12.3, h_dot: -23.4 },
+    MagneticCoeffEntry {
+        n: 1,
+        m: 0,
+        g: -29396.6,
+        h: 0.0,
+        g_dot: 11.6,
+        h_dot: 0.0,
+    },
+    MagneticCoeffEntry {
+        n: 1,
+        m: 1,
+        g: -1404.9,
+        h: 4589.6,
+        g_dot: 12.3,
+        h_dot: -23.4,
+    },
     // Degree 2
-    MagneticCoeffEntry { n: 2, m: 0, g: -2499.7, h: 0.0, g_dot: -12.4, h_dot: 0.0 },
-    MagneticCoeffEntry { n: 2, m: 1, g: 2997.5, h: -3013.9, g_dot: 0.8, h_dot: -20.6 },
-    MagneticCoeffEntry { n: 2, m: 2, g: 1686.2, h: -664.1, g_dot: -2.1, h_dot: -20.1 },
+    MagneticCoeffEntry {
+        n: 2,
+        m: 0,
+        g: -2499.7,
+        h: 0.0,
+        g_dot: -12.4,
+        h_dot: 0.0,
+    },
+    MagneticCoeffEntry {
+        n: 2,
+        m: 1,
+        g: 2997.5,
+        h: -3013.9,
+        g_dot: 0.8,
+        h_dot: -20.6,
+    },
+    MagneticCoeffEntry {
+        n: 2,
+        m: 2,
+        g: 1686.2,
+        h: -664.1,
+        g_dot: -2.1,
+        h_dot: -20.1,
+    },
     // Degree 3
-    MagneticCoeffEntry { n: 3, m: 0, g: 1362.4, h: 0.0, g_dot: 3.6, h_dot: 0.0 },
-    MagneticCoeffEntry { n: 3, m: 1, g: -2382.4, h: -70.9, g_dot: -6.5, h_dot: -6.1 },
-    MagneticCoeffEntry { n: 3, m: 2, g: 1237.9, h: 247.9, g_dot: -0.5, h_dot: -1.2 },
-    MagneticCoeffEntry { n: 3, m: 3, g: 557.0, h: -572.7, g_dot: -10.3, h_dot: 2.1 },
+    MagneticCoeffEntry {
+        n: 3,
+        m: 0,
+        g: 1362.4,
+        h: 0.0,
+        g_dot: 3.6,
+        h_dot: 0.0,
+    },
+    MagneticCoeffEntry {
+        n: 3,
+        m: 1,
+        g: -2382.4,
+        h: -70.9,
+        g_dot: -6.5,
+        h_dot: -6.1,
+    },
+    MagneticCoeffEntry {
+        n: 3,
+        m: 2,
+        g: 1237.9,
+        h: 247.9,
+        g_dot: -0.5,
+        h_dot: -1.2,
+    },
+    MagneticCoeffEntry {
+        n: 3,
+        m: 3,
+        g: 557.0,
+        h: -572.7,
+        g_dot: -10.3,
+        h_dot: 2.1,
+    },
     // Degree 4
-    MagneticCoeffEntry { n: 4, m: 0, g: 947.2, h: 0.0, g_dot: -1.6, h_dot: 0.0 },
-    MagneticCoeffEntry { n: 4, m: 1, g: 806.3, h: 296.3, g_dot: -0.3, h_dot: 1.4 },
-    MagneticCoeffEntry { n: 4, m: 2, g: 457.9, h: -244.2, g_dot: -4.8, h_dot: 6.7 },
-    MagneticCoeffEntry { n: 4, m: 3, g: -425.4, h: 90.7, g_dot: 1.7, h_dot: 3.3 },
-    MagneticCoeffEntry { n: 4, m: 4, g: 147.2, h: -336.5, g_dot: -6.5, h_dot: -0.3 },
+    MagneticCoeffEntry {
+        n: 4,
+        m: 0,
+        g: 947.2,
+        h: 0.0,
+        g_dot: -1.6,
+        h_dot: 0.0,
+    },
+    MagneticCoeffEntry {
+        n: 4,
+        m: 1,
+        g: 806.3,
+        h: 296.3,
+        g_dot: -0.3,
+        h_dot: 1.4,
+    },
+    MagneticCoeffEntry {
+        n: 4,
+        m: 2,
+        g: 457.9,
+        h: -244.2,
+        g_dot: -4.8,
+        h_dot: 6.7,
+    },
+    MagneticCoeffEntry {
+        n: 4,
+        m: 3,
+        g: -425.4,
+        h: 90.7,
+        g_dot: 1.7,
+        h_dot: 3.3,
+    },
+    MagneticCoeffEntry {
+        n: 4,
+        m: 4,
+        g: 147.2,
+        h: -336.5,
+        g_dot: -6.5,
+        h_dot: -0.3,
+    },
     // Degree 5
-    MagneticCoeffEntry { n: 5, m: 0, g: -238.1, h: 0.0, g_dot: -0.8, h_dot: 0.0 },
-    MagneticCoeffEntry { n: 5, m: 1, g: 367.6, h: 44.5, g_dot: 0.2, h_dot: 0.0 },
-    MagneticCoeffEntry { n: 5, m: 2, g: 201.2, h: 187.8, g_dot: 1.5, h_dot: 1.8 },
-    MagneticCoeffEntry { n: 5, m: 3, g: -152.0, h: -150.1, g_dot: -3.8, h_dot: 4.8 },
-    MagneticCoeffEntry { n: 5, m: 4, g: -160.0, h: -85.7, g_dot: -1.2, h_dot: 2.7 },
-    MagneticCoeffEntry { n: 5, m: 5, g: 97.4, h: 104.9, g_dot: 2.1, h_dot: 1.7 },
+    MagneticCoeffEntry {
+        n: 5,
+        m: 0,
+        g: -238.1,
+        h: 0.0,
+        g_dot: -0.8,
+        h_dot: 0.0,
+    },
+    MagneticCoeffEntry {
+        n: 5,
+        m: 1,
+        g: 367.6,
+        h: 44.5,
+        g_dot: 0.2,
+        h_dot: 0.0,
+    },
+    MagneticCoeffEntry {
+        n: 5,
+        m: 2,
+        g: 201.2,
+        h: 187.8,
+        g_dot: 1.5,
+        h_dot: 1.8,
+    },
+    MagneticCoeffEntry {
+        n: 5,
+        m: 3,
+        g: -152.0,
+        h: -150.1,
+        g_dot: -3.8,
+        h_dot: 4.8,
+    },
+    MagneticCoeffEntry {
+        n: 5,
+        m: 4,
+        g: -160.0,
+        h: -85.7,
+        g_dot: -1.2,
+        h_dot: 2.7,
+    },
+    MagneticCoeffEntry {
+        n: 5,
+        m: 5,
+        g: 97.4,
+        h: 104.9,
+        g_dot: 2.1,
+        h_dot: 1.7,
+    },
     // Degree 6
-    MagneticCoeffEntry { n: 6, m: 0, g: 67.9, h: 0.0, g_dot: -0.3, h_dot: 0.0 },
-    MagneticCoeffEntry { n: 6, m: 1, g: 65.5, h: -17.5, g_dot: -0.2, h_dot: -0.5 },
-    MagneticCoeffEntry { n: 6, m: 2, g: 73.1, h: 63.8, g_dot: 1.0, h_dot: -0.5 },
-    MagneticCoeffEntry { n: 6, m: 3, g: -142.4, h: 72.8, g_dot: 1.2, h_dot: -0.6 },
-    MagneticCoeffEntry { n: 6, m: 4, g: -1.8, h: -67.5, g_dot: -0.3, h_dot: -1.5 },
-    MagneticCoeffEntry { n: 6, m: 5, g: 15.6, h: -3.0, g_dot: -0.3, h_dot: -0.4 },
-    MagneticCoeffEntry { n: 6, m: 6, g: -88.9, h: 22.8, g_dot: 1.0, h_dot: 2.8 },
+    MagneticCoeffEntry {
+        n: 6,
+        m: 0,
+        g: 67.9,
+        h: 0.0,
+        g_dot: -0.3,
+        h_dot: 0.0,
+    },
+    MagneticCoeffEntry {
+        n: 6,
+        m: 1,
+        g: 65.5,
+        h: -17.5,
+        g_dot: -0.2,
+        h_dot: -0.5,
+    },
+    MagneticCoeffEntry {
+        n: 6,
+        m: 2,
+        g: 73.1,
+        h: 63.8,
+        g_dot: 1.0,
+        h_dot: -0.5,
+    },
+    MagneticCoeffEntry {
+        n: 6,
+        m: 3,
+        g: -142.4,
+        h: 72.8,
+        g_dot: 1.2,
+        h_dot: -0.6,
+    },
+    MagneticCoeffEntry {
+        n: 6,
+        m: 4,
+        g: -1.8,
+        h: -67.5,
+        g_dot: -0.3,
+        h_dot: -1.5,
+    },
+    MagneticCoeffEntry {
+        n: 6,
+        m: 5,
+        g: 15.6,
+        h: -3.0,
+        g_dot: -0.3,
+        h_dot: -0.4,
+    },
+    MagneticCoeffEntry {
+        n: 6,
+        m: 6,
+        g: -88.9,
+        h: 22.8,
+        g_dot: 1.0,
+        h_dot: 2.8,
+    },
     // Degree 7
-    MagneticCoeffEntry { n: 7, m: 0, g: 79.9, h: 0.0, g_dot: -0.1, h_dot: 0.0 },
-    MagneticCoeffEntry { n: 7, m: 1, g: -73.3, h: -63.7, g_dot: -0.4, h_dot: -0.2 },
-    MagneticCoeffEntry { n: 7, m: 2, g: 2.2, h: -0.3, g_dot: 0.5, h_dot: -0.7 },
-    MagneticCoeffEntry { n: 7, m: 3, g: 31.7, h: 18.0, g_dot: 1.2, h_dot: 0.4 },
-    MagneticCoeffEntry { n: 7, m: 4, g: -12.4, h: -24.4, g_dot: 0.2, h_dot: 0.5 },
-    MagneticCoeffEntry { n: 7, m: 5, g: -18.7, h: 6.9, g_dot: -0.7, h_dot: 0.9 },
-    MagneticCoeffEntry { n: 7, m: 6, g: 7.2, h: 25.1, g_dot: 0.8, h_dot: 0.0 },
-    MagneticCoeffEntry { n: 7, m: 7, g: 10.3, h: -10.9, g_dot: 0.7, h_dot: -0.2 },
+    MagneticCoeffEntry {
+        n: 7,
+        m: 0,
+        g: 79.9,
+        h: 0.0,
+        g_dot: -0.1,
+        h_dot: 0.0,
+    },
+    MagneticCoeffEntry {
+        n: 7,
+        m: 1,
+        g: -73.3,
+        h: -63.7,
+        g_dot: -0.4,
+        h_dot: -0.2,
+    },
+    MagneticCoeffEntry {
+        n: 7,
+        m: 2,
+        g: 2.2,
+        h: -0.3,
+        g_dot: 0.5,
+        h_dot: -0.7,
+    },
+    MagneticCoeffEntry {
+        n: 7,
+        m: 3,
+        g: 31.7,
+        h: 18.0,
+        g_dot: 1.2,
+        h_dot: 0.4,
+    },
+    MagneticCoeffEntry {
+        n: 7,
+        m: 4,
+        g: -12.4,
+        h: -24.4,
+        g_dot: 0.2,
+        h_dot: 0.5,
+    },
+    MagneticCoeffEntry {
+        n: 7,
+        m: 5,
+        g: -18.7,
+        h: 6.9,
+        g_dot: -0.7,
+        h_dot: 0.9,
+    },
+    MagneticCoeffEntry {
+        n: 7,
+        m: 6,
+        g: 7.2,
+        h: 25.1,
+        g_dot: 0.8,
+        h_dot: 0.0,
+    },
+    MagneticCoeffEntry {
+        n: 7,
+        m: 7,
+        g: 10.3,
+        h: -10.9,
+        g_dot: 0.7,
+        h_dot: -0.2,
+    },
     // Degree 8
-    MagneticCoeffEntry { n: 8, m: 0, g: 24.3, h: 0.0, g_dot: -0.1, h_dot: 0.0 },
-    MagneticCoeffEntry { n: 8, m: 1, g: 7.6, h: 9.9, g_dot: 0.1, h_dot: -0.3 },
-    MagneticCoeffEntry { n: 8, m: 2, g: -8.8, h: -18.8, g_dot: -0.3, h_dot: 0.4 },
-    MagneticCoeffEntry { n: 8, m: 3, g: -12.3, h: 8.5, g_dot: 0.3, h_dot: -0.3 },
-    MagneticCoeffEntry { n: 8, m: 4, g: -17.2, h: -23.0, g_dot: -0.3, h_dot: 0.2 },
-    MagneticCoeffEntry { n: 8, m: 5, g: 5.6, h: 14.5, g_dot: -0.1, h_dot: -0.6 },
-    MagneticCoeffEntry { n: 8, m: 6, g: 1.9, h: -13.0, g_dot: 0.4, h_dot: 0.3 },
-    MagneticCoeffEntry { n: 8, m: 7, g: 4.8, h: -14.6, g_dot: 0.0, h_dot: 0.4 },
-    MagneticCoeffEntry { n: 8, m: 8, g: -8.9, h: 11.2, g_dot: -0.3, h_dot: 0.2 },
+    MagneticCoeffEntry {
+        n: 8,
+        m: 0,
+        g: 24.3,
+        h: 0.0,
+        g_dot: -0.1,
+        h_dot: 0.0,
+    },
+    MagneticCoeffEntry {
+        n: 8,
+        m: 1,
+        g: 7.6,
+        h: 9.9,
+        g_dot: 0.1,
+        h_dot: -0.3,
+    },
+    MagneticCoeffEntry {
+        n: 8,
+        m: 2,
+        g: -8.8,
+        h: -18.8,
+        g_dot: -0.3,
+        h_dot: 0.4,
+    },
+    MagneticCoeffEntry {
+        n: 8,
+        m: 3,
+        g: -12.3,
+        h: 8.5,
+        g_dot: 0.3,
+        h_dot: -0.3,
+    },
+    MagneticCoeffEntry {
+        n: 8,
+        m: 4,
+        g: -17.2,
+        h: -23.0,
+        g_dot: -0.3,
+        h_dot: 0.2,
+    },
+    MagneticCoeffEntry {
+        n: 8,
+        m: 5,
+        g: 5.6,
+        h: 14.5,
+        g_dot: -0.1,
+        h_dot: -0.6,
+    },
+    MagneticCoeffEntry {
+        n: 8,
+        m: 6,
+        g: 1.9,
+        h: -13.0,
+        g_dot: 0.4,
+        h_dot: 0.3,
+    },
+    MagneticCoeffEntry {
+        n: 8,
+        m: 7,
+        g: 4.8,
+        h: -14.6,
+        g_dot: 0.0,
+        h_dot: 0.4,
+    },
+    MagneticCoeffEntry {
+        n: 8,
+        m: 8,
+        g: -8.9,
+        h: 11.2,
+        g_dot: -0.3,
+        h_dot: 0.2,
+    },
     // Degree 9
-    MagneticCoeffEntry { n: 9, m: 0, g: 5.6, h: 0.0, g_dot: 0.0, h_dot: 0.0 },
-    MagneticCoeffEntry { n: 9, m: 1, g: 9.7, h: -20.6, g_dot: -0.1, h_dot: 0.0 },
-    MagneticCoeffEntry { n: 9, m: 2, g: 2.4, h: 14.7, g_dot: 0.0, h_dot: -0.2 },
-    MagneticCoeffEntry { n: 9, m: 3, g: -10.4, h: 10.3, g_dot: -0.2, h_dot: -0.2 },
-    MagneticCoeffEntry { n: 9, m: 4, g: 7.7, h: -4.3, g_dot: -0.1, h_dot: 0.1 },
-    MagneticCoeffEntry { n: 9, m: 5, g: -0.6, h: -7.5, g_dot: -0.1, h_dot: 0.1 },
-    MagneticCoeffEntry { n: 9, m: 6, g: -0.4, h: 0.3, g_dot: 0.1, h_dot: 0.0 },
-    MagneticCoeffEntry { n: 9, m: 7, g: 3.3, h: 2.6, g_dot: 0.0, h_dot: -0.2 },
-    MagneticCoeffEntry { n: 9, m: 8, g: 0.5, h: 5.2, g_dot: 0.0, h_dot: -0.1 },
-    MagneticCoeffEntry { n: 9, m: 9, g: -2.3, h: -0.8, g_dot: -0.4, h_dot: 0.2 },
+    MagneticCoeffEntry {
+        n: 9,
+        m: 0,
+        g: 5.6,
+        h: 0.0,
+        g_dot: 0.0,
+        h_dot: 0.0,
+    },
+    MagneticCoeffEntry {
+        n: 9,
+        m: 1,
+        g: 9.7,
+        h: -20.6,
+        g_dot: -0.1,
+        h_dot: 0.0,
+    },
+    MagneticCoeffEntry {
+        n: 9,
+        m: 2,
+        g: 2.4,
+        h: 14.7,
+        g_dot: 0.0,
+        h_dot: -0.2,
+    },
+    MagneticCoeffEntry {
+        n: 9,
+        m: 3,
+        g: -10.4,
+        h: 10.3,
+        g_dot: -0.2,
+        h_dot: -0.2,
+    },
+    MagneticCoeffEntry {
+        n: 9,
+        m: 4,
+        g: 7.7,
+        h: -4.3,
+        g_dot: -0.1,
+        h_dot: 0.1,
+    },
+    MagneticCoeffEntry {
+        n: 9,
+        m: 5,
+        g: -0.6,
+        h: -7.5,
+        g_dot: -0.1,
+        h_dot: 0.1,
+    },
+    MagneticCoeffEntry {
+        n: 9,
+        m: 6,
+        g: -0.4,
+        h: 0.3,
+        g_dot: 0.1,
+        h_dot: 0.0,
+    },
+    MagneticCoeffEntry {
+        n: 9,
+        m: 7,
+        g: 3.3,
+        h: 2.6,
+        g_dot: 0.0,
+        h_dot: -0.2,
+    },
+    MagneticCoeffEntry {
+        n: 9,
+        m: 8,
+        g: 0.5,
+        h: 5.2,
+        g_dot: 0.0,
+        h_dot: -0.1,
+    },
+    MagneticCoeffEntry {
+        n: 9,
+        m: 9,
+        g: -2.3,
+        h: -0.8,
+        g_dot: -0.4,
+        h_dot: 0.2,
+    },
     // Degree 10
-    MagneticCoeffEntry { n: 10, m: 0, g: -2.0, h: 0.0, g_dot: 0.0, h_dot: 0.0 },
-    MagneticCoeffEntry { n: 10, m: 1, g: -5.7, h: 2.8, g_dot: 0.0, h_dot: 0.0 },
-    MagneticCoeffEntry { n: 10, m: 2, g: 2.1, h: -0.2, g_dot: 0.0, h_dot: -0.1 },
-    MagneticCoeffEntry { n: 10, m: 3, g: -6.0, h: 4.0, g_dot: 0.1, h_dot: -0.1 },
-    MagneticCoeffEntry { n: 10, m: 4, g: -0.8, h: -0.5, g_dot: 0.0, h_dot: 0.1 },
-    MagneticCoeffEntry { n: 10, m: 5, g: 3.9, h: 4.8, g_dot: 0.0, h_dot: -0.1 },
-    MagneticCoeffEntry { n: 10, m: 6, g: 0.4, h: -1.7, g_dot: 0.1, h_dot: 0.0 },
-    MagneticCoeffEntry { n: 10, m: 7, g: 2.5, h: -0.8, g_dot: 0.0, h_dot: 0.0 },
-    MagneticCoeffEntry { n: 10, m: 8, g: 2.8, h: 2.7, g_dot: 0.0, h_dot: -0.1 },
-    MagneticCoeffEntry { n: 10, m: 9, g: 2.4, h: -3.9, g_dot: 0.0, h_dot: -0.1 },
-    MagneticCoeffEntry { n: 10, m: 10, g: -2.1, h: -3.8, g_dot: -0.1, h_dot: 0.0 },
+    MagneticCoeffEntry {
+        n: 10,
+        m: 0,
+        g: -2.0,
+        h: 0.0,
+        g_dot: 0.0,
+        h_dot: 0.0,
+    },
+    MagneticCoeffEntry {
+        n: 10,
+        m: 1,
+        g: -5.7,
+        h: 2.8,
+        g_dot: 0.0,
+        h_dot: 0.0,
+    },
+    MagneticCoeffEntry {
+        n: 10,
+        m: 2,
+        g: 2.1,
+        h: -0.2,
+        g_dot: 0.0,
+        h_dot: -0.1,
+    },
+    MagneticCoeffEntry {
+        n: 10,
+        m: 3,
+        g: -6.0,
+        h: 4.0,
+        g_dot: 0.1,
+        h_dot: -0.1,
+    },
+    MagneticCoeffEntry {
+        n: 10,
+        m: 4,
+        g: -0.8,
+        h: -0.5,
+        g_dot: 0.0,
+        h_dot: 0.1,
+    },
+    MagneticCoeffEntry {
+        n: 10,
+        m: 5,
+        g: 3.9,
+        h: 4.8,
+        g_dot: 0.0,
+        h_dot: -0.1,
+    },
+    MagneticCoeffEntry {
+        n: 10,
+        m: 6,
+        g: 0.4,
+        h: -1.7,
+        g_dot: 0.1,
+        h_dot: 0.0,
+    },
+    MagneticCoeffEntry {
+        n: 10,
+        m: 7,
+        g: 2.5,
+        h: -0.8,
+        g_dot: 0.0,
+        h_dot: 0.0,
+    },
+    MagneticCoeffEntry {
+        n: 10,
+        m: 8,
+        g: 2.8,
+        h: 2.7,
+        g_dot: 0.0,
+        h_dot: -0.1,
+    },
+    MagneticCoeffEntry {
+        n: 10,
+        m: 9,
+        g: 2.4,
+        h: -3.9,
+        g_dot: 0.0,
+        h_dot: -0.1,
+    },
+    MagneticCoeffEntry {
+        n: 10,
+        m: 10,
+        g: -2.1,
+        h: -3.8,
+        g_dot: -0.1,
+        h_dot: 0.0,
+    },
     // Degree 11
-    MagneticCoeffEntry { n: 11, m: 0, g: 3.0, h: 0.0, g_dot: 0.0, h_dot: 0.0 },
-    MagneticCoeffEntry { n: 11, m: 1, g: -1.4, h: -1.2, g_dot: 0.0, h_dot: 0.0 },
-    MagneticCoeffEntry { n: 11, m: 2, g: -2.4, h: 2.3, g_dot: 0.0, h_dot: 0.0 },
-    MagneticCoeffEntry { n: 11, m: 3, g: 2.0, h: -1.9, g_dot: 0.0, h_dot: 0.0 },
-    MagneticCoeffEntry { n: 11, m: 4, g: -1.0, h: -1.3, g_dot: 0.0, h_dot: 0.0 },
-    MagneticCoeffEntry { n: 11, m: 5, g: 0.2, h: 0.9, g_dot: 0.0, h_dot: 0.0 },
-    MagneticCoeffEntry { n: 11, m: 6, g: 0.8, h: -0.5, g_dot: 0.0, h_dot: 0.0 },
-    MagneticCoeffEntry { n: 11, m: 7, g: -0.2, h: -0.3, g_dot: 0.0, h_dot: 0.0 },
-    MagneticCoeffEntry { n: 11, m: 8, g: 1.4, h: -0.7, g_dot: 0.0, h_dot: 0.0 },
-    MagneticCoeffEntry { n: 11, m: 9, g: -0.5, h: 0.7, g_dot: 0.0, h_dot: 0.0 },
-    MagneticCoeffEntry { n: 11, m: 10, g: 0.3, h: -0.2, g_dot: 0.0, h_dot: 0.0 },
-    MagneticCoeffEntry { n: 11, m: 11, g: -0.7, h: -1.1, g_dot: 0.0, h_dot: 0.0 },
+    MagneticCoeffEntry {
+        n: 11,
+        m: 0,
+        g: 3.0,
+        h: 0.0,
+        g_dot: 0.0,
+        h_dot: 0.0,
+    },
+    MagneticCoeffEntry {
+        n: 11,
+        m: 1,
+        g: -1.4,
+        h: -1.2,
+        g_dot: 0.0,
+        h_dot: 0.0,
+    },
+    MagneticCoeffEntry {
+        n: 11,
+        m: 2,
+        g: -2.4,
+        h: 2.3,
+        g_dot: 0.0,
+        h_dot: 0.0,
+    },
+    MagneticCoeffEntry {
+        n: 11,
+        m: 3,
+        g: 2.0,
+        h: -1.9,
+        g_dot: 0.0,
+        h_dot: 0.0,
+    },
+    MagneticCoeffEntry {
+        n: 11,
+        m: 4,
+        g: -1.0,
+        h: -1.3,
+        g_dot: 0.0,
+        h_dot: 0.0,
+    },
+    MagneticCoeffEntry {
+        n: 11,
+        m: 5,
+        g: 0.2,
+        h: 0.9,
+        g_dot: 0.0,
+        h_dot: 0.0,
+    },
+    MagneticCoeffEntry {
+        n: 11,
+        m: 6,
+        g: 0.8,
+        h: -0.5,
+        g_dot: 0.0,
+        h_dot: 0.0,
+    },
+    MagneticCoeffEntry {
+        n: 11,
+        m: 7,
+        g: -0.2,
+        h: -0.3,
+        g_dot: 0.0,
+        h_dot: 0.0,
+    },
+    MagneticCoeffEntry {
+        n: 11,
+        m: 8,
+        g: 1.4,
+        h: -0.7,
+        g_dot: 0.0,
+        h_dot: 0.0,
+    },
+    MagneticCoeffEntry {
+        n: 11,
+        m: 9,
+        g: -0.5,
+        h: 0.7,
+        g_dot: 0.0,
+        h_dot: 0.0,
+    },
+    MagneticCoeffEntry {
+        n: 11,
+        m: 10,
+        g: 0.3,
+        h: -0.2,
+        g_dot: 0.0,
+        h_dot: 0.0,
+    },
+    MagneticCoeffEntry {
+        n: 11,
+        m: 11,
+        g: -0.7,
+        h: -1.1,
+        g_dot: 0.0,
+        h_dot: 0.0,
+    },
     // Degree 12
-    MagneticCoeffEntry { n: 12, m: 0, g: -2.2, h: 0.0, g_dot: 0.0, h_dot: 0.0 },
-    MagneticCoeffEntry { n: 12, m: 1, g: -0.3, h: -0.8, g_dot: 0.0, h_dot: 0.0 },
-    MagneticCoeffEntry { n: 12, m: 2, g: 0.4, h: 0.4, g_dot: 0.0, h_dot: 0.0 },
-    MagneticCoeffEntry { n: 12, m: 3, g: 1.1, h: 1.6, g_dot: 0.0, h_dot: 0.0 },
-    MagneticCoeffEntry { n: 12, m: 4, g: -0.4, h: -0.4, g_dot: 0.0, h_dot: 0.0 },
-    MagneticCoeffEntry { n: 12, m: 5, g: 0.8, h: 0.1, g_dot: 0.0, h_dot: 0.0 },
-    MagneticCoeffEntry { n: 12, m: 6, g: 0.0, h: -0.7, g_dot: 0.0, h_dot: 0.0 },
-    MagneticCoeffEntry { n: 12, m: 7, g: 0.3, h: 0.4, g_dot: 0.0, h_dot: 0.0 },
-    MagneticCoeffEntry { n: 12, m: 8, g: -0.2, h: 0.2, g_dot: 0.0, h_dot: 0.0 },
-    MagneticCoeffEntry { n: 12, m: 9, g: 0.1, h: 0.2, g_dot: 0.0, h_dot: 0.0 },
-    MagneticCoeffEntry { n: 12, m: 10, g: -0.7, h: -0.3, g_dot: 0.0, h_dot: 0.0 },
-    MagneticCoeffEntry { n: 12, m: 11, g: -0.2, h: 0.4, g_dot: 0.0, h_dot: 0.0 },
-    MagneticCoeffEntry { n: 12, m: 12, g: 0.2, h: -0.9, g_dot: 0.0, h_dot: 0.0 },
+    MagneticCoeffEntry {
+        n: 12,
+        m: 0,
+        g: -2.2,
+        h: 0.0,
+        g_dot: 0.0,
+        h_dot: 0.0,
+    },
+    MagneticCoeffEntry {
+        n: 12,
+        m: 1,
+        g: -0.3,
+        h: -0.8,
+        g_dot: 0.0,
+        h_dot: 0.0,
+    },
+    MagneticCoeffEntry {
+        n: 12,
+        m: 2,
+        g: 0.4,
+        h: 0.4,
+        g_dot: 0.0,
+        h_dot: 0.0,
+    },
+    MagneticCoeffEntry {
+        n: 12,
+        m: 3,
+        g: 1.1,
+        h: 1.6,
+        g_dot: 0.0,
+        h_dot: 0.0,
+    },
+    MagneticCoeffEntry {
+        n: 12,
+        m: 4,
+        g: -0.4,
+        h: -0.4,
+        g_dot: 0.0,
+        h_dot: 0.0,
+    },
+    MagneticCoeffEntry {
+        n: 12,
+        m: 5,
+        g: 0.8,
+        h: 0.1,
+        g_dot: 0.0,
+        h_dot: 0.0,
+    },
+    MagneticCoeffEntry {
+        n: 12,
+        m: 6,
+        g: 0.0,
+        h: -0.7,
+        g_dot: 0.0,
+        h_dot: 0.0,
+    },
+    MagneticCoeffEntry {
+        n: 12,
+        m: 7,
+        g: 0.3,
+        h: 0.4,
+        g_dot: 0.0,
+        h_dot: 0.0,
+    },
+    MagneticCoeffEntry {
+        n: 12,
+        m: 8,
+        g: -0.2,
+        h: 0.2,
+        g_dot: 0.0,
+        h_dot: 0.0,
+    },
+    MagneticCoeffEntry {
+        n: 12,
+        m: 9,
+        g: 0.1,
+        h: 0.2,
+        g_dot: 0.0,
+        h_dot: 0.0,
+    },
+    MagneticCoeffEntry {
+        n: 12,
+        m: 10,
+        g: -0.7,
+        h: -0.3,
+        g_dot: 0.0,
+        h_dot: 0.0,
+    },
+    MagneticCoeffEntry {
+        n: 12,
+        m: 11,
+        g: -0.2,
+        h: 0.4,
+        g_dot: 0.0,
+        h_dot: 0.0,
+    },
+    MagneticCoeffEntry {
+        n: 12,
+        m: 12,
+        g: 0.2,
+        h: -0.9,
+        g_dot: 0.0,
+        h_dot: 0.0,
+    },
 ];
 
 /// Future-proof spherical harmonic Magnetic Model computational engine.
@@ -375,7 +1015,11 @@ impl MagneticModel {
     /// # Arguments
     /// * `point` - Geodetic coordinate (lat, lon in radians, height in meters above WGS84 ellipsoid).
     /// * `epoch_decimal_year` - Time in decimal years (e.g. 2025.0, 2026.5).
-    pub fn get_magnetic_elements(&self, point: &LatLon, epoch_decimal_year: f64) -> MagneticElements {
+    pub fn get_magnetic_elements(
+        &self,
+        point: &LatLon,
+        epoch_decimal_year: f64,
+    ) -> MagneticElements {
         let ell = Ellipsoid::wgs84();
         let dt = epoch_decimal_year - self.coeffs.epoch;
         let max_degree = self.coeffs.max_degree;
@@ -438,7 +1082,8 @@ impl MagneticModel {
                     } else {
                         let factor = ((2 * n - 1) as f64 / (2 * n) as f64).sqrt();
                         p_nm[idx] = factor * sin_theta * p_nm[prev_idx];
-                        dp_nm[idx] = factor * (sin_theta * dp_nm[prev_idx] + cos_theta * p_nm[prev_idx]);
+                        dp_nm[idx] =
+                            factor * (sin_theta * dp_nm[prev_idx] + cos_theta * p_nm[prev_idx]);
                     }
                 } else if n == 1 && m == 0 {
                     p_nm[idx] = cos_theta;
@@ -449,7 +1094,8 @@ impl MagneticModel {
                     let f1 = (2 * n - 1) as f64 / n as f64;
                     let f2 = (n - 1) as f64 / n as f64;
                     p_nm[idx] = f1 * cos_theta * p_nm[idx_n1] - f2 * p_nm[idx_n2];
-                    dp_nm[idx] = f1 * (cos_theta * dp_nm[idx_n1] - sin_theta * p_nm[idx_n1]) - f2 * dp_nm[idx_n2];
+                    dp_nm[idx] = f1 * (cos_theta * dp_nm[idx_n1] - sin_theta * p_nm[idx_n1])
+                        - f2 * dp_nm[idx_n2];
                 } else {
                     let idx_n1 = (n - 1) * n / 2 + m;
                     let idx_n2 = (n - 2) * (n - 1) / 2 + m;
@@ -462,7 +1108,8 @@ impl MagneticModel {
                     };
 
                     p_nm[idx] = k_nm * cos_theta * p_nm[idx_n1] - l_nm * p_nm[idx_n2];
-                    dp_nm[idx] = k_nm * (cos_theta * dp_nm[idx_n1] - sin_theta * p_nm[idx_n1]) - l_nm * dp_nm[idx_n2];
+                    dp_nm[idx] = k_nm * (cos_theta * dp_nm[idx_n1] - sin_theta * p_nm[idx_n1])
+                        - l_nm * dp_nm[idx_n2];
                 }
             }
         }
@@ -535,17 +1182,28 @@ impl MagneticModel {
     /// Computes magnetic declination (variation) in radians for given WGS84 coordinate and epoch.
     #[inline]
     pub fn get_declination(&self, point: &LatLon, epoch_decimal_year: f64) -> f64 {
-        self.get_magnetic_elements(point, epoch_decimal_year).declination_rad
+        self.get_magnetic_elements(point, epoch_decimal_year)
+            .declination_rad
     }
 
     /// Converts a True North bearing (radians) to a Magnetic North bearing (radians).
-    pub fn true_to_magnetic(&self, true_bearing_rad: f64, point: &LatLon, epoch_decimal_year: f64) -> f64 {
+    pub fn true_to_magnetic(
+        &self,
+        true_bearing_rad: f64,
+        point: &LatLon,
+        epoch_decimal_year: f64,
+    ) -> f64 {
         let declination = self.get_declination(point, epoch_decimal_year);
         normalize_bearing(true_bearing_rad - declination)
     }
 
     /// Converts a Magnetic North bearing (radians) to a True North bearing (radians).
-    pub fn magnetic_to_true(&self, mag_bearing_rad: f64, point: &LatLon, epoch_decimal_year: f64) -> f64 {
+    pub fn magnetic_to_true(
+        &self,
+        mag_bearing_rad: f64,
+        point: &LatLon,
+        epoch_decimal_year: f64,
+    ) -> f64 {
         let declination = self.get_declination(point, epoch_decimal_year);
         normalize_bearing(mag_bearing_rad + declination)
     }

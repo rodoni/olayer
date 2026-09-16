@@ -2,8 +2,9 @@
 #![allow(clippy::missing_safety_doc)]
 #![allow(clippy::too_many_arguments)]
 
-use std::os::raw::{c_char, c_int};
-use std::sync::Arc;
+use crate::tools::{
+    HoldingPatternConfig, IlsConeConfig, RangeRingsConfig, TacticalToolsManager, TurnDirection,
+};
 use olayer_core::aeronautical::{
     export_dataset_to_geojson, parse_aixm_51_str, parse_geojson_aviation_str, AeronauticalDataset,
     NavaidType,
@@ -12,9 +13,10 @@ use olayer_core::geodesy::{
     compute_route_deviation, geodesic_intersection, EnuPoint, GeodesicPolygon, LatLon,
     LocalTangentFrame, MagneticModel,
 };
-use olayer_core::terrain::TerrainEngine;
 use olayer_core::interpolator::{InterpolationEngine, TargetState};
-use crate::tools::{HoldingPatternConfig, IlsConeConfig, RangeRingsConfig, TacticalToolsManager, TurnDirection};
+use olayer_core::terrain::TerrainEngine;
+use std::os::raw::{c_char, c_int};
+use std::sync::Arc;
 
 // --- C-COMPATIBLE DATA STRUCTURES ---
 
@@ -186,7 +188,7 @@ pub unsafe extern "C" fn olayer_terrain_engine_unload_tile(
     }
     let engine_ref = &mut *engine;
     let key = olayer_core::terrain::TileKey { lat_deg, lon_deg };
-    
+
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         engine_ref.unload_tile(&key)
     }));
@@ -408,7 +410,11 @@ pub unsafe extern "C" fn olayer_terrain_engine_resolve_altitude(
         2 => olayer_core::terrain::AltitudeUnknownPolicy::UseZero,
         _ => return -3,
     };
-    let mesh = if mesh_height.is_finite() { Some(mesh_height) } else { None };
+    let mesh = if mesh_height.is_finite() {
+        Some(mesh_height)
+    } else {
+        None
+    };
     let engine_ref = &mut *engine;
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         engine_ref.resolve_altitude(lat_rad, lon_rad, input_height, altitude_mode, policy, mesh)
@@ -479,7 +485,13 @@ pub unsafe extern "C" fn olayer_terrain_engine_get_vertical_profile(
     out_profile: *mut *mut C_ProfilePoint,
     out_count: *mut usize,
 ) -> c_int {
-    if engine.is_null() || route_lat.is_null() || route_lon.is_null() || route_height.is_null() || out_profile.is_null() || out_count.is_null() {
+    if engine.is_null()
+        || route_lat.is_null()
+        || route_lon.is_null()
+        || route_height.is_null()
+        || out_profile.is_null()
+        || out_count.is_null()
+    {
         return -1;
     }
 
@@ -499,15 +511,16 @@ pub unsafe extern "C" fn olayer_terrain_engine_get_vertical_profile(
 
     match result {
         Ok(Ok(profile)) => {
-            let mut c_points: Vec<C_ProfilePoint> = profile.into_iter().map(|p| {
-                C_ProfilePoint {
+            let mut c_points: Vec<C_ProfilePoint> = profile
+                .into_iter()
+                .map(|p| C_ProfilePoint {
                     distance_meters: p.distance_meters,
                     ground_elevation: p.ground_elevation,
                     lat: p.coords.lat.to_degrees(),
                     lon: p.coords.lon.to_degrees(),
                     height: p.coords.height,
-                }
-            }).collect();
+                })
+                .collect();
 
             c_points.shrink_to_fit();
             let count = c_points.len();
@@ -590,8 +603,12 @@ pub extern "C" fn olayer_interpolator_create() -> *mut InterpolationEngine {
 
 /// Creates a new InterpolationEngine instance with custom stale threshold.
 #[no_mangle]
-pub extern "C" fn olayer_interpolator_create_with_threshold(stale_threshold: f64) -> *mut InterpolationEngine {
-    Box::into_raw(Box::new(InterpolationEngine::with_stale_threshold(stale_threshold)))
+pub extern "C" fn olayer_interpolator_create_with_threshold(
+    stale_threshold: f64,
+) -> *mut InterpolationEngine {
+    Box::into_raw(Box::new(InterpolationEngine::with_stale_threshold(
+        stale_threshold,
+    )))
 }
 
 /// Updates or inserts a target state. Returns 0 on success, negative error.
@@ -721,7 +738,10 @@ pub unsafe extern "C" fn olayer_interpolator_interpolate_all(
 
 /// Frees interpolated targets allocated by Rust.
 #[no_mangle]
-pub unsafe extern "C" fn olayer_interpolated_targets_free(targets: *mut C_InterpolatedTarget, count: usize) {
+pub unsafe extern "C" fn olayer_interpolated_targets_free(
+    targets: *mut C_InterpolatedTarget,
+    count: usize,
+) {
     if !targets.is_null() && count > 0 {
         let vec = Vec::from_raw_parts(targets, count, count);
         for t in vec {
@@ -744,7 +764,11 @@ pub unsafe extern "C" fn olayer_interpolator_free(engine: *mut InterpolationEngi
 
 /// Creates a new `LocalTangentFrame` at the given geodetic origin.
 #[no_mangle]
-pub extern "C" fn olayer_local_frame_create(origin_lat: f64, origin_lon: f64, origin_height: f64) -> *mut LocalTangentFrame {
+pub extern "C" fn olayer_local_frame_create(
+    origin_lat: f64,
+    origin_lon: f64,
+    origin_height: f64,
+) -> *mut LocalTangentFrame {
     let origin = LatLon::new(origin_lat, origin_lon, origin_height);
     Box::into_raw(Box::new(LocalTangentFrame::new(origin)))
 }
@@ -806,7 +830,11 @@ pub unsafe extern "C" fn olayer_local_frame_radar_look_angles(
     out_azimuth_rad: *mut f64,
     out_elevation_rad: *mut f64,
 ) -> c_int {
-    if frame.is_null() || out_slant_range.is_null() || out_azimuth_rad.is_null() || out_elevation_rad.is_null() {
+    if frame.is_null()
+        || out_slant_range.is_null()
+        || out_azimuth_rad.is_null()
+        || out_elevation_rad.is_null()
+    {
         return -1;
     }
     let frame_ref = &*frame;
@@ -830,7 +858,11 @@ pub unsafe extern "C" fn olayer_local_frame_radar_look_angles_refracted(
     out_azimuth_rad: *mut f64,
     out_elevation_rad: *mut f64,
 ) -> c_int {
-    if frame.is_null() || out_slant_range.is_null() || out_azimuth_rad.is_null() || out_elevation_rad.is_null() {
+    if frame.is_null()
+        || out_slant_range.is_null()
+        || out_azimuth_rad.is_null()
+        || out_elevation_rad.is_null()
+    {
         return -1;
     }
     let frame_ref = &*frame;
@@ -861,7 +893,9 @@ pub extern "C" fn olayer_magnetic_model_create_default() -> *mut MagneticModel {
 /// Creates a `MagneticModel` from a null-terminated `WMM.COF` string.
 /// Returns null pointer if parsing fails or string is invalid UTF-8.
 #[no_mangle]
-pub unsafe extern "C" fn olayer_magnetic_model_create_from_cof(cof_str: *const c_char) -> *mut MagneticModel {
+pub unsafe extern "C" fn olayer_magnetic_model_create_from_cof(
+    cof_str: *const c_char,
+) -> *mut MagneticModel {
     if cof_str.is_null() {
         return std::ptr::null_mut();
     }
@@ -1122,7 +1156,10 @@ pub unsafe extern "C" fn olayer_spatial_polygon_contains_point(
         return -1;
     }
     let slice = std::slice::from_raw_parts(poly_coords, num_coords);
-    let vertices: Vec<LatLon> = slice.iter().map(|c| LatLon::new(c.lat, c.lon, c.height)).collect();
+    let vertices: Vec<LatLon> = slice
+        .iter()
+        .map(|c| LatLon::new(c.lat, c.lon, c.height))
+        .collect();
     let poly = GeodesicPolygon::new(vertices);
     let pt = LatLon::new(point.lat, point.lon, point.height);
     *out_contains = if poly.contains_point(&pt) { 1 } else { 0 };
@@ -1146,8 +1183,16 @@ pub unsafe extern "C" fn olayer_tools_compute_rbl(
         return -1;
     }
     let manager = TacticalToolsManager::new();
-    let spd = if speed_knots > 0.001 { Some(speed_knots) } else { None };
-    let ep = if epoch_year > 1900.0 { Some(epoch_year) } else { None };
+    let spd = if speed_knots > 0.001 {
+        Some(speed_knots)
+    } else {
+        None
+    };
+    let ep = if epoch_year > 1900.0 {
+        Some(epoch_year)
+    } else {
+        None
+    };
     let res = manager.compute_rbl(from_lat_deg, from_lon_deg, to_lat_deg, to_lon_deg, spd, ep);
 
     *out_measurement = C_RblMeasurement {
@@ -1179,7 +1224,11 @@ pub unsafe extern "C" fn olayer_tools_generate_ppl(
     max_ticks: usize,
     out_ticks_written: *mut usize,
 ) -> c_int {
-    if intervals_minutes.is_null() || out_ticks.is_null() || out_ticks_written.is_null() || num_intervals == 0 {
+    if intervals_minutes.is_null()
+        || out_ticks.is_null()
+        || out_ticks_written.is_null()
+        || num_intervals == 0
+    {
         return -1;
     }
     let intervals = std::slice::from_raw_parts(intervals_minutes, num_intervals);
@@ -1257,7 +1306,10 @@ pub unsafe extern "C" fn olayer_tools_generate_ils_cone(
     max_polygon_coords: usize,
     out_polygon_coords_written: *mut usize,
 ) -> c_int {
-    if out_polygon_coords.is_null() || out_polygon_coords_written.is_null() || max_polygon_coords == 0 {
+    if out_polygon_coords.is_null()
+        || out_polygon_coords_written.is_null()
+        || max_polygon_coords == 0
+    {
         return -1;
     }
     let config = IlsConeConfig {
@@ -1328,7 +1380,9 @@ pub unsafe extern "C" fn olayer_tools_generate_range_rings(
 /// Loads an `AeronauticalDataset` from an AIXM 5.1 XML null-terminated UTF-8 string.
 /// Returns null pointer on error.
 #[no_mangle]
-pub unsafe extern "C" fn olayer_aeronautical_dataset_from_aixm(xml_utf8: *const c_char) -> *mut AeronauticalDataset {
+pub unsafe extern "C" fn olayer_aeronautical_dataset_from_aixm(
+    xml_utf8: *const c_char,
+) -> *mut AeronauticalDataset {
     if xml_utf8.is_null() {
         return std::ptr::null_mut();
     }
@@ -1345,7 +1399,9 @@ pub unsafe extern "C" fn olayer_aeronautical_dataset_from_aixm(xml_utf8: *const 
 /// Loads an `AeronauticalDataset` from a GeoJSON-Aviation null-terminated UTF-8 string.
 /// Returns null pointer on error.
 #[no_mangle]
-pub unsafe extern "C" fn olayer_aeronautical_dataset_from_geojson(json_utf8: *const c_char) -> *mut AeronauticalDataset {
+pub unsafe extern "C" fn olayer_aeronautical_dataset_from_geojson(
+    json_utf8: *const c_char,
+) -> *mut AeronauticalDataset {
     if json_utf8.is_null() {
         return std::ptr::null_mut();
     }
@@ -1557,7 +1613,9 @@ pub unsafe extern "C" fn olayer_weather_generate_isolines(
         max_lon_deg.to_radians(),
     );
 
-    let segments = match olayer_core::weather::generate_isolines_rad(grid_slice, width, height, bounds_rad, iso_slice) {
+    let segments = match olayer_core::weather::generate_isolines_rad(
+        grid_slice, width, height, bounds_rad, iso_slice,
+    ) {
         Ok(s) => s,
         Err(_) => return -2,
     };
@@ -1573,7 +1631,9 @@ pub unsafe extern "C" fn olayer_weather_generate_isolines(
 
 /// Parses a GeoJSON string into a heap-allocated `SigmetDataset`.
 #[no_mangle]
-pub unsafe extern "C" fn olayer_sigmet_dataset_from_geojson(geojson_str: *const c_char) -> *mut SigmetDataset {
+pub unsafe extern "C" fn olayer_sigmet_dataset_from_geojson(
+    geojson_str: *const c_char,
+) -> *mut SigmetDataset {
     if geojson_str.is_null() {
         return std::ptr::null_mut();
     }
@@ -1589,7 +1649,10 @@ pub unsafe extern "C" fn olayer_sigmet_dataset_from_geojson(geojson_str: *const 
 
 /// Returns the total number of warnings in a `SigmetDataset`.
 #[no_mangle]
-pub unsafe extern "C" fn olayer_sigmet_dataset_total_count(ds: *const SigmetDataset, out_count: *mut usize) -> c_int {
+pub unsafe extern "C" fn olayer_sigmet_dataset_total_count(
+    ds: *const SigmetDataset,
+    out_count: *mut usize,
+) -> c_int {
     if ds.is_null() || out_count.is_null() {
         return -1;
     }
@@ -1625,8 +1688,11 @@ pub unsafe extern "C" fn olayer_volumetric_generate_airspace_mesh(
     max_indices: usize,
     out_indices_count: *mut usize,
 ) -> c_int {
-    if polygon_coords.is_null() || out_vertices.is_null() || out_vertices_count.is_null()
-        || out_indices.is_null() || out_indices_count.is_null()
+    if polygon_coords.is_null()
+        || out_vertices.is_null()
+        || out_vertices_count.is_null()
+        || out_indices.is_null()
+        || out_indices_count.is_null()
     {
         return -1;
     }
@@ -1640,7 +1706,9 @@ pub unsafe extern "C" fn olayer_volumetric_generate_airspace_mesh(
         polygon.push(LatLon::from_degrees(pt.lat, pt.lon, pt.height));
     }
 
-    let mesh = match olayer_core::volumetric::generate_airspace_volume_mesh(&polygon, floor_m, ceiling_m) {
+    let mesh = match olayer_core::volumetric::generate_airspace_volume_mesh(
+        &polygon, floor_m, ceiling_m,
+    ) {
         Ok(m) => m,
         Err(_) => return -3,
     };
@@ -1675,8 +1743,11 @@ pub unsafe extern "C" fn olayer_volumetric_generate_trajectory_ribbon(
     max_indices: usize,
     out_indices_count: *mut usize,
 ) -> c_int {
-    if waypoints.is_null() || out_vertices.is_null() || out_vertices_count.is_null()
-        || out_indices.is_null() || out_indices_count.is_null()
+    if waypoints.is_null()
+        || out_vertices.is_null()
+        || out_vertices_count.is_null()
+        || out_indices.is_null()
+        || out_indices_count.is_null()
     {
         return -1;
     }
@@ -1696,7 +1767,11 @@ pub unsafe extern "C" fn olayer_volumetric_generate_trajectory_ribbon(
         None
     };
 
-    let ribbon = match olayer_core::volumetric::generate_trajectory_ribbon_mesh(&poly_wp, ribbon_width_m, scalar_opt) {
+    let ribbon = match olayer_core::volumetric::generate_trajectory_ribbon_mesh(
+        &poly_wp,
+        ribbon_width_m,
+        scalar_opt,
+    ) {
         Ok(r) => r,
         Err(_) => return -3,
     };
@@ -1824,7 +1899,12 @@ mod tests {
     use super::*;
 
     /// Builds a minimal mock DTED Level 0 tile (4x4) for FFI tests.
-    fn create_mock_dted0(origin_lat: &str, origin_lon: &str, num_cols: usize, num_rows: usize) -> Vec<u8> {
+    fn create_mock_dted0(
+        origin_lat: &str,
+        origin_lon: &str,
+        num_cols: usize,
+        num_rows: usize,
+    ) -> Vec<u8> {
         let mut data = vec![b' '; 3428];
         data[0..4].copy_from_slice(b"UHL1");
         let lon_bytes = format!("{: <8}", origin_lon);
@@ -1866,13 +1946,13 @@ mod tests {
             let update_res = olayer_interpolator_update(
                 engine,
                 id_str.as_ptr(),
-                -0.41, // lat
-                -0.81, // lon
+                -0.41,   // lat
+                -0.81,   // lon
                 10000.0, // height
-                250.0, // speed
-                1.57, // heading
-                0.0, // vertical rate
-                1000.0, // time
+                250.0,   // speed
+                1.57,    // heading
+                0.0,     // vertical rate
+                1000.0,  // time
             );
             assert_eq!(update_res, 0);
 
@@ -1938,49 +2018,96 @@ mod tests {
             let fake_data = [0u8; 100];
             let mut out_lat = 0;
             let mut out_lon = 0;
-            assert_eq!(olayer_terrain_engine_load_tile(
-                std::ptr::null_mut(), fake_data.as_ptr(), 10, &mut out_lat, &mut out_lon,
-            ), -1);
-            assert_eq!(olayer_terrain_engine_unload_tile(
-                std::ptr::null_mut(), 0, 0,
-            ), -1);
+            assert_eq!(
+                olayer_terrain_engine_load_tile(
+                    std::ptr::null_mut(),
+                    fake_data.as_ptr(),
+                    10,
+                    &mut out_lat,
+                    &mut out_lon,
+                ),
+                -1
+            );
+            assert_eq!(
+                olayer_terrain_engine_unload_tile(std::ptr::null_mut(), 0, 0,),
+                -1
+            );
             let mut elev = 0.0;
-            assert_eq!(olayer_terrain_engine_get_elevation(
-                std::ptr::null_mut(), 0.0, 0.0, &mut elev,
-            ), -1);
-            assert_eq!(olayer_terrain_engine_get_elevation(
-                engine, 0.0, 0.0, std::ptr::null_mut(),
-            ), -1);
+            assert_eq!(
+                olayer_terrain_engine_get_elevation(std::ptr::null_mut(), 0.0, 0.0, &mut elev,),
+                -1
+            );
+            assert_eq!(
+                olayer_terrain_engine_get_elevation(engine, 0.0, 0.0, std::ptr::null_mut(),),
+                -1
+            );
 
             // Null route pointers for vertical profile
             let mut out_profile: *mut C_ProfilePoint = std::ptr::null_mut();
             let mut count: usize = 0;
-            assert_eq!(olayer_terrain_engine_get_vertical_profile(
-                engine,
-                std::ptr::null(), std::ptr::null(), std::ptr::null(),
-                0, 100.0,
-                &mut out_profile, &mut count,
-            ), -1);
+            assert_eq!(
+                olayer_terrain_engine_get_vertical_profile(
+                    engine,
+                    std::ptr::null(),
+                    std::ptr::null(),
+                    std::ptr::null(),
+                    0,
+                    100.0,
+                    &mut out_profile,
+                    &mut count,
+                ),
+                -1
+            );
 
             // Null interpolator pointers
             let id = std::ffi::CString::new("X").unwrap();
             let mut ptr: *mut C_InterpolatedTarget = std::ptr::null_mut();
             let mut cnt: usize = 0;
-            assert_eq!(olayer_interpolator_update(
-                std::ptr::null_mut(), id.as_ptr(), 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-            ), -1);
-            assert_eq!(olayer_interpolator_update(
-                engine as *mut InterpolationEngine, std::ptr::null(), 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-            ), -1);
-            assert_eq!(olayer_interpolator_remove(
-                std::ptr::null_mut(), id.as_ptr(),
-            ), -1);
-            assert_eq!(olayer_interpolator_interpolate_all(
-                std::ptr::null_mut(), 0.0, &mut ptr, &mut cnt,
-            ), -1);
-            assert_eq!(olayer_interpolator_interpolate_all(
-                engine as *mut InterpolationEngine, 0.0, std::ptr::null_mut(), &mut cnt,
-            ), -1);
+            assert_eq!(
+                olayer_interpolator_update(
+                    std::ptr::null_mut(),
+                    id.as_ptr(),
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                ),
+                -1
+            );
+            assert_eq!(
+                olayer_interpolator_update(
+                    engine as *mut InterpolationEngine,
+                    std::ptr::null(),
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                ),
+                -1
+            );
+            assert_eq!(
+                olayer_interpolator_remove(std::ptr::null_mut(), id.as_ptr(),),
+                -1
+            );
+            assert_eq!(
+                olayer_interpolator_interpolate_all(std::ptr::null_mut(), 0.0, &mut ptr, &mut cnt,),
+                -1
+            );
+            assert_eq!(
+                olayer_interpolator_interpolate_all(
+                    engine as *mut InterpolationEngine,
+                    0.0,
+                    std::ptr::null_mut(),
+                    &mut cnt,
+                ),
+                -1
+            );
 
             olayer_terrain_engine_free(engine);
         }
@@ -1996,7 +2123,11 @@ mod tests {
             let mut out_lat = 0;
             let mut out_lon = 0;
             let load_res = olayer_terrain_engine_load_tile(
-                engine, mock.as_ptr(), mock.len(), &mut out_lat, &mut out_lon,
+                engine,
+                mock.as_ptr(),
+                mock.len(),
+                &mut out_lat,
+                &mut out_lon,
             );
             assert_eq!(load_res, 0);
             assert_eq!(out_lat, -23);
@@ -2011,7 +2142,10 @@ mod tests {
             // Query exact grid cell (col=1, row=1) → elevation = 1*10+1 = 11
             let mut elev2 = -1.0;
             let q2 = olayer_terrain_engine_get_elevation(
-                engine, -23.0 + 1.0 / 3.0, -48.0 + 1.0 / 3.0, &mut elev2,
+                engine,
+                -23.0 + 1.0 / 3.0,
+                -48.0 + 1.0 / 3.0,
+                &mut elev2,
             );
             assert_eq!(q2, 0);
             assert!((elev2 - 11.0).abs() < 1e-3);
@@ -2037,7 +2171,11 @@ mod tests {
             let mut out_lat = 0;
             let mut out_lon = 0;
             let load_res = olayer_terrain_engine_load_tile(
-                engine, mock.as_ptr(), mock.len(), &mut out_lat, &mut out_lon,
+                engine,
+                mock.as_ptr(),
+                mock.len(),
+                &mut out_lat,
+                &mut out_lon,
             );
             assert_eq!(load_res, 0);
 
@@ -2050,9 +2188,13 @@ mod tests {
 
             let prof_res = olayer_terrain_engine_get_vertical_profile(
                 engine,
-                route_lat.as_ptr(), route_lon.as_ptr(), route_height.as_ptr(),
-                2, 2000.0,
-                &mut out_profile, &mut count,
+                route_lat.as_ptr(),
+                route_lon.as_ptr(),
+                route_height.as_ptr(),
+                2,
+                2000.0,
+                &mut out_profile,
+                &mut count,
             );
             assert_eq!(prof_res, 0);
             assert!(count >= 2);
@@ -2075,7 +2217,15 @@ mod tests {
 
             let id = std::ffi::CString::new("REMOVE_ME").unwrap();
             let update = olayer_interpolator_update(
-                engine, id.as_ptr(), 0.0, 0.0, 100.0, 10.0, 0.0, 0.0, 0.0,
+                engine,
+                id.as_ptr(),
+                0.0,
+                0.0,
+                100.0,
+                10.0,
+                0.0,
+                0.0,
+                0.0,
             );
             assert_eq!(update, 0);
 
@@ -2107,7 +2257,15 @@ mod tests {
             // Create a target with a normal ID
             let id_ok = std::ffi::CString::new("OK").unwrap();
             let r1 = olayer_interpolator_update(
-                engine, id_ok.as_ptr(), 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                engine,
+                id_ok.as_ptr(),
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
             );
             assert_eq!(r1, 0);
 
@@ -2149,8 +2307,15 @@ mod tests {
             // Invalid UTF-8 sequence
             let bad_bytes = [0x80u8, 0x81, 0x82, 0x00];
             let r = olayer_interpolator_update(
-                engine, bad_bytes.as_ptr() as *const c_char,
-                0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                engine,
+                bad_bytes.as_ptr() as *const c_char,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
             );
             assert_eq!(r, -3, "Should reject invalid UTF-8 ID");
 
@@ -2164,24 +2329,42 @@ mod tests {
             let frame = olayer_local_frame_create(0.0, 0.0, 0.0);
             assert!(!frame.is_null());
 
-            let mut out_enu = C_EnuPoint { east_m: 0.0, north_m: 0.0, up_m: 0.0 };
+            let mut out_enu = C_EnuPoint {
+                east_m: 0.0,
+                north_m: 0.0,
+                up_m: 0.0,
+            };
             let r1 = olayer_local_frame_lla_to_enu(frame, 0.01, 0.01, 100.0, &mut out_enu);
             assert_eq!(r1, 0);
             assert!(out_enu.east_m > 1000.0);
 
-            let mut out_lla = C_LatLon { lat: 0.0, lon: 0.0, height: 0.0 };
-            let r2 = olayer_local_frame_enu_to_lla(frame, out_enu.east_m, out_enu.north_m, out_enu.up_m, &mut out_lla);
+            let mut out_lla = C_LatLon {
+                lat: 0.0,
+                lon: 0.0,
+                height: 0.0,
+            };
+            let r2 = olayer_local_frame_enu_to_lla(
+                frame,
+                out_enu.east_m,
+                out_enu.north_m,
+                out_enu.up_m,
+                &mut out_lla,
+            );
             assert_eq!(r2, 0);
             assert!((out_lla.lat - 0.01).abs() < 1e-6);
 
             let mut slant = 0.0;
             let mut az = 0.0;
             let mut el = 0.0;
-            let r3 = olayer_local_frame_radar_look_angles(frame, 0.01, 0.01, 100.0, &mut slant, &mut az, &mut el);
+            let r3 = olayer_local_frame_radar_look_angles(
+                frame, 0.01, 0.01, 100.0, &mut slant, &mut az, &mut el,
+            );
             assert_eq!(r3, 0);
             assert!(slant > 1000.0);
 
-            let r4 = olayer_local_frame_radar_look_angles_refracted(frame, 0.01, 0.01, 100.0, 1.333, &mut slant, &mut az, &mut el);
+            let r4 = olayer_local_frame_radar_look_angles_refracted(
+                frame, 0.01, 0.01, 100.0, 1.333, &mut slant, &mut az, &mut el,
+            );
             assert_eq!(r4, 0);
 
             olayer_local_frame_free(frame);
@@ -2284,42 +2467,112 @@ mod tests {
     #[test]
     fn test_c_ffi_spatial_analysis() {
         unsafe {
-            let start = C_LatLon { lat: 0.0, lon: 0.0, height: 0.0 };
-            let end = C_LatLon { lat: 0.0, lon: 0.1, height: 0.0 };
-            let pos = C_LatLon { lat: 0.01, lon: 0.05, height: 0.0 };
+            let start = C_LatLon {
+                lat: 0.0,
+                lon: 0.0,
+                height: 0.0,
+            };
+            let end = C_LatLon {
+                lat: 0.0,
+                lon: 0.1,
+                height: 0.0,
+            };
+            let pos = C_LatLon {
+                lat: 0.01,
+                lon: 0.05,
+                height: 0.0,
+            };
             let mut dev = C_RouteDeviation {
                 cross_track_error_meters: 0.0,
                 along_track_distance_meters: 0.0,
-                nearest_point: C_LatLon { lat: 0.0, lon: 0.0, height: 0.0 },
+                nearest_point: C_LatLon {
+                    lat: 0.0,
+                    lon: 0.0,
+                    height: 0.0,
+                },
             };
             let r1 = olayer_spatial_compute_route_deviation(start, end, pos, &mut dev);
             assert_eq!(r1, 0);
             assert!(dev.cross_track_error_meters < 0.0); // North of Eastbound track
 
-            let p1 = C_LatLon { lat: 0.0, lon: -0.1, height: 0.0 };
-            let p2 = C_LatLon { lat: 0.0, lon: 0.1, height: 0.0 };
-            let p3 = C_LatLon { lat: -0.1, lon: 0.0, height: 0.0 };
-            let p4 = C_LatLon { lat: 0.1, lon: 0.0, height: 0.0 };
-            let mut inter = C_LatLon { lat: 0.0, lon: 0.0, height: 0.0 };
+            let p1 = C_LatLon {
+                lat: 0.0,
+                lon: -0.1,
+                height: 0.0,
+            };
+            let p2 = C_LatLon {
+                lat: 0.0,
+                lon: 0.1,
+                height: 0.0,
+            };
+            let p3 = C_LatLon {
+                lat: -0.1,
+                lon: 0.0,
+                height: 0.0,
+            };
+            let p4 = C_LatLon {
+                lat: 0.1,
+                lon: 0.0,
+                height: 0.0,
+            };
+            let mut inter = C_LatLon {
+                lat: 0.0,
+                lon: 0.0,
+                height: 0.0,
+            };
             let r2 = olayer_spatial_geodesic_intersection(p1, p2, p3, p4, &mut inter);
             assert_eq!(r2, 1);
             assert!(inter.lat.abs() < 1e-6);
             assert!(inter.lon.abs() < 1e-6);
 
             let poly_coords = [
-                C_LatLon { lat: 0.0, lon: 0.0, height: 0.0 },
-                C_LatLon { lat: 0.0, lon: 0.1, height: 0.0 },
-                C_LatLon { lat: 0.1, lon: 0.1, height: 0.0 },
-                C_LatLon { lat: 0.1, lon: 0.0, height: 0.0 },
+                C_LatLon {
+                    lat: 0.0,
+                    lon: 0.0,
+                    height: 0.0,
+                },
+                C_LatLon {
+                    lat: 0.0,
+                    lon: 0.1,
+                    height: 0.0,
+                },
+                C_LatLon {
+                    lat: 0.1,
+                    lon: 0.1,
+                    height: 0.0,
+                },
+                C_LatLon {
+                    lat: 0.1,
+                    lon: 0.0,
+                    height: 0.0,
+                },
             ];
             let mut contains = 0;
-            let pt_in = C_LatLon { lat: 0.05, lon: 0.05, height: 0.0 };
-            let r3 = olayer_spatial_polygon_contains_point(poly_coords.as_ptr(), poly_coords.len(), pt_in, &mut contains);
+            let pt_in = C_LatLon {
+                lat: 0.05,
+                lon: 0.05,
+                height: 0.0,
+            };
+            let r3 = olayer_spatial_polygon_contains_point(
+                poly_coords.as_ptr(),
+                poly_coords.len(),
+                pt_in,
+                &mut contains,
+            );
             assert_eq!(r3, 0);
             assert_eq!(contains, 1);
 
-            let pt_out = C_LatLon { lat: 0.5, lon: 0.5, height: 0.0 };
-            let r4 = olayer_spatial_polygon_contains_point(poly_coords.as_ptr(), poly_coords.len(), pt_out, &mut contains);
+            let pt_out = C_LatLon {
+                lat: 0.5,
+                lon: 0.5,
+                height: 0.0,
+            };
+            let r4 = olayer_spatial_polygon_contains_point(
+                poly_coords.as_ptr(),
+                poly_coords.len(),
+                pt_out,
+                &mut contains,
+            );
             assert_eq!(r4, 0);
             assert_eq!(contains, 0);
         }
@@ -2342,38 +2595,95 @@ mod tests {
                 reciprocal_magnetic_bearing_deg: 0.0,
                 estimated_time_enroute_sec: 0.0,
             };
-            let r1 = olayer_tools_compute_rbl(40.64, -73.78, 42.36, -71.01, 450.0, 2025.0, &mut rbl);
+            let r1 =
+                olayer_tools_compute_rbl(40.64, -73.78, 42.36, -71.01, 450.0, 2025.0, &mut rbl);
             assert_eq!(r1, 0);
             assert!(rbl.distance_nm > 150.0 && rbl.distance_nm < 185.0);
             assert!(rbl.estimated_time_enroute_sec > 1000.0);
 
             // PPL
             let intervals = [1.0, 2.0, 5.0];
-            let mut ticks = [C_PplTick { time_minutes: 0.0, distance_nm: 0.0, lat_deg: 0.0, lon_deg: 0.0 }; 3];
+            let mut ticks = [C_PplTick {
+                time_minutes: 0.0,
+                distance_nm: 0.0,
+                lat_deg: 0.0,
+                lon_deg: 0.0,
+            }; 3];
             let mut written = 0;
-            let r2 = olayer_tools_generate_ppl(40.0, -74.0, 480.0, 90.0, intervals.as_ptr(), intervals.len(), ticks.as_mut_ptr(), 3, &mut written);
+            let r2 = olayer_tools_generate_ppl(
+                40.0,
+                -74.0,
+                480.0,
+                90.0,
+                intervals.as_ptr(),
+                intervals.len(),
+                ticks.as_mut_ptr(),
+                3,
+                &mut written,
+            );
             assert_eq!(r2, 0);
             assert_eq!(written, 3);
             assert!((ticks[0].distance_nm - 8.0).abs() < 1e-3);
 
             // Holding Pattern
-            let mut holding_coords = [C_LatLon { lat: 0.0, lon: 0.0, height: 0.0 }; 64];
+            let mut holding_coords = [C_LatLon {
+                lat: 0.0,
+                lon: 0.0,
+                height: 0.0,
+            }; 64];
             let mut holding_written = 0;
-            let r3 = olayer_tools_generate_holding_pattern(51.5, -0.1, 270.0, 1, 1.0, 210.0, 16, holding_coords.as_mut_ptr(), 64, &mut holding_written);
+            let r3 = olayer_tools_generate_holding_pattern(
+                51.5,
+                -0.1,
+                270.0,
+                1,
+                1.0,
+                210.0,
+                16,
+                holding_coords.as_mut_ptr(),
+                64,
+                &mut holding_written,
+            );
             assert_eq!(r3, 0);
             assert!(holding_written >= 34);
 
             // ILS Cone
-            let mut ils_coords = [C_LatLon { lat: 0.0, lon: 0.0, height: 0.0 }; 32];
+            let mut ils_coords = [C_LatLon {
+                lat: 0.0,
+                lon: 0.0,
+                height: 0.0,
+            }; 32];
             let mut ils_written = 0;
-            let r4 = olayer_tools_generate_ils_cone(51.4775, -0.4614, 270.0, 10.0, 5.0, 12, ils_coords.as_mut_ptr(), 32, &mut ils_written);
+            let r4 = olayer_tools_generate_ils_cone(
+                51.4775,
+                -0.4614,
+                270.0,
+                10.0,
+                5.0,
+                12,
+                ils_coords.as_mut_ptr(),
+                32,
+                &mut ils_written,
+            );
             assert_eq!(r4, 0);
             assert!(ils_written >= 14);
 
             // Range Rings
-            let mut ring_coords = [C_LatLon { lat: 0.0, lon: 0.0, height: 0.0 }; 64];
+            let mut ring_coords = [C_LatLon {
+                lat: 0.0,
+                lon: 0.0,
+                height: 0.0,
+            }; 64];
             let mut ring_written = 0;
-            let r5 = olayer_tools_generate_range_rings(0.0, 0.0, 10.0, 36, ring_coords.as_mut_ptr(), 64, &mut ring_written);
+            let r5 = olayer_tools_generate_range_rings(
+                0.0,
+                0.0,
+                10.0,
+                36,
+                ring_coords.as_mut_ptr(),
+                64,
+                &mut ring_written,
+            );
             assert_eq!(r5, 0);
             assert_eq!(ring_written, 37);
         }
@@ -2382,7 +2692,8 @@ mod tests {
     #[test]
     fn test_c_ffi_aeronautical_dataset() {
         unsafe {
-            let geojson = std::ffi::CString::new(r#"{
+            let geojson = std::ffi::CString::new(
+                r#"{
                 "type": "FeatureCollection",
                 "features": [
                     {
@@ -2400,7 +2711,9 @@ mod tests {
                         }
                     }
                 ]
-            }"#).unwrap();
+            }"#,
+            )
+            .unwrap();
 
             let ds = olayer_aeronautical_dataset_from_geojson(geojson.as_ptr());
             assert!(!ds.is_null());
@@ -2409,7 +2722,8 @@ mod tests {
             let mut nav = 0;
             let mut rtes = 0;
             let mut apts = 0;
-            let r1 = olayer_aeronautical_dataset_counts(ds, &mut asp, &mut nav, &mut rtes, &mut apts);
+            let r1 =
+                olayer_aeronautical_dataset_counts(ds, &mut asp, &mut nav, &mut rtes, &mut apts);
             assert_eq!(r1, 0);
             assert_eq!(asp, 0);
             assert_eq!(nav, 1);
@@ -2429,7 +2743,12 @@ mod tests {
 
             let mut out_buf = vec![0 as c_char; 2048];
             let mut out_len = 0;
-            let r3 = olayer_aeronautical_dataset_to_geojson(ds, out_buf.as_mut_ptr(), 2048, &mut out_len);
+            let r3 = olayer_aeronautical_dataset_to_geojson(
+                ds,
+                out_buf.as_mut_ptr(),
+                2048,
+                &mut out_len,
+            );
             assert_eq!(r3, 0);
             assert!(out_len > 50);
 
@@ -2494,7 +2813,15 @@ mod tests {
             let mut lines = [0.0; 64];
             let mut count = 0;
             let r2 = olayer_weather_generate_wind_barb(
-                51.5, -0.1, 65.0, 90.0, 1000.0, false, lines.as_mut_ptr(), 64, &mut count,
+                51.5,
+                -0.1,
+                65.0,
+                90.0,
+                1000.0,
+                false,
+                lines.as_mut_ptr(),
+                64,
+                &mut count,
             );
             assert_eq!(r2, 0);
             assert!(count >= 12);
@@ -2505,7 +2832,18 @@ mod tests {
             let mut segs = [0.0; 32];
             let mut seg_count = 0;
             let r3 = olayer_weather_generate_isolines(
-                grid.as_ptr(), 2, 2, 0.0, 0.0, 1.0, 1.0, isos.as_ptr(), 1, segs.as_mut_ptr(), 32, &mut seg_count,
+                grid.as_ptr(),
+                2,
+                2,
+                0.0,
+                0.0,
+                1.0,
+                1.0,
+                isos.as_ptr(),
+                1,
+                segs.as_mut_ptr(),
+                32,
+                &mut seg_count,
             );
             assert_eq!(r3, 0);
             assert_eq!(seg_count, 5);
@@ -2542,10 +2880,26 @@ mod tests {
         unsafe {
             // 1. Volumetric Airspace Mesh
             let polygon = [
-                C_LatLon { lat: 51.0, lon: -0.5, height: 0.0 },
-                C_LatLon { lat: 51.0, lon: 0.5, height: 0.0 },
-                C_LatLon { lat: 51.5, lon: 0.5, height: 0.0 },
-                C_LatLon { lat: 51.5, lon: -0.5, height: 0.0 },
+                C_LatLon {
+                    lat: 51.0,
+                    lon: -0.5,
+                    height: 0.0,
+                },
+                C_LatLon {
+                    lat: 51.0,
+                    lon: 0.5,
+                    height: 0.0,
+                },
+                C_LatLon {
+                    lat: 51.5,
+                    lon: 0.5,
+                    height: 0.0,
+                },
+                C_LatLon {
+                    lat: 51.5,
+                    lon: -0.5,
+                    height: 0.0,
+                },
             ];
 
             let mut out_verts = [0.0f32; 512];
@@ -2571,9 +2925,21 @@ mod tests {
 
             // 2. Trajectory Ribbon Mesh
             let waypoints = [
-                C_LatLon { lat: 40.0, lon: -74.0, height: 1000.0 },
-                C_LatLon { lat: 40.5, lon: -73.5, height: 5000.0 },
-                C_LatLon { lat: 41.0, lon: -73.0, height: 10000.0 },
+                C_LatLon {
+                    lat: 40.0,
+                    lon: -74.0,
+                    height: 1000.0,
+                },
+                C_LatLon {
+                    lat: 40.5,
+                    lon: -73.5,
+                    height: 5000.0,
+                },
+                C_LatLon {
+                    lat: 41.0,
+                    lon: -73.0,
+                    height: 10000.0,
+                },
             ];
 
             let mut out_ribbon_verts = [0.0f32; 256];

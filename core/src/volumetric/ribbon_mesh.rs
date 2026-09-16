@@ -52,8 +52,12 @@ pub fn generate_trajectory_ribbon_mesh(
     for pt in waypoints {
         let ecef = lla_to_ecef(pt, &ell);
         ecef_points.push([ecef.x, ecef.y, ecef.z]);
-        if pt.height < min_alt { min_alt = pt.height; }
-        if pt.height > max_alt { max_alt = pt.height; }
+        if pt.height < min_alt {
+            min_alt = pt.height;
+        }
+        if pt.height > max_alt {
+            max_alt = pt.height;
+        }
     }
 
     let alt_span = if (max_alt - min_alt).abs() > 1e-3 {
@@ -89,7 +93,10 @@ pub fn generate_trajectory_ribbon_mesh(
 
         if i > 0 {
             let p_prev = ecef_points[i - 1];
-            let d = ((p_curr[0] - p_prev[0]).powi(2) + (p_curr[1] - p_prev[1]).powi(2) + (p_curr[2] - p_prev[2]).powi(2)).sqrt();
+            let d = ((p_curr[0] - p_prev[0]).powi(2)
+                + (p_curr[1] - p_prev[1]).powi(2)
+                + (p_curr[2] - p_prev[2]).powi(2))
+            .sqrt();
             cumulative_dist += d;
         }
 
@@ -99,15 +106,31 @@ pub fn generate_trajectory_ribbon_mesh(
         // Tangent along track
         let tangent = if i == 0 {
             let p_next = ecef_points[1];
-            normalize3([p_next[0] - p_curr[0], p_next[1] - p_curr[1], p_next[2] - p_curr[2]])
+            normalize3([
+                p_next[0] - p_curr[0],
+                p_next[1] - p_curr[1],
+                p_next[2] - p_curr[2],
+            ])
         } else if i == n - 1 {
             let p_prev = ecef_points[n - 2];
-            normalize3([p_curr[0] - p_prev[0], p_curr[1] - p_prev[1], p_curr[2] - p_prev[2]])
+            normalize3([
+                p_curr[0] - p_prev[0],
+                p_curr[1] - p_prev[1],
+                p_curr[2] - p_prev[2],
+            ])
         } else {
             let p_prev = ecef_points[i - 1];
             let p_next = ecef_points[i + 1];
-            let t_in = normalize3([p_curr[0] - p_prev[0], p_curr[1] - p_prev[1], p_curr[2] - p_prev[2]]);
-            let t_out = normalize3([p_next[0] - p_curr[0], p_next[1] - p_curr[1], p_next[2] - p_curr[2]]);
+            let t_in = normalize3([
+                p_curr[0] - p_prev[0],
+                p_curr[1] - p_prev[1],
+                p_curr[2] - p_prev[2],
+            ]);
+            let t_out = normalize3([
+                p_next[0] - p_curr[0],
+                p_next[1] - p_curr[1],
+                p_next[2] - p_curr[2],
+            ]);
             normalize3([t_in[0] + t_out[0], t_in[1] + t_out[1], t_in[2] + t_out[2]])
         };
 
@@ -116,7 +139,11 @@ pub fn generate_trajectory_ribbon_mesh(
 
         // Surface normal for the ribbon: Right x Tangent
         let ribbon_norm = normalize3(cross3(right, tangent));
-        let norm_f32 = [ribbon_norm[0] as f32, ribbon_norm[1] as f32, ribbon_norm[2] as f32];
+        let norm_f32 = [
+            ribbon_norm[0] as f32,
+            ribbon_norm[1] as f32,
+            ribbon_norm[2] as f32,
+        ];
 
         // Scalar value for color gradient
         let scalar_val = if let Some(scalars) = scalar_values {

@@ -71,9 +71,10 @@ fn ascii_contains_insensitive(haystack: &str, needle: &str) -> bool {
     let needle_bytes = needle.as_bytes();
     let haystack_bytes = haystack.as_bytes();
     haystack_bytes.windows(needle_bytes.len()).any(|window| {
-        window.iter().zip(needle_bytes.iter()).all(|(h, n)| {
-            h.to_ascii_lowercase() == *n || h == n
-        })
+        window
+            .iter()
+            .zip(needle_bytes.iter())
+            .all(|(h, n)| h.to_ascii_lowercase() == *n || h == n)
     })
 }
 
@@ -126,7 +127,8 @@ impl NatoProvider {
         if ascii_contains_insensitive(code, "friend") {
             return Affiliation::Friend;
         }
-        if ascii_contains_insensitive(code, "hostile") || ascii_contains_insensitive(code, "enemy") {
+        if ascii_contains_insensitive(code, "hostile") || ascii_contains_insensitive(code, "enemy")
+        {
             return Affiliation::Hostile;
         }
         if ascii_contains_insensitive(code, "neutral") {
@@ -181,10 +183,14 @@ impl NatoProvider {
         {
             return BattleDimension::Surface;
         }
-        if ascii_contains_insensitive(code, "subsurface") || ascii_contains_insensitive(code, "submarine") {
+        if ascii_contains_insensitive(code, "subsurface")
+            || ascii_contains_insensitive(code, "submarine")
+        {
             return BattleDimension::Subsurface;
         }
-        if ascii_contains_insensitive(code, "space") || ascii_contains_insensitive(code, "satellite") {
+        if ascii_contains_insensitive(code, "space")
+            || ascii_contains_insensitive(code, "satellite")
+        {
             return BattleDimension::Space;
         }
 
@@ -215,23 +221,38 @@ impl NatoProvider {
         match affiliation {
             Affiliation::Unknown | Affiliation::Pending => {
                 // Cloud-like shape (simplified as a circle)
-                ("M 0,-15 A 15,15 0 1 1 0,15 A 15,15 0 1 1 0,-15 Z", (-15.0, -15.0, 15.0, 15.0))
+                (
+                    "M 0,-15 A 15,15 0 1 1 0,15 A 15,15 0 1 1 0,-15 Z",
+                    (-15.0, -15.0, 15.0, 15.0),
+                )
             }
             Affiliation::Friend | Affiliation::AssumedFriend => {
                 // Rectangle
-                ("M -15,-10 L 15,-10 L 15,10 L -15,10 Z", (-15.0, -10.0, 15.0, 10.0))
+                (
+                    "M -15,-10 L 15,-10 L 15,10 L -15,10 Z",
+                    (-15.0, -10.0, 15.0, 10.0),
+                )
             }
             Affiliation::Hostile => {
                 // Diamond
-                ("M 0,-16 L 16,0 L 0,16 L -16,0 Z", (-16.0, -16.0, 16.0, 16.0))
+                (
+                    "M 0,-16 L 16,0 L 0,16 L -16,0 Z",
+                    (-16.0, -16.0, 16.0, 16.0),
+                )
             }
             Affiliation::Neutral => {
                 // Square
-                ("M -14,-14 L 14,-14 L 14,14 L -14,14 Z", (-14.0, -14.0, 14.0, 14.0))
+                (
+                    "M -14,-14 L 14,-14 L 14,14 L -14,14 Z",
+                    (-14.0, -14.0, 14.0, 14.0),
+                )
             }
             Affiliation::Other => {
                 // Rectangle (same as friend but different colour)
-                ("M -15,-10 L 15,-10 L 15,10 L -15,10 Z", (-15.0, -10.0, 15.0, 10.0))
+                (
+                    "M -15,-10 L 15,-10 L 15,10 L -15,10 Z",
+                    (-15.0, -10.0, 15.0, 10.0),
+                )
             }
         }
     }
@@ -310,7 +331,11 @@ impl SymbologyProvider for NatoProvider {
         code.starts_with("nato:") || code.starts_with("mil:")
     }
 
-    fn resolve(&self, code: &str, _style: &StyleRegistry) -> Result<ResolvedSymbol, SymbologyError> {
+    fn resolve(
+        &self,
+        code: &str,
+        _style: &StyleRegistry,
+    ) -> Result<ResolvedSymbol, SymbologyError> {
         let affiliation = Self::parse_affiliation(code);
         let dimension = Self::parse_dimension(code);
 
@@ -447,7 +472,10 @@ mod tests {
         // Verify the icon is a Path (submarine silhouette)
         match &symbol.primitives[1] {
             SymbolPrimitive::Path { commands, .. } => {
-                assert!(commands.contains("A 9,5"), "Submarine icon should have an arc");
+                assert!(
+                    commands.contains("A 9,5"),
+                    "Submarine icon should have an arc"
+                );
             }
             _ => panic!("Second primitive should be the submarine icon Path"),
         }
@@ -518,7 +546,9 @@ mod tests {
         registry.register_provider(Box::new(NatoProvider::new()));
 
         let style = StyleRegistry::default();
-        let symbol = registry.resolve_symbol("nato:friend:fighter", &style).unwrap();
+        let symbol = registry
+            .resolve_symbol("nato:friend:fighter", &style)
+            .unwrap();
         assert_eq!(symbol.primitives.len(), 2);
 
         // Unknown code should fail

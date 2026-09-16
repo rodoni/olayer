@@ -1,5 +1,5 @@
 use crate::geodesy::errors::GeodesyError;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct LatLon {

@@ -1,6 +1,6 @@
 use crate::aeronautical::errors::AeronauticalError;
 use crate::geodesy::coords::LatLon;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 /// Standard classification of controlled, uncontrolled, or special-use airspace.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -47,7 +47,7 @@ pub enum AltitudeReference {
 }
 
 /// Vertical boundary definition for an airspace volume.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub struct AltitudeLimit {
     /// Height in meters above the datum.
     value_m: f64,
@@ -81,17 +81,71 @@ impl AltitudeLimit {
         })
     }
 
+    /// Creates an altitude limit in meters AGL.
+    ///
+    /// # Errors
+    /// Returns [`AeronauticalError::InvalidAltitude`] for non-finite or negative values.
+    ///
+    /// # Panics
+    /// This function does not panic for valid Rust inputs.
+    ///
+    /// # Safety
+    /// This function does not use unsafe operations.
+    pub fn agl(value_m: f64) -> Result<Self, AeronauticalError> {
+        if !value_m.is_finite() || value_m < 0.0 {
+            return Err(AeronauticalError::InvalidAltitude(format!(
+                "invalid AGL value: {value_m}"
+            )));
+        }
+        Ok(Self {
+            value_m,
+            reference: AltitudeReference::Agl,
+            flight_level: None,
+        })
+    }
+
     /// Creates an altitude limit from a Flight Level (e.g. FL195 = 19500 ft = 5943.6 m).
-    pub fn from_flight_level(fl: u32) -> Self {
-        let value_m = f64::from(fl) * 100.0 * 0.3048;
-        Self {
+    ///
+    /// # Errors
+    /// Returns [`AeronauticalError::InvalidAltitude`] for invalid, non-finite,
+    /// fractional, negative, or out-of-range flight levels.
+    ///
+    /// # Panics
+    /// This function does not panic for valid Rust inputs.
+    ///
+    /// # Safety
+    /// This function does not use unsafe operations.
+    pub fn from_flight_level(fl: impl Into<f64>) -> Result<Self, AeronauticalError> {
+        let fl = fl.into();
+        if !fl.is_finite() || fl < 0.0 || fl > f64::from(u32::MAX) || fl.fract() != 0.0 {
+            return Err(AeronauticalError::InvalidAltitude(format!(
+                "invalid flight level: {fl}"
+            )));
+        }
+        let flight_level = fl as u32;
+        let value_m = fl * 100.0 * 0.3048;
+        if !value_m.is_finite() {
+            return Err(AeronauticalError::InvalidAltitude(
+                "flight-level conversion is not finite".into(),
+            ));
+        }
+        Ok(Self {
             value_m,
             reference: AltitudeReference::FlightLevel,
-            flight_level: Some(fl),
-        }
+            flight_level: Some(flight_level),
+        })
     }
 
     /// Creates a Ground/Surface limit (0.0 m GND).
+    ///
+    /// # Errors
+    /// This function does not return errors.
+    ///
+    /// # Panics
+    /// This function does not panic.
+    ///
+    /// # Safety
+    /// This function does not use unsafe operations.
     pub const fn ground() -> Self {
         Self {
             value_m: 0.0,
@@ -101,6 +155,15 @@ impl AltitudeLimit {
     }
 
     /// Creates an Uncapped/Unlimited limit.
+    ///
+    /// # Errors
+    /// This function does not return errors.
+    ///
+    /// # Panics
+    /// This function does not panic.
+    ///
+    /// # Safety
+    /// This function does not use unsafe operations.
     pub const fn uncapped() -> Self {
         Self {
             value_m: 100_000.0, // 100 km standard uncapped ceiling
@@ -167,7 +230,47 @@ impl AltitudeLimit {
                 self.value_m
             )));
         }
+        if self.reference == AltitudeReference::FlightLevel {
+            let Some(fl) = self.flight_level else {
+                return Err(AeronauticalError::InvalidAltitude(
+                    "flight-level reference requires a flight level".into(),
+                ));
+            };
+            let expected = f64::from(fl) * 100.0 * 0.3048;
+            if !expected.is_finite() || self.value_m != expected {
+                return Err(AeronauticalError::InvalidAltitude(
+                    "flight-level value does not match flight level".into(),
+                ));
+            }
+        } else if self.flight_level.is_some() {
+            return Err(AeronauticalError::InvalidAltitude(
+                "non-flight-level reference cannot contain a flight level".into(),
+            ));
+        }
         Ok(())
+    }
+}
+
+impl<'de> Deserialize<'de> for AltitudeLimit {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct RawAltitudeLimit {
+            value_m: f64,
+            reference: AltitudeReference,
+            flight_level: Option<u32>,
+        }
+
+        let raw = RawAltitudeLimit::deserialize(deserializer)?;
+        let limit = Self {
+            value_m: raw.value_m,
+            reference: raw.reference,
+            flight_level: raw.flight_level,
+        };
+        limit.validate().map_err(serde::de::Error::custom)?;
+        Ok(limit)
     }
 }
 
@@ -247,6 +350,39 @@ pub enum AirwayType {
     Military,
 }
 
+/// Directionality of an airway segment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum SegmentDirection {
+    /// The segment may be flown in both directions.
+    #[default]
+    Bidirectional,
+    /// The segment may be flown only in its declared direction.
+    Unidirectional,
+}
+
+mod segment_direction_serde {
+    use super::SegmentDirection;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S>(direction: &SegmentDirection, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_bool(matches!(direction, SegmentDirection::Unidirectional))
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<SegmentDirection, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Ok(if bool::deserialize(deserializer)? {
+            SegmentDirection::Unidirectional
+        } else {
+            SegmentDirection::Bidirectional
+        })
+    }
+}
+
 /// A single segment linking two fixes in an airway route.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AirwaySegment {
@@ -264,8 +400,9 @@ pub struct AirwaySegment {
     pub maa_m: Option<f64>,
     /// Inbound magnetic track in degrees.
     pub inbound_bearing_deg: Option<f64>,
-    /// Whether the segment is one-way only.
-    pub is_unidirectional: bool,
+    /// Directionality of the segment.
+    #[serde(with = "segment_direction_serde")]
+    pub direction: SegmentDirection,
 }
 
 /// ATS Airway route composed of sequenced segments.

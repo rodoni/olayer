@@ -9,9 +9,9 @@ pub trait SymbologyProvider {
 }
 
 pub mod declarative;
-pub mod nato;
 pub mod icao;
+pub mod nato;
 
 pub use declarative::DeclarativeProvider;
-pub use nato::NatoProvider;
 pub use icao::IcaoProvider;
+pub use nato::NatoProvider;

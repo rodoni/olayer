@@ -1,9 +1,9 @@
 #![allow(clippy::unreadable_literal)]
 
+use super::{Projection, ProjectionError};
 use crate::geodesy::coords::LatLon;
 use crate::geodesy::ellipsoid::Ellipsoid;
 use crate::geodesy::math::normalize_longitude;
-use super::{Projection, ProjectionError};
 
 /// Latitude limit for Web Mercator (~85.05112878 degrees).
 const WEB_MERCATOR_LIMIT: f64 = 85.05112878_f64.to_radians();
@@ -29,7 +29,8 @@ impl WebMercator {
     #[inline]
     pub fn new(ellipsoid: Ellipsoid) -> Self {
         debug_assert!(
-            (ellipsoid.a - 6378137.0).abs() < 1e-3 && (ellipsoid.f - 1.0 / 298.257223563).abs() < 1e-12,
+            (ellipsoid.a - 6378137.0).abs() < 1e-3
+                && (ellipsoid.f - 1.0 / 298.257223563).abs() < 1e-12,
             "WebMercator is defined on the WGS84 sphere; non-WGS84 ellipsoid passed"
         );
         Self { ellipsoid }
@@ -39,7 +40,10 @@ impl WebMercator {
 impl Projection for WebMercator {
     #[inline]
     fn project(&self, lla: &LatLon) -> Result<(f64, f64), ProjectionError> {
-        debug_assert!(lla.validate().is_ok(), "Invalid LLA in WebMercator::project: {lla:?}");
+        debug_assert!(
+            lla.validate().is_ok(),
+            "Invalid LLA in WebMercator::project: {lla:?}"
+        );
 
         let lat = lla.lat;
         let lon = lla.lon;

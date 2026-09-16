@@ -2,12 +2,12 @@
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Ellipsoid {
-    pub a: f64,                   // Semi-major axis in meters
-    pub b: f64,                   // Semi-minor axis in meters
-    pub f: f64,                   // Flattening
-    pub e_sq: f64,                // First eccentricity squared
-    pub e_prime_sq: f64,          // Second eccentricity squared
-    pub authalic_radius: f64,     // Authalic (mean) spherical radius for Haversine approximations
+    pub a: f64,               // Semi-major axis in meters
+    pub b: f64,               // Semi-minor axis in meters
+    pub f: f64,               // Flattening
+    pub e_sq: f64,            // First eccentricity squared
+    pub e_prime_sq: f64,      // Second eccentricity squared
+    pub authalic_radius: f64, // Authalic (mean) spherical radius for Haversine approximations
 }
 
 impl Ellipsoid {

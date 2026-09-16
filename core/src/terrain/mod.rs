@@ -1,14 +1,19 @@
+pub mod altitude;
+pub mod engine;
 mod errors;
 pub mod geotiff;
 pub mod rgb_decoder;
 pub mod rgb_tile;
 mod tile;
-pub mod engine;
-pub mod altitude;
 
 #[cfg(test)]
 mod tests;
 
+pub use altitude::{resolve_altitude, AltitudeMode, AltitudeUnknownPolicy};
+pub use engine::{
+    ClearanceResult, ElevationSample, MsawState, ProfilePoint, ProfilePointStatus, TerrainEngine,
+    TileKey, UnknownTerrainPolicy,
+};
 pub use errors::TerrainError;
 pub use geotiff::GeoTiffTile;
 pub use rgb_decoder::{
@@ -17,8 +22,3 @@ pub use rgb_decoder::{
 };
 pub use rgb_tile::{RgbElevationTile, SlippyTileKey};
 pub use tile::DtedTile;
-pub use engine::{
-    ClearanceResult, ElevationSample, MsawState, ProfilePoint, ProfilePointStatus, TerrainEngine,
-    TileKey, UnknownTerrainPolicy,
-};
-pub use altitude::{resolve_altitude, AltitudeMode, AltitudeUnknownPolicy};

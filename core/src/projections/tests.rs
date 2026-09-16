@@ -1,10 +1,10 @@
-use crate::geodesy::coords::LatLon;
-use crate::geodesy::ellipsoid::Ellipsoid;
 use super::lcc::LambertConformalConic;
 use super::matrix::Matrix4;
 use super::mercator::WebMercator;
 use super::stereographic::Stereographic;
 use super::{CameraState, Projection, ProjectionError};
+use crate::geodesy::coords::LatLon;
+use crate::geodesy::ellipsoid::Ellipsoid;
 
 fn check_roundtrip(proj: &dyn Projection, points: &[LatLon]) {
     for p in points {
@@ -14,8 +14,18 @@ fn check_roundtrip(proj: &dyn Projection, points: &[LatLon]) {
         let (lat_d, lon_d, _) = p.to_degrees();
         let (lat_b, lon_b, _) = back.to_degrees();
 
-        assert!((lat_d - lat_b).abs() < 1e-7, "Latitude mismatch: {} vs {}", lat_d, lat_b);
-        assert!((lon_d - lon_b).abs() < 1e-7, "Longitude mismatch: {} vs {}", lon_d, lon_b);
+        assert!(
+            (lat_d - lat_b).abs() < 1e-7,
+            "Latitude mismatch: {} vs {}",
+            lat_d,
+            lat_b
+        );
+        assert!(
+            (lon_d - lon_b).abs() < 1e-7,
+            "Longitude mismatch: {} vs {}",
+            lon_d,
+            lon_b
+        );
     }
 }
 
@@ -63,7 +73,7 @@ fn test_web_mercator_roundtrip() {
     let wm = WebMercator::new(ellipsoid);
 
     let test_points = vec![
-        LatLon::from_degrees(0.0, 0.0, 0.0),          // Origin
+        LatLon::from_degrees(0.0, 0.0, 0.0),           // Origin
         LatLon::from_degrees(51.4778, -0.0015, 0.0),   // Greenwich
         LatLon::from_degrees(-23.5505, -46.6333, 0.0), // São Paulo
     ];
@@ -135,13 +145,7 @@ fn test_view_projection_matrix_with_rotation() {
     let center_proj = wm.project(&center).unwrap();
 
     // 90 degree rotation
-    let camera_rot = CameraState::new(
-        center,
-        1.0,
-        std::f64::consts::FRAC_PI_2,
-        1.0,
-        100_000.0,
-    );
+    let camera_rot = CameraState::new(center, 1.0, std::f64::consts::FRAC_PI_2, 1.0, 100_000.0);
     let m_rot_arr = wm.get_view_proj_matrix(&camera_rot).unwrap();
 
     // Multiply a vector v by column-major matrix m
@@ -163,13 +167,23 @@ fn test_view_projection_matrix_with_rotation() {
     assert!(ndc_center[1].abs() < 1e-4);
 
     // A point 50_000m NORTH of center should now map to NDC x ≈ 1 (rotated to the right)
-    let v_north = [center_proj.0 as f32, (center_proj.1 + 50_000.0) as f32, 0.0, 1.0];
+    let v_north = [
+        center_proj.0 as f32,
+        (center_proj.1 + 50_000.0) as f32,
+        0.0,
+        1.0,
+    ];
     let ndc_north = multiply_vector(&v_north);
     assert!((ndc_north[0] - 1.0).abs() < 1e-4);
     assert!(ndc_north[1].abs() < 1e-4);
 
     // A point 50_000m EAST of center should now map to NDC y ≈ -1 (rotated downward)
-    let v_east = [(center_proj.0 + 50_000.0) as f32, center_proj.1 as f32, 0.0, 1.0];
+    let v_east = [
+        (center_proj.0 + 50_000.0) as f32,
+        center_proj.1 as f32,
+        0.0,
+        1.0,
+    ];
     let ndc_east = multiply_vector(&v_east);
     assert!(ndc_east[0].abs() < 1e-4);
     assert!((ndc_east[1] + 1.0).abs() < 1e-4);
@@ -199,10 +213,26 @@ fn test_matrix4_multiply_correctness() {
     //
     // Multiplying by translation(1,2,3):
     // col 3 becomes rot * [1,2,3,1] = [-2, 1, 3, 1]
-    assert!((m[12] - -2.0).abs() < 1e-6, "m[12] expected -2.0, got {}", m[12]);
-    assert!((m[13] - 1.0).abs() < 1e-6, "m[13] expected 1.0, got {}", m[13]);
-    assert!((m[14] - 3.0).abs() < 1e-6, "m[14] expected 3.0, got {}", m[14]);
-    assert!((m[15] - 1.0).abs() < 1e-6, "m[15] expected 1.0, got {}", m[15]);
+    assert!(
+        (m[12] - -2.0).abs() < 1e-6,
+        "m[12] expected -2.0, got {}",
+        m[12]
+    );
+    assert!(
+        (m[13] - 1.0).abs() < 1e-6,
+        "m[13] expected 1.0, got {}",
+        m[13]
+    );
+    assert!(
+        (m[14] - 3.0).abs() < 1e-6,
+        "m[14] expected 3.0, got {}",
+        m[14]
+    );
+    assert!(
+        (m[15] - 1.0).abs() < 1e-6,
+        "m[15] expected 1.0, got {}",
+        m[15]
+    );
 }
 
 #[test]
@@ -223,10 +253,10 @@ fn test_view_projection_matrix() {
     // Camera centered at (0, 0)
     let camera = CameraState::new(
         LatLon::from_degrees(0.0, 0.0, 0.0),
-        1.0,           // zoom
-        0.0,           // rotation
-        1.0,           // aspect ratio (square viewport)
-        100_000.0,     // viewport base in meters
+        1.0,       // zoom
+        0.0,       // rotation
+        1.0,       // aspect ratio (square viewport)
+        100_000.0, // viewport base in meters
     );
 
     let m_arr = wm.get_view_proj_matrix(&camera).unwrap();
@@ -251,13 +281,23 @@ fn test_view_projection_matrix() {
     assert!(ndc_center[1].abs() < 1e-4);
 
     // Point on the right edge of viewport (dx = 50,000 meters) should map to NDC x = 1.0
-    let v_right = [(center_proj.0 + 50_000.0) as f32, center_proj.1 as f32, 0.0, 1.0];
+    let v_right = [
+        (center_proj.0 + 50_000.0) as f32,
+        center_proj.1 as f32,
+        0.0,
+        1.0,
+    ];
     let ndc_right = multiply_vector(&v_right);
     assert!((ndc_right[0] - 1.0).abs() < 1e-4);
     assert!(ndc_right[1].abs() < 1e-4);
 
     // Point on the top edge of viewport (dy = 50,000 meters) should map to NDC y = 1.0
-    let v_top = [center_proj.0 as f32, (center_proj.1 + 50_000.0) as f32, 0.0, 1.0];
+    let v_top = [
+        center_proj.0 as f32,
+        (center_proj.1 + 50_000.0) as f32,
+        0.0,
+        1.0,
+    ];
     let ndc_top = multiply_vector(&v_top);
     assert!(ndc_top[0].abs() < 1e-4);
     assert!((ndc_top[1] - 1.0).abs() < 1e-4);

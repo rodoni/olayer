@@ -1,9 +1,9 @@
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use crate::sld::StyleRegistry;
 use crate::symbol_registry::errors::SymbologyError;
 use crate::symbol_registry::primitives::{ResolvedSymbol, SymbolPrimitive};
 use crate::symbol_registry::providers::SymbologyProvider;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct DeclarativeLibraryDto {
@@ -64,7 +64,11 @@ impl SymbologyProvider for DeclarativeProvider {
     }
 
     #[inline]
-    fn resolve(&self, code: &str, _style: &StyleRegistry) -> Result<ResolvedSymbol, SymbologyError> {
+    fn resolve(
+        &self,
+        code: &str,
+        _style: &StyleRegistry,
+    ) -> Result<ResolvedSymbol, SymbologyError> {
         self.symbols
             .get(code)
             .cloned()

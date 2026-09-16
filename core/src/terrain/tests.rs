@@ -1,8 +1,13 @@
 use crate::geodesy::coords::LatLon;
-use crate::terrain::errors::TerrainError;
 use crate::terrain::engine::{MsawState, TerrainEngine, TileKey, UnknownTerrainPolicy};
+use crate::terrain::errors::TerrainError;
 
-fn create_mock_dted0(origin_lat: &str, origin_lon: &str, num_cols: usize, num_rows: usize) -> Vec<u8> {
+fn create_mock_dted0(
+    origin_lat: &str,
+    origin_lon: &str,
+    num_cols: usize,
+    num_rows: usize,
+) -> Vec<u8> {
     let mut data = vec![b' '; 3428];
 
     // UHL Sentinel
@@ -54,7 +59,12 @@ fn create_mock_dted0(origin_lat: &str, origin_lon: &str, num_cols: usize, num_ro
 }
 
 /// Creates a mock tile where the centre cell contains a null sentinel (-32767).
-fn create_mock_dted0_with_null(origin_lat: &str, origin_lon: &str, num_cols: usize, num_rows: usize) -> Vec<u8> {
+fn create_mock_dted0_with_null(
+    origin_lat: &str,
+    origin_lon: &str,
+    num_cols: usize,
+    num_rows: usize,
+) -> Vec<u8> {
     let mut data = vec![b' '; 3428];
     data[0..4].copy_from_slice(b"UHL1");
     let lon_bytes = format!("{: <8}", origin_lon);
@@ -99,7 +109,13 @@ fn test_parse_mock_dted0() {
     let mut engine = TerrainEngine::new();
 
     let key = engine.load_tile(&mock_bytes).unwrap();
-    assert_eq!(key, TileKey { lat_deg: -23, lon_deg: -48 });
+    assert_eq!(
+        key,
+        TileKey {
+            lat_deg: -23,
+            lon_deg: -48
+        }
+    );
 
     // Southwest corner (origin) — should be zero
     let el = engine.get_elevation(-23.0, -48.0).unwrap();
@@ -196,7 +212,9 @@ fn test_null_sentinel_is_unknown_in_status_api() {
     let mut engine = TerrainEngine::new();
     let data = create_mock_dted0_with_null("230000S", "0480000W", 121, 121);
     engine.load_tile(&data).unwrap();
-    let sample = engine.get_elevation_status((-22.5_f64).to_radians(), (-47.5_f64).to_radians()).unwrap();
+    let sample = engine
+        .get_elevation_status((-22.5_f64).to_radians(), (-47.5_f64).to_radians())
+        .unwrap();
     assert_eq!(sample.elevation_meters, None);
 }
 
@@ -208,8 +226,15 @@ fn test_unknown_terrain_policy_can_reject_or_propagate() {
     let lat = (-22.5_f64).to_radians();
     let lon = (-47.5_f64).to_radians();
 
-    assert_eq!(engine.get_elevation_with_policy(lat, lon, UnknownTerrainPolicy::Propagate).unwrap(), None);
-    assert!(engine.get_elevation_with_policy(lat, lon, UnknownTerrainPolicy::Reject).is_err());
+    assert_eq!(
+        engine
+            .get_elevation_with_policy(lat, lon, UnknownTerrainPolicy::Propagate)
+            .unwrap(),
+        None
+    );
+    assert!(engine
+        .get_elevation_with_policy(lat, lon, UnknownTerrainPolicy::Reject)
+        .is_err());
 }
 
 #[test]
@@ -219,23 +244,45 @@ fn test_msaw_clearance_reports_safe_warning_and_unknown() {
     engine.load_tile(&data).unwrap();
     let lat = (-23.0_f64).to_radians();
     let lon = (-48.0_f64).to_radians();
-    let ground = engine.get_elevation_status(lat, lon).unwrap().elevation_meters.unwrap();
+    let ground = engine
+        .get_elevation_status(lat, lon)
+        .unwrap()
+        .elevation_meters
+        .unwrap();
 
-    let safe = engine.calculate_clearance(lat, lon, ground + 200.0, 100.0, UnknownTerrainPolicy::Propagate).unwrap();
+    let safe = engine
+        .calculate_clearance(
+            lat,
+            lon,
+            ground + 200.0,
+            100.0,
+            UnknownTerrainPolicy::Propagate,
+        )
+        .unwrap();
     assert_eq!(safe.state, MsawState::Safe);
-    let warning = engine.calculate_clearance(lat, lon, ground + 50.0, 100.0, UnknownTerrainPolicy::Propagate).unwrap();
+    let warning = engine
+        .calculate_clearance(
+            lat,
+            lon,
+            ground + 50.0,
+            100.0,
+            UnknownTerrainPolicy::Propagate,
+        )
+        .unwrap();
     assert_eq!(warning.state, MsawState::Warning);
 
     let unknown_data = create_mock_dted0_with_null("230000S", "0480000W", 121, 121);
     let mut unknown_engine = TerrainEngine::new();
     unknown_engine.load_tile(&unknown_data).unwrap();
-    let unknown = unknown_engine.calculate_clearance(
-        (-22.5_f64).to_radians(),
-        (-47.5_f64).to_radians(),
-        1000.0,
-        100.0,
-        UnknownTerrainPolicy::Propagate,
-    ).unwrap();
+    let unknown = unknown_engine
+        .calculate_clearance(
+            (-22.5_f64).to_radians(),
+            (-47.5_f64).to_radians(),
+            1000.0,
+            100.0,
+            UnknownTerrainPolicy::Propagate,
+        )
+        .unwrap();
     assert_eq!(unknown.state, MsawState::Unknown);
 }
 
@@ -283,7 +330,9 @@ fn test_elevation_rad_matches_degrees() {
     let lat_deg = -23.0;
     let lon_deg = -48.0;
     let elev_deg = engine.get_elevation(lat_deg, lon_deg).unwrap();
-    let elev_rad = engine.get_elevation_rad(lat_deg.to_radians(), lon_deg.to_radians()).unwrap();
+    let elev_rad = engine
+        .get_elevation_rad(lat_deg.to_radians(), lon_deg.to_radians())
+        .unwrap();
     assert!((elev_deg - elev_rad).abs() < 1e-12);
 }
 
@@ -351,7 +400,10 @@ fn test_parse_uhl_invalid_direction() {
 
 #[test]
 fn test_tile_key_copy() {
-    let k1 = TileKey { lat_deg: -23, lon_deg: -48 };
+    let k1 = TileKey {
+        lat_deg: -23,
+        lon_deg: -48,
+    };
     let k2 = k1;
     // k1 must still be usable because TileKey is Copy
     assert_eq!(k1.lat_deg, -23);
@@ -384,7 +436,9 @@ fn test_terrain_error_display() {
 
 #[test]
 fn test_mapbox_rgb_decoding() {
-    use crate::terrain::rgb_decoder::{decode_mapbox_rgb, decode_rgb_elevation, RgbElevationEncoding};
+    use crate::terrain::rgb_decoder::{
+        decode_mapbox_rgb, decode_rgb_elevation, RgbElevationEncoding,
+    };
 
     // Sea level: height = 0m -> -10000 + (R*65536 + G*256 + B)*0.1 = 0
     // (R*65536 + G*256 + B) = 100,000 -> R = 1, G = 134, B = 160
@@ -405,7 +459,9 @@ fn test_mapbox_rgb_decoding() {
 
 #[test]
 fn test_terrarium_rgb_decoding() {
-    use crate::terrain::rgb_decoder::{decode_terrarium_rgb, decode_rgb_elevation, RgbElevationEncoding};
+    use crate::terrain::rgb_decoder::{
+        decode_rgb_elevation, decode_terrarium_rgb, RgbElevationEncoding,
+    };
 
     // Sea level (0m) in Terrarium: (R*256 + G + B/256) = 32768 -> R = 128, G = 0, B = 0
     let elev_0 = decode_terrarium_rgb(128, 0, 0);
@@ -439,7 +495,8 @@ fn test_rgb_tile_bounds_and_elevation() {
         rgba_buf.extend_from_slice(&[1, 154, 40, 255]);
     }
 
-    let tile = RgbElevationTile::from_rgba(key, 2, 2, &rgba_buf, RgbElevationEncoding::MapboxRgb).unwrap();
+    let tile =
+        RgbElevationTile::from_rgba(key, 2, 2, &rgba_buf, RgbElevationEncoding::MapboxRgb).unwrap();
     assert_eq!(tile.width, 2);
     assert_eq!(tile.height, 2);
 
@@ -454,7 +511,14 @@ fn test_rgb_tile_bounds_and_elevation() {
     assert!(tile.get_elevation_rad(1.0, 1.0).is_none());
 }
 
-fn create_mock_geotiff_float32(width: u32, height: u32, min_lon_deg: f64, max_lat_deg: f64, pixel_scale_deg: f64, elevation_val: f32) -> Vec<u8> {
+fn create_mock_geotiff_float32(
+    width: u32,
+    height: u32,
+    min_lon_deg: f64,
+    max_lat_deg: f64,
+    pixel_scale_deg: f64,
+    elevation_val: f32,
+) -> Vec<u8> {
     let mut bytes = Vec::new();
 
     // TIFF Header (8 bytes)
@@ -585,7 +649,17 @@ fn test_multi_source_terrain_engine() {
         // Mapbox RGB 1200m: 11200 * 10 = 112000 -> R = 1, G = 181, B = 128
         rgba_buf.extend_from_slice(&[1, 181, 128, 255]);
     }
-    engine.load_rgb_tile(10, 512, 512, 2, 2, &rgba_buf, RgbElevationEncoding::MapboxRgb).unwrap();
+    engine
+        .load_rgb_tile(
+            10,
+            512,
+            512,
+            2,
+            2,
+            &rgba_buf,
+            RgbElevationEncoding::MapboxRgb,
+        )
+        .unwrap();
     assert_eq!(engine.rgb_cache_size(), 1);
 
     // 2. Load a GeoTIFF covering lat 49..50, lon 10..11 with 820m elevation

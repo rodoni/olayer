@@ -6,6 +6,6 @@ mod registry;
 mod tests;
 
 pub use errors::SymbologyError;
-pub use primitives::{Color, Stroke, SymbolPrimitive, ResolvedSymbol};
-pub use providers::{SymbologyProvider, DeclarativeProvider, NatoProvider, IcaoProvider};
+pub use primitives::{Color, ResolvedSymbol, Stroke, SymbolPrimitive};
+pub use providers::{DeclarativeProvider, IcaoProvider, NatoProvider, SymbologyProvider};
 pub use registry::SymbolRegistry;

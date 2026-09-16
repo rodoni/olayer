@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use crate::declutter::types::Rect2D;
+use std::collections::HashMap;
 
 /// Uniform 2D spatial hash grid for $O(1)$ fast bounding box collision queries.
 pub struct SpatialHashGrid {
@@ -60,12 +60,7 @@ impl SpatialHashGrid {
 }
 
 /// Checks whether 2D line segment AB intersects line segment CD.
-pub fn line_segments_intersect(
-    a: [f32; 2],
-    b: [f32; 2],
-    c: [f32; 2],
-    d: [f32; 2],
-) -> bool {
+pub fn line_segments_intersect(a: [f32; 2], b: [f32; 2], c: [f32; 2], d: [f32; 2]) -> bool {
     let ccw = |p1: [f32; 2], p2: [f32; 2], p3: [f32; 2]| -> f32 {
         (p2[0] - p1[0]) * (p3[1] - p1[1]) - (p2[1] - p1[1]) * (p3[0] - p1[0])
     };

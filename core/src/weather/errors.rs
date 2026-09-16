@@ -4,7 +4,11 @@ use std::fmt;
 #[derive(Debug, Clone, PartialEq)]
 pub enum WeatherError {
     /// Invalid grid dimensions (e.g., width or height is 0 or buffer length mismatch).
-    InvalidGridDimensions { width: usize, height: usize, actual_len: usize },
+    InvalidGridDimensions {
+        width: usize,
+        height: usize,
+        actual_len: usize,
+    },
     /// Invalid isovalues for contour generation (e.g., empty array or non-finite values).
     InvalidIsovalues(String),
     /// Invalid wind parameters (e.g., negative wind speed).
@@ -16,7 +20,11 @@ pub enum WeatherError {
 impl fmt::Display for WeatherError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            WeatherError::InvalidGridDimensions { width, height, actual_len } => {
+            WeatherError::InvalidGridDimensions {
+                width,
+                height,
+                actual_len,
+            } => {
                 write!(f, "Invalid grid dimensions: {width}x{height} does not match buffer length {actual_len}")
             }
             WeatherError::InvalidIsovalues(msg) => write!(f, "Invalid isovalues: {msg}"),

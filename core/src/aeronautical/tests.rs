@@ -1,6 +1,9 @@
 use crate::aeronautical::aixm_parser::parse_aixm_51_str;
 use crate::aeronautical::geojson_parser::{export_dataset_to_geojson, parse_geojson_aviation_str};
-use crate::aeronautical::types::{AirspaceType, NavaidType};
+use crate::aeronautical::types::{
+    AeronauticalAirport, AeronauticalAirway, AeronauticalRunway, AirspaceType, AirwaySegment,
+    AirwayType, AltitudeLimit, AltitudeReference, NavaidType, SegmentDirection,
+};
 use crate::geodesy::coords::LatLon;
 
 const SAMPLE_AIXM_51_XML: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -208,4 +211,128 @@ fn rejects_invalid_geojson_coordinates_and_altitudes() {
 fn rejects_malformed_aixm_coordinates() {
     let malformed = r#"<aixm:Message xmlns:aixm="urn:aixm"><aixm:Airspace gml:id="A"><aixm:type>CTR</aixm:type><gml:posList xmlns:gml="urn:gml">51.0 invalid 52.0</gml:posList></aixm:Airspace></aixm:Message>"#;
     assert!(parse_aixm_51_str(malformed).is_err());
+}
+
+#[test]
+fn altitude_limit_deserialization_validates_and_preserves_serde_shape() {
+    let valid: AltitudeLimit =
+        serde_json::from_str(r#"{"value_m":5943.6,"reference":"FlightLevel","flight_level":195}"#)
+            .unwrap();
+    assert_eq!(valid.reference(), AltitudeReference::FlightLevel);
+    assert!(serde_json::from_str::<AltitudeLimit>(
+        r#"{"value_m":null,"reference":"Amsl","flight_level":null}"#,
+    )
+    .is_err());
+    assert!(AltitudeLimit::from_flight_level(f64::INFINITY).is_err());
+    assert!(AltitudeLimit::from_flight_level(f64::from(u32::MAX) + 1.0).is_err());
+}
+
+#[test]
+fn geojson_preserves_altitude_references_and_sector() {
+    let input = r#"{"type":"FeatureCollection","features":[{"type":"Feature","properties":{"aero_type":"Airspace","uid":"S","airspace_type":"SECTOR","lower_limit_reference":"GND","upper_limit_reference":"UNCAPPED"},"geometry":{"type":"Polygon","coordinates":[[[-1,50],[-1,51],[0,51],[0,50],[-1,50]]]}}]}"#;
+    let dataset = parse_geojson_aviation_str(input).unwrap();
+    let airspace = &dataset.airspaces[0];
+    assert_eq!(airspace.airspace_type, AirspaceType::Sector);
+    assert_eq!(airspace.lower_limit.reference(), AltitudeReference::Ground);
+    assert_eq!(
+        airspace.upper_limit.reference(),
+        AltitudeReference::Uncapped
+    );
+    let roundtrip =
+        parse_geojson_aviation_str(&export_dataset_to_geojson(&dataset).unwrap()).unwrap();
+    assert_eq!(
+        roundtrip.airspaces[0].lower_limit.reference(),
+        AltitudeReference::Ground
+    );
+    assert_eq!(
+        roundtrip.airspaces[0].upper_limit.reference(),
+        AltitudeReference::Uncapped
+    );
+}
+
+#[test]
+fn geojson_rejects_open_short_rings_and_invalid_typed_properties() {
+    for ring in [
+        "[[-1,50],[-1,51],[0,51]]",
+        "[[-1,50],[-1,51],[0,51],[0,50]]",
+    ] {
+        let input = format!(
+            r#"{{"type":"FeatureCollection","features":[{{"type":"Feature","properties":{{"aero_type":"Airspace"}},"geometry":{{"type":"Polygon","coordinates":[{ring}]}}}}]}}"#
+        );
+        assert!(parse_geojson_aviation_str(&input).is_err());
+    }
+    let invalid_navaid = r#"{"type":"FeatureCollection","features":[{"type":"Feature","properties":{"aero_type":"Navaid","frequency_mhz":"bad"},"geometry":{"type":"Point","coordinates":[0,0]}}]}"#;
+    assert!(parse_geojson_aviation_str(invalid_navaid).is_err());
+    let invalid_airport = r#"{"type":"FeatureCollection","features":[{"type":"Feature","properties":{"aero_type":"Airport","icao":12},"geometry":{"type":"Point","coordinates":[0,0]}}]}"#;
+    assert!(parse_geojson_aviation_str(invalid_airport).is_err());
+    let invalid_airway = r#"{"type":"FeatureCollection","features":[{"type":"Feature","properties":{"aero_type":"Airway","route_type":true},"geometry":{"type":"LineString","coordinates":[[0,0],[1,1]]}}]}"#;
+    assert!(parse_geojson_aviation_str(invalid_airway).is_err());
+}
+
+#[test]
+fn rejects_fractional_aixm_flight_levels_and_missing_airspace_fields() {
+    let fractional = SAMPLE_AIXM_51_XML.replace(
+        "<aixm:upperLimit uom=\"FL\">195</aixm:upperLimit>",
+        "<aixm:upperLimit uom=\"FL\">195.5</aixm:upperLimit>",
+    );
+    assert!(parse_aixm_51_str(&fractional).is_err());
+
+    let missing_name = SAMPLE_AIXM_51_XML.replace("<aixm:name>PARIS TMA SECTOR 1</aixm:name>", "");
+    assert!(parse_aixm_51_str(&missing_name).is_err());
+}
+
+#[test]
+fn rejects_geojson_type_geometry_mismatches() {
+    let input = r#"{"type":"FeatureCollection","features":[{"type":"Feature","properties":{"aero_type":"Airport","icao":"TEST"},"geometry":{"type":"Polygon","coordinates":[[[-1,50],[-1,51],[0,51],[-1,50]]]}}]}"#;
+    assert!(parse_geojson_aviation_str(input).is_err());
+}
+
+#[test]
+fn geojson_roundtrip_preserves_airway_and_runway_metadata() {
+    let point = LatLon::from_degrees(50.0, -1.0, 10.0);
+    let other = LatLon::from_degrees(51.0, 0.0, 20.0);
+    let dataset = crate::aeronautical::AeronauticalDataset {
+        airspaces: Vec::new(),
+        navaids: Vec::new(),
+        airways: vec![AeronauticalAirway {
+            ident: "A1".into(),
+            route_type: AirwayType::Rnav1,
+            segments: vec![AirwaySegment {
+                from_ident: "A".into(),
+                to_ident: "B".into(),
+                from_coords: point,
+                to_coords: other,
+                mea_m: Some(1200.0),
+                maa_m: Some(2400.0),
+                inbound_bearing_deg: Some(90.0),
+                direction: SegmentDirection::Unidirectional,
+            }],
+        }],
+        airports: vec![AeronauticalAirport {
+            icao: "TEST".into(),
+            iata: None,
+            name: "Test Airport".into(),
+            coords: point,
+            elevation_m: 10.0,
+            runways: vec![AeronauticalRunway {
+                ident: "09/27".into(),
+                true_bearing_deg: 90.0,
+                magnetic_bearing_deg: 87.0,
+                length_m: 1200.0,
+                width_m: 30.0,
+                threshold_primary: point,
+                threshold_secondary: other,
+                surface: "Asphalt".into(),
+            }],
+        }],
+    };
+    let exported = export_dataset_to_geojson(&dataset).unwrap();
+    let roundtrip = parse_geojson_aviation_str(&exported).unwrap();
+    assert_eq!(roundtrip.airways[0].segments[0].mea_m, Some(1200.0));
+    assert_eq!(
+        roundtrip.airways[0].segments[0].direction,
+        SegmentDirection::Unidirectional
+    );
+    assert_eq!(roundtrip.airports[0].runways[0].ident, "09/27");
+    assert_eq!(roundtrip.airports[0].runways[0].length_m, 1200.0);
 }

@@ -22,10 +22,12 @@ pub enum NavaidType {
 impl NavaidType {
     /// Parses the navaid type from a symbol code.
     fn from_code(code: &str) -> Option<Self> {
-        if ascii_contains_insensitive(code, "vortac") || ascii_contains_insensitive(code, "vor_tac") {
+        if ascii_contains_insensitive(code, "vortac") || ascii_contains_insensitive(code, "vor_tac")
+        {
             return Some(NavaidType::VorTac);
         }
-        if ascii_contains_insensitive(code, "vordme") || ascii_contains_insensitive(code, "vor_dme") {
+        if ascii_contains_insensitive(code, "vordme") || ascii_contains_insensitive(code, "vor_dme")
+        {
             return Some(NavaidType::VorDme);
         }
         if ascii_contains_insensitive(code, "vor") {
@@ -40,7 +42,8 @@ impl NavaidType {
         if ascii_contains_insensitive(code, "ndb") {
             return Some(NavaidType::Ndb);
         }
-        if ascii_contains_insensitive(code, "heliport") || ascii_contains_insensitive(code, "heli") {
+        if ascii_contains_insensitive(code, "heliport") || ascii_contains_insensitive(code, "heli")
+        {
             return Some(NavaidType::Heliport);
         }
         if ascii_contains_insensitive(code, "airport")
@@ -52,10 +55,14 @@ impl NavaidType {
         if ascii_contains_insensitive(code, "waypoint") || ascii_contains_insensitive(code, "wpt") {
             return Some(NavaidType::Waypoint);
         }
-        if ascii_contains_insensitive(code, "intersection") || ascii_contains_insensitive(code, "int:") {
+        if ascii_contains_insensitive(code, "intersection")
+            || ascii_contains_insensitive(code, "int:")
+        {
             return Some(NavaidType::Intersection);
         }
-        if ascii_contains_insensitive(code, "runway") || ascii_contains_insensitive(code, "threshold") {
+        if ascii_contains_insensitive(code, "runway")
+            || ascii_contains_insensitive(code, "threshold")
+        {
             return Some(NavaidType::RunwayThreshold);
         }
         None
@@ -113,7 +120,8 @@ impl IcaoProvider {
                 (
                     vec![
                         SymbolPrimitive::Path {
-                            commands: "M 0,-14 L 12,-7 L 12,7 L 0,14 L -12,7 L -12,-7 Z".to_string(),
+                            commands: "M 0,-14 L 12,-7 L 12,7 L 0,14 L -12,7 L -12,-7 Z"
+                                .to_string(),
                             fill: Some(white),
                             stroke: Some(Stroke::new(blue, 2.0)),
                         },
@@ -133,7 +141,8 @@ impl IcaoProvider {
                 (
                     vec![
                         SymbolPrimitive::Path {
-                            commands: "M 0,-14 L 12,-7 L 12,7 L 0,14 L -12,7 L -12,-7 Z".to_string(),
+                            commands: "M 0,-14 L 12,-7 L 12,7 L 0,14 L -12,7 L -12,-7 Z"
+                                .to_string(),
                             fill: Some(white),
                             stroke: Some(Stroke::new(blue, 2.0)),
                         },
@@ -159,7 +168,8 @@ impl IcaoProvider {
                 (
                     vec![
                         SymbolPrimitive::Path {
-                            commands: "M 0,-14 L 12,-7 L 12,7 L 0,14 L -12,7 L -12,-7 Z".to_string(),
+                            commands: "M 0,-14 L 12,-7 L 12,7 L 0,14 L -12,7 L -12,-7 Z"
+                                .to_string(),
                             fill: Some(white),
                             stroke: Some(Stroke::new(blue, 2.0)),
                         },
@@ -321,7 +331,11 @@ impl SymbologyProvider for IcaoProvider {
         code.starts_with("icao:") && NavaidType::from_code(code).is_some()
     }
 
-    fn resolve(&self, code: &str, _style: &StyleRegistry) -> Result<ResolvedSymbol, SymbologyError> {
+    fn resolve(
+        &self,
+        code: &str,
+        _style: &StyleRegistry,
+    ) -> Result<ResolvedSymbol, SymbologyError> {
         let navaid = NavaidType::from_code(code)
             .ok_or_else(|| SymbologyError::SymbolNotFound(code.to_string()))?;
 

@@ -1,7 +1,7 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use std::sync::Arc;
 use olayer_core::geodesy::LatLon;
 use olayer_core::interpolator::{InterpolationEngine, TargetState};
+use std::sync::Arc;
 
 fn benchmark_interpolation(c: &mut Criterion) {
     let mut engine = InterpolationEngine::new();

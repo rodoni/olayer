@@ -20,7 +20,9 @@ fn benchmark_projections(c: &mut Criterion) {
         b.iter(|| stereo.project(black_box(&point)))
     });
     c.bench_function("lcc_project", |b| b.iter(|| lcc.project(black_box(&point))));
-    c.bench_function("web_mercator_project", |b| b.iter(|| wm.project(black_box(&point))));
+    c.bench_function("web_mercator_project", |b| {
+        b.iter(|| wm.project(black_box(&point)))
+    });
 
     c.bench_function("stereographic_roundtrip", |b| {
         b.iter(|| {

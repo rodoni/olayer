@@ -18,7 +18,11 @@ impl SymbologyProvider for TestProgProvider {
     }
 
     #[inline]
-    fn resolve(&self, code: &str, _style: &StyleRegistry) -> Result<ResolvedSymbol, SymbologyError> {
+    fn resolve(
+        &self,
+        code: &str,
+        _style: &StyleRegistry,
+    ) -> Result<ResolvedSymbol, SymbologyError> {
         Ok(ResolvedSymbol {
             symbol_id: code.to_string(),
             primitives: vec![SymbolPrimitive::Circle {
@@ -97,7 +101,9 @@ fn test_declarative_provider_from_json() {
     assert_eq!(resolved.primitives.len(), 3);
 
     match &resolved.primitives[0] {
-        SymbolPrimitive::Path { commands, stroke, .. } => {
+        SymbolPrimitive::Path {
+            commands, stroke, ..
+        } => {
             assert_eq!(commands, "M -10,-10 L 10,-10 Z");
             assert_eq!(stroke.as_ref().unwrap().width, 2.0);
         }
@@ -113,7 +119,9 @@ fn test_declarative_provider_from_json() {
     }
 
     match &resolved.primitives[2] {
-        SymbolPrimitive::Text { content, font_size, .. } => {
+        SymbolPrimitive::Text {
+            content, font_size, ..
+        } => {
             assert_eq!(content, "V");
             assert_eq!(*font_size, 12.0);
         }
@@ -156,7 +164,8 @@ fn test_registry_chaining_and_errors() {
 
 #[test]
 fn test_invalid_json_format() {
-    let broken_json = r#"{ "library_name": "Broken", "symbols": { "civil:vor": { "bbox": "not_a_bbox" } } }"#;
+    let broken_json =
+        r#"{ "library_name": "Broken", "symbols": { "civil:vor": { "bbox": "not_a_bbox" } } }"#;
     let res = DeclarativeProvider::from_json(broken_json);
     assert!(matches!(res, Err(SymbologyError::InvalidFormat(_))));
 }

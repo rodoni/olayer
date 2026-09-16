@@ -1,9 +1,9 @@
 mod errors;
-mod styles;
 pub mod parser;
+mod styles;
 #[cfg(test)]
 mod tests;
 
 pub use errors::SldError;
-pub use styles::{StyleRegistry, RuleStyle, StrokeStyle, FillStyle, TextStyle, PointStyle};
 pub use parser::parse;
+pub use styles::{FillStyle, PointStyle, RuleStyle, StrokeStyle, StyleRegistry, TextStyle};

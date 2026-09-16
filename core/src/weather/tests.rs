@@ -48,7 +48,10 @@ fn test_colorize_dbz_grid() {
 
     // Mismatched grid dimensions error
     let err = colorize_dbz_grid(&grid, 3, 3, RadarColorPalette::Nexrad);
-    assert!(matches!(err, Err(WeatherError::InvalidGridDimensions { .. })));
+    assert!(matches!(
+        err,
+        Err(WeatherError::InvalidGridDimensions { .. })
+    ));
 }
 
 #[test]
@@ -71,7 +74,8 @@ fn test_wind_barb_5kt_and_65kt() {
     assert_eq!(geom_5kt.barbs.len(), 1);
 
     // 65 knots: 1 pennant (50kt) + 1 full barb (10kt) + 1 half barb (5kt)
-    let geom_65kt = generate_wind_barb(&origin, 65.0, std::f64::consts::FRAC_PI_2, 1000.0, false).unwrap();
+    let geom_65kt =
+        generate_wind_barb(&origin, 65.0, std::f64::consts::FRAC_PI_2, 1000.0, false).unwrap();
     assert_eq!(geom_65kt.pennants.len(), 1);
     assert_eq!(geom_65kt.barbs.len(), 2); // 1 full + 1 half = 2 barb segments
 
@@ -122,28 +126,19 @@ fn test_sigmet_feature_and_dataset() {
     assert_eq!(dataset.len(), 1);
 
     // Inside polygon and within altitude window (FL150 ~ 4500m)
-    let hazards_inside = dataset.find_hazards_at_point(
-        51.5_f64.to_radians(),
-        0.0_f64.to_radians(),
-        Some(4500.0),
-    );
+    let hazards_inside =
+        dataset.find_hazards_at_point(51.5_f64.to_radians(), 0.0_f64.to_radians(), Some(4500.0));
     assert_eq!(hazards_inside.len(), 1);
     assert_eq!(hazards_inside[0].id, "SIGMET_01");
 
     // Outside altitude window (500m < floor 1000m)
-    let hazards_too_low = dataset.find_hazards_at_point(
-        51.5_f64.to_radians(),
-        0.0_f64.to_radians(),
-        Some(500.0),
-    );
+    let hazards_too_low =
+        dataset.find_hazards_at_point(51.5_f64.to_radians(), 0.0_f64.to_radians(), Some(500.0));
     assert_eq!(hazards_too_low.len(), 0);
 
     // Outside polygon footprint (Paris ~ 48.8, 2.3)
-    let hazards_outside = dataset.find_hazards_at_point(
-        48.8_f64.to_radians(),
-        2.3_f64.to_radians(),
-        Some(4500.0),
-    );
+    let hazards_outside =
+        dataset.find_hazards_at_point(48.8_f64.to_radians(), 2.3_f64.to_radians(), Some(4500.0));
     assert_eq!(hazards_outside.len(), 0);
 
     // Test GeoJSON roundtrip
@@ -162,11 +157,7 @@ fn test_marching_squares_isolines() {
     // 10  20  10
     // 20  50  20
     // 10  20  10
-    let grid = vec![
-        10.0, 20.0, 10.0,
-        20.0, 50.0, 20.0,
-        10.0, 20.0, 10.0,
-    ];
+    let grid = vec![10.0, 20.0, 10.0, 20.0, 50.0, 20.0, 10.0, 20.0, 10.0];
 
     let bounds_rad = (
         0.0_f64.to_radians(),

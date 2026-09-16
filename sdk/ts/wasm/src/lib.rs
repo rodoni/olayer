@@ -1,16 +1,17 @@
 #![allow(clippy::missing_safety_doc)]
 #![allow(clippy::too_many_arguments)]
 
-use wasm_bindgen::prelude::*;
-use olayer_core::geodesy::{GeodeticSolver, LatLon};
 use olayer_core::geodesy::ellipsoid::Ellipsoid;
+use olayer_core::geodesy::{GeodeticSolver, LatLon};
+use olayer_core::interpolator::{InterpolationEngine, TargetState};
+use olayer_core::projections::{
+    CameraState, LambertConformalConic, Projection, Stereographic, WebMercator,
+};
+use olayer_core::sld::StyleRegistry;
+use olayer_core::symbol_registry::{providers::DeclarativeProvider, SymbolRegistry};
 use olayer_core::terrain::TerrainEngine;
 use std::sync::Arc;
-use olayer_core::interpolator::{InterpolationEngine, TargetState};
-use olayer_core::projections::{LambertConformalConic, WebMercator, Stereographic, Projection, CameraState};
-use olayer_core::sld::StyleRegistry;
-use olayer_core::symbol_registry::{SymbolRegistry, providers::DeclarativeProvider};
-
+use wasm_bindgen::prelude::*;
 
 /// WASM compatible wrapper for LatLon geodetic coordinates.
 #[wasm_bindgen]
@@ -61,8 +62,12 @@ impl WasmTerrainEngine {
     /// Loads a raw DTED buffer slice and registers the resulting tile.
     /// Returns the parsed tile origin coordinates on success.
     pub fn load_tile(&mut self, data: &[u8]) -> Result<WasmTileKey, JsValue> {
-        self.inner.load_tile(data)
-            .map(|key| WasmTileKey { lat_deg: key.lat_deg, lon_deg: key.lon_deg })
+        self.inner
+            .load_tile(data)
+            .map(|key| WasmTileKey {
+                lat_deg: key.lat_deg,
+                lon_deg: key.lon_deg,
+            })
             .map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
@@ -74,13 +79,15 @@ impl WasmTerrainEngine {
 
     /// Returns the interpolated elevation at coordinate degrees.
     pub fn get_elevation(&self, lat_deg: f64, lon_deg: f64) -> Result<f64, JsValue> {
-        self.inner.get_elevation(lat_deg, lon_deg)
+        self.inner
+            .get_elevation(lat_deg, lon_deg)
             .map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
     /// Returns the interpolated elevation at coordinate radians.
     pub fn get_elevation_rad(&self, lat_rad: f64, lon_rad: f64) -> Result<f64, JsValue> {
-        self.inner.get_elevation_rad(lat_rad, lon_rad)
+        self.inner
+            .get_elevation_rad(lat_rad, lon_rad)
             .map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
@@ -105,10 +112,11 @@ impl WasmTerrainEngine {
 
     /// Returns `{ elevation_meters: number | null }`, preserving DTED null samples.
     pub fn get_elevation_status(&self, lat_rad: f64, lon_rad: f64) -> Result<JsValue, JsValue> {
-        let sample = self.inner.get_elevation_status(lat_rad, lon_rad)
+        let sample = self
+            .inner
+            .get_elevation_status(lat_rad, lon_rad)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
-        serde_wasm_bindgen::to_value(&sample)
-            .map_err(|e| JsValue::from_str(&e.to_string()))
+        serde_wasm_bindgen::to_value(&sample).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
     /// Returns profile points with nullable elevations. Set reject_unknown to reject null DTED samples.
@@ -127,10 +135,11 @@ impl WasmTerrainEngine {
         } else {
             olayer_core::terrain::UnknownTerrainPolicy::Propagate
         };
-        let profile = self.inner.get_vertical_profile_status(&route, step_meters, policy)
+        let profile = self
+            .inner
+            .get_vertical_profile_status(&route, step_meters, policy)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
-        serde_wasm_bindgen::to_value(&profile)
-            .map_err(|e| JsValue::from_str(&e.to_string()))
+        serde_wasm_bindgen::to_value(&profile).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
     /// Computes MSAW clearance. Unknown terrain is propagated when reject_unknown is false.
@@ -147,26 +156,35 @@ impl WasmTerrainEngine {
         } else {
             olayer_core::terrain::UnknownTerrainPolicy::Propagate
         };
-        let result = self.inner.calculate_clearance(
-            lat_rad,
-            lon_rad,
-            aircraft_height_meters,
-            minimum_clearance_meters,
-            policy,
-        ).map_err(|e| JsValue::from_str(&e.to_string()))?;
-        serde_wasm_bindgen::to_value(&result)
-            .map_err(|e| JsValue::from_str(&e.to_string()))
+        let result = self
+            .inner
+            .calculate_clearance(
+                lat_rad,
+                lon_rad,
+                aircraft_height_meters,
+                minimum_clearance_meters,
+                policy,
+            )
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        serde_wasm_bindgen::to_value(&result).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
     /// Generates a vertical terrain profile along a sequence of route points.
     /// Route coordinates must be passed as a flat array of [lat0, lon0, height0, lat1, lon1, height1, ...] in **degrees**.
     /// Returns a flat array of profile points [distance0, elevation0, lat0, lon0, height0, ...] in **degrees**.
-    pub fn get_vertical_profile(&self, route_coords: &[f64], step_meters: f64) -> Result<Vec<f64>, JsValue> {
-        let route: Vec<LatLon> = route_coords.chunks_exact(3)
+    pub fn get_vertical_profile(
+        &self,
+        route_coords: &[f64],
+        step_meters: f64,
+    ) -> Result<Vec<f64>, JsValue> {
+        let route: Vec<LatLon> = route_coords
+            .chunks_exact(3)
             .map(|c| LatLon::from_degrees(c[0], c[1], c[2]))
             .collect();
 
-        let profile = self.inner.get_vertical_profile(&route, step_meters)
+        let profile = self
+            .inner
+            .get_vertical_profile(&route, step_meters)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
         // Flatten the result: 5 elements per point (distance, elevation, lat, lon, height)
@@ -188,7 +206,9 @@ impl WasmTerrainEngine {
     /// Returns an error if `capacity` is zero.
     pub fn set_cache_capacity(&self, capacity: usize) -> Result<(), JsValue> {
         if capacity == 0 {
-            return Err(JsValue::from_str("terrain tile cache capacity must be non-zero"));
+            return Err(JsValue::from_str(
+                "terrain tile cache capacity must be non-zero",
+            ));
         }
         self.inner.set_cache_capacity(capacity);
         Ok(())
@@ -275,19 +295,33 @@ impl WasmTerrainEngine {
 fn parse_altitude_mode(value: &str) -> Result<olayer_core::terrain::AltitudeMode, JsValue> {
     match value {
         "absolute" => Ok(olayer_core::terrain::AltitudeMode::Absolute),
-        "clamp-to-ground" | "clamp_to_ground" => Ok(olayer_core::terrain::AltitudeMode::ClampToGround),
-        "relative-to-ground" | "relative_to_ground" => Ok(olayer_core::terrain::AltitudeMode::RelativeToGround),
-        "relative-to-mesh" | "relative_to_mesh" => Ok(olayer_core::terrain::AltitudeMode::RelativeToMesh),
-        _ => Err(JsValue::from_str(&format!("Unknown altitude mode: {value}"))),
+        "clamp-to-ground" | "clamp_to_ground" => {
+            Ok(olayer_core::terrain::AltitudeMode::ClampToGround)
+        }
+        "relative-to-ground" | "relative_to_ground" => {
+            Ok(olayer_core::terrain::AltitudeMode::RelativeToGround)
+        }
+        "relative-to-mesh" | "relative_to_mesh" => {
+            Ok(olayer_core::terrain::AltitudeMode::RelativeToMesh)
+        }
+        _ => Err(JsValue::from_str(&format!(
+            "Unknown altitude mode: {value}"
+        ))),
     }
 }
 
-fn parse_altitude_unknown_policy(value: &str) -> Result<olayer_core::terrain::AltitudeUnknownPolicy, JsValue> {
+fn parse_altitude_unknown_policy(
+    value: &str,
+) -> Result<olayer_core::terrain::AltitudeUnknownPolicy, JsValue> {
     match value {
         "reject" => Ok(olayer_core::terrain::AltitudeUnknownPolicy::Reject),
-        "use-absolute" | "use_absolute" => Ok(olayer_core::terrain::AltitudeUnknownPolicy::UseAbsolute),
+        "use-absolute" | "use_absolute" => {
+            Ok(olayer_core::terrain::AltitudeUnknownPolicy::UseAbsolute)
+        }
         "use-zero" | "use_zero" => Ok(olayer_core::terrain::AltitudeUnknownPolicy::UseZero),
-        _ => Err(JsValue::from_str(&format!("Unknown terrain altitude policy: {value}"))),
+        _ => Err(JsValue::from_str(&format!(
+            "Unknown terrain altitude policy: {value}"
+        ))),
     }
 }
 
@@ -360,7 +394,8 @@ impl WasmInterpolationEngine {
             vertical_rate_mps,
             last_ping_time,
         };
-        self.inner.update_target(state)
+        self.inner
+            .update_target(state)
             .map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
@@ -371,19 +406,21 @@ impl WasmInterpolationEngine {
 
     /// Interpolates positions of all active targets and returns the serialized JSON value.
     pub fn interpolate_all(&self, current_time: f64) -> Result<JsValue, JsValue> {
-        let targets = self.inner.interpolate_all(current_time)
+        let targets = self
+            .inner
+            .interpolate_all(current_time)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
-        serde_wasm_bindgen::to_value(&targets)
-            .map_err(|e| JsValue::from_str(&e.to_string()))
+        serde_wasm_bindgen::to_value(&targets).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
     /// Interpolates targets and returns valid predictions plus skipped-target status.
     pub fn interpolate_all_with_status(&self, current_time: f64) -> Result<JsValue, JsValue> {
-        let batch = self.inner.interpolate_all_with_status(current_time)
+        let batch = self
+            .inner
+            .interpolate_all_with_status(current_time)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
-        serde_wasm_bindgen::to_value(&batch)
-            .map_err(|e| JsValue::from_str(&e.to_string()))
+        serde_wasm_bindgen::to_value(&batch).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 }
 
@@ -396,13 +433,13 @@ impl Default for WasmInterpolationEngine {
 /// WASM compatible camera parameters.
 #[wasm_bindgen]
 pub struct WasmCameraState {
-    pub center_lat: f64, // radians
-    pub center_lon: f64, // radians
+    pub center_lat: f64,    // radians
+    pub center_lon: f64,    // radians
     pub center_height: f64, // meters
     pub zoom: f64,
     pub rotation: f64, // radians
-    pub pitch: f64, // radians
-    pub roll: f64, // radians
+    pub pitch: f64,    // radians
+    pub roll: f64,     // radians
     pub aspect_ratio: f64,
     pub viewport_base_meters: f64,
 }
@@ -458,7 +495,12 @@ pub struct WasmProjection {
 #[wasm_bindgen]
 impl WasmProjection {
     #[wasm_bindgen]
-    pub fn new_lcc(std_par1: f64, std_par2: f64, origin_lat: f64, origin_lon: f64) -> WasmProjection {
+    pub fn new_lcc(
+        std_par1: f64,
+        std_par2: f64,
+        origin_lat: f64,
+        origin_lon: f64,
+    ) -> WasmProjection {
         WasmProjection {
             projection_type: WasmProjectionType::Lcc,
             lcc_std_par1: std_par1,
@@ -533,9 +575,7 @@ impl WasmProjection {
                 );
                 Box::new(stereo)
             }
-            WasmProjectionType::WebMercator => {
-                Box::new(WebMercator::new(Ellipsoid::wgs84()))
-            }
+            WasmProjectionType::WebMercator => Box::new(WebMercator::new(Ellipsoid::wgs84())),
         }
     }
 
@@ -552,7 +592,11 @@ impl WasmProjection {
     pub fn unproject(&self, x: f64, y: f64) -> Result<WasmLatLon, JsValue> {
         let proj = self.get_projection();
         proj.unproject(x, y)
-            .map(|lla| WasmLatLon { lat: lla.lat, lon: lla.lon, height: lla.height })
+            .map(|lla| WasmLatLon {
+                lat: lla.lat,
+                lon: lla.lon,
+                height: lla.height,
+            })
             .map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
@@ -665,11 +709,16 @@ impl WasmSymbolRegistry {
     }
 
     #[wasm_bindgen]
-    pub fn resolve_symbol(&self, code: &str, style: &WasmStyleRegistry) -> Result<JsValue, JsValue> {
-        let resolved = self.inner.resolve_symbol(code, &style.inner)
+    pub fn resolve_symbol(
+        &self,
+        code: &str,
+        style: &WasmStyleRegistry,
+    ) -> Result<JsValue, JsValue> {
+        let resolved = self
+            .inner
+            .resolve_symbol(code, &style.inner)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
-        serde_wasm_bindgen::to_value(&resolved)
-            .map_err(|e| JsValue::from_str(&e.to_string()))
+        serde_wasm_bindgen::to_value(&resolved).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 }
 
@@ -720,7 +769,11 @@ pub struct WasmLocalTangentFrame {
 #[wasm_bindgen]
 impl WasmLocalTangentFrame {
     #[wasm_bindgen(constructor)]
-    pub fn new(origin_lat_rad: f64, origin_lon_rad: f64, origin_height_m: f64) -> WasmLocalTangentFrame {
+    pub fn new(
+        origin_lat_rad: f64,
+        origin_lon_rad: f64,
+        origin_height_m: f64,
+    ) -> WasmLocalTangentFrame {
         let origin = LatLon::new(origin_lat_rad, origin_lon_rad, origin_height_m);
         WasmLocalTangentFrame {
             inner: olayer_core::geodesy::LocalTangentFrame::new(origin),
@@ -750,14 +803,25 @@ impl WasmLocalTangentFrame {
     }
 
     /// Returns `[slant_range_m, azimuth_rad, elevation_rad]` without atmospheric refraction.
-    pub fn radar_look_angles(&self, target_lat_rad: f64, target_lon_rad: f64, target_height_m: f64) -> Vec<f64> {
+    pub fn radar_look_angles(
+        &self,
+        target_lat_rad: f64,
+        target_lon_rad: f64,
+        target_height_m: f64,
+    ) -> Vec<f64> {
         let target = LatLon::new(target_lat_rad, target_lon_rad, target_height_m);
         let (slant, az, el) = self.inner.radar_look_angles(&target);
         vec![slant, az, el]
     }
 
     /// Returns `[slant_range_m, azimuth_rad, elevation_rad]` with tropospheric refraction (k_factor ~1.333).
-    pub fn radar_look_angles_refracted(&self, target_lat_rad: f64, target_lon_rad: f64, target_height_m: f64, k_factor: f64) -> Vec<f64> {
+    pub fn radar_look_angles_refracted(
+        &self,
+        target_lat_rad: f64,
+        target_lon_rad: f64,
+        target_height_m: f64,
+        k_factor: f64,
+    ) -> Vec<f64> {
         let target = LatLon::new(target_lat_rad, target_lon_rad, target_height_m);
         let (slant, az, el) = self.inner.radar_look_angles_refracted(&target, k_factor);
         vec![slant, az, el]
@@ -809,23 +873,42 @@ impl WasmMagneticModel {
     }
 
     /// Converts True North bearing to Magnetic North bearing in radians.
-    pub fn true_to_magnetic(&self, true_bearing_rad: f64, lat_rad: f64, lon_rad: f64, height_m: f64, epoch: f64) -> f64 {
+    pub fn true_to_magnetic(
+        &self,
+        true_bearing_rad: f64,
+        lat_rad: f64,
+        lon_rad: f64,
+        height_m: f64,
+        epoch: f64,
+    ) -> f64 {
         let pt = LatLon::new(lat_rad, lon_rad, height_m);
         self.inner.true_to_magnetic(true_bearing_rad, &pt, epoch)
     }
 
     /// Converts Magnetic North bearing to True North bearing in radians.
-    pub fn magnetic_to_true(&self, mag_bearing_rad: f64, lat_rad: f64, lon_rad: f64, height_m: f64, epoch: f64) -> f64 {
+    pub fn magnetic_to_true(
+        &self,
+        mag_bearing_rad: f64,
+        lat_rad: f64,
+        lon_rad: f64,
+        height_m: f64,
+        epoch: f64,
+    ) -> f64 {
         let pt = LatLon::new(lat_rad, lon_rad, height_m);
         self.inner.magnetic_to_true(mag_bearing_rad, &pt, epoch)
     }
 
     /// Computes all magnetic field elements and returns serialized JSON.
-    pub fn get_magnetic_elements(&self, lat_rad: f64, lon_rad: f64, height_m: f64, epoch: f64) -> Result<JsValue, JsValue> {
+    pub fn get_magnetic_elements(
+        &self,
+        lat_rad: f64,
+        lon_rad: f64,
+        height_m: f64,
+        epoch: f64,
+    ) -> Result<JsValue, JsValue> {
         let pt = LatLon::new(lat_rad, lon_rad, height_m);
         let elements = self.inner.get_magnetic_elements(&pt, epoch);
-        serde_wasm_bindgen::to_value(&elements)
-            .map_err(|e| JsValue::from_str(&e.to_string()))
+        serde_wasm_bindgen::to_value(&elements).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 }
 
@@ -888,8 +971,11 @@ pub fn geodesic_intersection(
     let p2 = LatLon::new(p2_lat, p2_lon, 0.0);
     let p3 = LatLon::new(p3_lat, p3_lon, 0.0);
     let p4 = LatLon::new(p4_lat, p4_lon, 0.0);
-    olayer_core::geodesy::geodesic_intersection(&p1, &p2, &p3, &p4)
-        .map(|pt| WasmLatLon { lat: pt.lat, lon: pt.lon, height: pt.height })
+    olayer_core::geodesy::geodesic_intersection(&p1, &p2, &p3, &p4).map(|pt| WasmLatLon {
+        lat: pt.lat,
+        lon: pt.lon,
+        height: pt.height,
+    })
 }
 
 /// WASM wrapper for a GeodesicPolygon representing airspaces, FIR sectors, or geofences.
@@ -903,7 +989,8 @@ impl WasmGeodesicPolygon {
     /// Creates a new `WasmGeodesicPolygon` from a flat array of coordinates `[lat0, lon0, h0, lat1, lon1, h1, ...]`.
     #[wasm_bindgen(constructor)]
     pub fn new(coords: &[f64]) -> WasmGeodesicPolygon {
-        let vertices: Vec<LatLon> = coords.chunks_exact(3)
+        let vertices: Vec<LatLon> = coords
+            .chunks_exact(3)
             .map(|c| LatLon::new(c[0], c[1], c[2]))
             .collect();
         WasmGeodesicPolygon {
@@ -926,9 +1013,7 @@ impl WasmGeodesicPolygon {
     /// Generates a constant-width geodesic buffer polygon around this polygon.
     pub fn generate_buffer(&self, radius_meters: f64, num_segments: usize) -> WasmGeodesicPolygon {
         let buffered = self.inner.generate_buffer(radius_meters, num_segments);
-        WasmGeodesicPolygon {
-            inner: buffered,
-        }
+        WasmGeodesicPolygon { inner: buffered }
     }
 
     /// Returns a flat array of vertex coordinates `[lat0, lon0, h0, lat1, lon1, h1, ...]`.
@@ -979,7 +1064,9 @@ pub fn compute_tactical_rbl(
     let to_pt = LatLon::from_degrees(to_lat_deg, to_lon_deg, 0.0);
 
     let inv = solver.inverse(&from_pt, &to_pt, &ell).unwrap_or_else(|_| {
-        olayer_core::geodesy::HaversineSolver.inverse(&from_pt, &to_pt, &ell).unwrap()
+        olayer_core::geodesy::HaversineSolver
+            .inverse(&from_pt, &to_pt, &ell)
+            .unwrap()
     });
 
     let dist_m = inv.distance;
@@ -989,13 +1076,21 @@ pub fn compute_tactical_rbl(
     let true_bearing_rad = olayer_core::geodesy::normalize_bearing(inv.initial_bearing);
     let true_bearing_deg = true_bearing_rad.to_degrees();
 
-    let epoch = if epoch_year > 1900.0 { epoch_year } else { 2025.0 };
+    let epoch = if epoch_year > 1900.0 {
+        epoch_year
+    } else {
+        2025.0
+    };
     let mag_model = olayer_core::geodesy::MagneticModel::wmm2025();
     let mag_bearing_rad = mag_model.true_to_magnetic(true_bearing_rad, &from_pt, epoch);
     let mag_bearing_deg = mag_bearing_rad.to_degrees();
 
-    let recip_true_deg = olayer_core::geodesy::normalize_bearing(true_bearing_rad + std::f64::consts::PI).to_degrees();
-    let recip_mag_deg = olayer_core::geodesy::normalize_bearing(mag_bearing_rad + std::f64::consts::PI).to_degrees();
+    let recip_true_deg =
+        olayer_core::geodesy::normalize_bearing(true_bearing_rad + std::f64::consts::PI)
+            .to_degrees();
+    let recip_mag_deg =
+        olayer_core::geodesy::normalize_bearing(mag_bearing_rad + std::f64::consts::PI)
+            .to_degrees();
 
     let ete_sec = if speed_knots > 0.001 {
         (dist_nm / speed_knots) * 3600.0
@@ -1036,7 +1131,9 @@ pub fn generate_tactical_ppl(
     for &t_min in intervals_minutes {
         let dist_nm = ground_speed_knots * (t_min / 60.0);
         let dist_m = dist_nm * 1852.0;
-        let projected = solver.direct(&origin, track_rad, dist_m, &ell).unwrap_or(origin);
+        let projected = solver
+            .direct(&origin, track_rad, dist_m, &ell)
+            .unwrap_or(origin);
         let (p_lat, p_lon, _) = projected.to_degrees();
         out.push(t_min);
         out.push(dist_nm);
@@ -1068,8 +1165,12 @@ pub fn generate_tactical_holding_pattern(
 
     let theta_inbound = inbound_bearing_deg.to_radians();
     let perp_sign = if is_standard_right { 1.0 } else { -1.0 };
-    let bearing_to_turn1_center = olayer_core::geodesy::normalize_bearing(theta_inbound + perp_sign * (std::f64::consts::PI / 2.0));
-    let turn1_center = solver.direct(&fix, bearing_to_turn1_center, turn_radius_m, &ell).unwrap_or(fix);
+    let bearing_to_turn1_center = olayer_core::geodesy::normalize_bearing(
+        theta_inbound + perp_sign * (std::f64::consts::PI / 2.0),
+    );
+    let turn1_center = solver
+        .direct(&fix, bearing_to_turn1_center, turn_radius_m, &ell)
+        .unwrap_or(fix);
 
     let steps = points_per_turn.max(4);
     let mut poly = Vec::with_capacity((steps * 2 + 6) * 2);
@@ -1079,12 +1180,19 @@ pub fn generate_tactical_holding_pattern(
     poly.push(fix_lon_deg);
 
     // 2. Turn 1
-    let start_angle_1 = olayer_core::geodesy::normalize_bearing(bearing_to_turn1_center + std::f64::consts::PI);
+    let start_angle_1 =
+        olayer_core::geodesy::normalize_bearing(bearing_to_turn1_center + std::f64::consts::PI);
     for i in 1..=steps {
         let frac = i as f64 / steps as f64;
-        let sweep = if is_standard_right { frac * std::f64::consts::PI } else { -frac * std::f64::consts::PI };
+        let sweep = if is_standard_right {
+            frac * std::f64::consts::PI
+        } else {
+            -frac * std::f64::consts::PI
+        };
         let angle = olayer_core::geodesy::normalize_bearing(start_angle_1 + sweep);
-        let pt = solver.direct(&turn1_center, angle, turn_radius_m, &ell).unwrap_or(turn1_center);
+        let pt = solver
+            .direct(&turn1_center, angle, turn_radius_m, &ell)
+            .unwrap_or(turn1_center);
         let (lat_d, lon_d, _) = pt.to_degrees();
         poly.push(lat_d);
         poly.push(lon_d);
@@ -1094,22 +1202,36 @@ pub fn generate_tactical_holding_pattern(
     let outbound_start_lat = poly[poly.len() - 2];
     let outbound_start_lon = poly[poly.len() - 1];
     let outbound_start = LatLon::from_degrees(outbound_start_lat, outbound_start_lon, 0.0);
-    let theta_outbound = olayer_core::geodesy::normalize_bearing(theta_inbound + std::f64::consts::PI);
-    let outbound_end = solver.direct(&outbound_start, theta_outbound, leg_dist_m, &ell).unwrap_or(outbound_start);
+    let theta_outbound =
+        olayer_core::geodesy::normalize_bearing(theta_inbound + std::f64::consts::PI);
+    let outbound_end = solver
+        .direct(&outbound_start, theta_outbound, leg_dist_m, &ell)
+        .unwrap_or(outbound_start);
     let (ob_lat, ob_lon, _) = outbound_end.to_degrees();
     poly.push(ob_lat);
     poly.push(ob_lon);
 
     // 4. Turn 2
-    let bearing_to_turn2_center = olayer_core::geodesy::normalize_bearing(theta_outbound + perp_sign * (std::f64::consts::PI / 2.0));
-    let turn2_center = solver.direct(&outbound_end, bearing_to_turn2_center, turn_radius_m, &ell).unwrap_or(outbound_end);
-    let start_angle_2 = olayer_core::geodesy::normalize_bearing(bearing_to_turn2_center + std::f64::consts::PI);
+    let bearing_to_turn2_center = olayer_core::geodesy::normalize_bearing(
+        theta_outbound + perp_sign * (std::f64::consts::PI / 2.0),
+    );
+    let turn2_center = solver
+        .direct(&outbound_end, bearing_to_turn2_center, turn_radius_m, &ell)
+        .unwrap_or(outbound_end);
+    let start_angle_2 =
+        olayer_core::geodesy::normalize_bearing(bearing_to_turn2_center + std::f64::consts::PI);
 
     for i in 1..=steps {
         let frac = i as f64 / steps as f64;
-        let sweep = if is_standard_right { frac * std::f64::consts::PI } else { -frac * std::f64::consts::PI };
+        let sweep = if is_standard_right {
+            frac * std::f64::consts::PI
+        } else {
+            -frac * std::f64::consts::PI
+        };
         let angle = olayer_core::geodesy::normalize_bearing(start_angle_2 + sweep);
-        let pt = solver.direct(&turn2_center, angle, turn_radius_m, &ell).unwrap_or(turn2_center);
+        let pt = solver
+            .direct(&turn2_center, angle, turn_radius_m, &ell)
+            .unwrap_or(turn2_center);
         let (lat_d, lon_d, _) = pt.to_degrees();
         poly.push(lat_d);
         poly.push(lon_d);
@@ -1137,7 +1259,8 @@ pub fn generate_tactical_ils_cone(
     let threshold = LatLon::from_degrees(threshold_lat_deg, threshold_lon_deg, 0.0);
 
     let rwy_heading_rad = runway_heading_deg.to_radians();
-    let approach_back_rad = olayer_core::geodesy::normalize_bearing(rwy_heading_rad + std::f64::consts::PI);
+    let approach_back_rad =
+        olayer_core::geodesy::normalize_bearing(rwy_heading_rad + std::f64::consts::PI);
     let half_fov_rad = (fov_deg / 2.0).to_radians();
     let cone_dist_m = length_nm * 1852.0;
 
@@ -1148,7 +1271,9 @@ pub fn generate_tactical_ils_cone(
     let left_bearing = olayer_core::geodesy::normalize_bearing(approach_back_rad - half_fov_rad);
     let right_bearing = olayer_core::geodesy::normalize_bearing(approach_back_rad + half_fov_rad);
 
-    let left_pt = solver.direct(&threshold, left_bearing, cone_dist_m, &ell).unwrap_or(threshold);
+    let left_pt = solver
+        .direct(&threshold, left_bearing, cone_dist_m, &ell)
+        .unwrap_or(threshold);
     let (left_lat, left_lon, _) = left_pt.to_degrees();
     poly.push(left_lat);
     poly.push(left_lon);
@@ -1156,14 +1281,19 @@ pub fn generate_tactical_ils_cone(
     let steps = arc_steps.max(2);
     for i in 1..steps {
         let frac = i as f64 / steps as f64;
-        let angle = olayer_core::geodesy::normalize_bearing(left_bearing + frac * (fov_deg.to_radians()));
-        let arc_pt = solver.direct(&threshold, angle, cone_dist_m, &ell).unwrap_or(threshold);
+        let angle =
+            olayer_core::geodesy::normalize_bearing(left_bearing + frac * (fov_deg.to_radians()));
+        let arc_pt = solver
+            .direct(&threshold, angle, cone_dist_m, &ell)
+            .unwrap_or(threshold);
         let (a_lat, a_lon, _) = arc_pt.to_degrees();
         poly.push(a_lat);
         poly.push(a_lon);
     }
 
-    let right_pt = solver.direct(&threshold, right_bearing, cone_dist_m, &ell).unwrap_or(threshold);
+    let right_pt = solver
+        .direct(&threshold, right_bearing, cone_dist_m, &ell)
+        .unwrap_or(threshold);
     let (right_lat, right_lon, _) = right_pt.to_degrees();
     poly.push(right_lat);
     poly.push(right_lon);
@@ -1270,24 +1400,32 @@ impl WasmAeronauticalDataset {
     /// Finds a navaid by its identification code, returned as a JSON object.
     pub fn find_navaid(&self, ident: &str) -> Result<JsValue, JsValue> {
         let navaid = self.inner.find_navaid(ident);
-        serde_wasm_bindgen::to_value(&navaid)
-            .map_err(|e| JsValue::from_str(&e.to_string()))
+        serde_wasm_bindgen::to_value(&navaid).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
     /// Finds navaids within a radius in meters around a geodetic point (lat/lon in radians).
-    pub fn find_navaids_within_radius(&self, lat_rad: f64, lon_rad: f64, radius_meters: f64) -> Result<JsValue, JsValue> {
+    pub fn find_navaids_within_radius(
+        &self,
+        lat_rad: f64,
+        lon_rad: f64,
+        radius_meters: f64,
+    ) -> Result<JsValue, JsValue> {
         let center = LatLon::new(lat_rad, lon_rad, 0.0);
-        let navaids = self.inner.find_navaids_within_radius(&center, radius_meters);
-        serde_wasm_bindgen::to_value(&navaids)
-            .map_err(|e| JsValue::from_str(&e.to_string()))
+        let navaids = self
+            .inner
+            .find_navaids_within_radius(&center, radius_meters);
+        serde_wasm_bindgen::to_value(&navaids).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
     /// Finds airspaces containing the given coordinate (lat/lon in radians).
-    pub fn find_airspaces_containing_point(&self, lat_rad: f64, lon_rad: f64) -> Result<JsValue, JsValue> {
+    pub fn find_airspaces_containing_point(
+        &self,
+        lat_rad: f64,
+        lon_rad: f64,
+    ) -> Result<JsValue, JsValue> {
         let pt = LatLon::new(lat_rad, lon_rad, 0.0);
         let airspaces = self.inner.find_airspaces_containing_point(&pt);
-        serde_wasm_bindgen::to_value(&airspaces)
-            .map_err(|e| JsValue::from_str(&e.to_string()))
+        serde_wasm_bindgen::to_value(&airspaces).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 }
 
@@ -1354,11 +1492,9 @@ impl WasmSigmetDataset {
         lon_deg: f64,
         alt_m: Option<f64>,
     ) -> Result<JsValue, JsValue> {
-        let hazards = self.inner.find_hazards_at_point(
-            lat_deg.to_radians(),
-            lon_deg.to_radians(),
-            alt_m,
-        );
+        let hazards =
+            self.inner
+                .find_hazards_at_point(lat_deg.to_radians(), lon_deg.to_radians(), alt_m);
         serde_wasm_bindgen::to_value(&hazards).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 }
@@ -1380,14 +1516,16 @@ pub fn generate_wind_barb_geometry(
     staff_length_meters: f64,
     is_southern_hemisphere: bool,
 ) -> Result<Vec<f64>, JsValue> {
-    let origin = olayer_core::geodesy::coords::LatLon::from_degrees(origin_lat_deg, origin_lon_deg, 0.0);
+    let origin =
+        olayer_core::geodesy::coords::LatLon::from_degrees(origin_lat_deg, origin_lon_deg, 0.0);
     let geom = olayer_core::weather::generate_wind_barb(
         &origin,
         speed_knots,
         direction_deg.to_radians(),
         staff_length_meters,
         is_southern_hemisphere,
-    ).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    )
+    .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
     Ok(olayer_core::weather::wind_barb_to_flat_lines_deg(&geom))
 }
@@ -1433,8 +1571,9 @@ pub fn generate_isolines(
         max_lat_deg.to_radians(),
         max_lon_deg.to_radians(),
     );
-    let segments = olayer_core::weather::generate_isolines_rad(grid, width, height, bounds_rad, isovalues)
-        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let segments =
+        olayer_core::weather::generate_isolines_rad(grid, width, height, bounds_rad, isovalues)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
     Ok(olayer_core::weather::isolines_to_flat_array_deg(&segments))
 }
 
@@ -1510,7 +1649,9 @@ pub fn generate_airspace_volume_mesh(
     ceiling_m: f64,
 ) -> Result<WasmVolumetricMesh, JsValue> {
     if !polygon_flat_deg.len().is_multiple_of(2) || polygon_flat_deg.len() < 6 {
-        return Err(JsValue::from_str("Polygon array must contain at least 3 pairs of [lat_deg, lon_deg] coordinates"));
+        return Err(JsValue::from_str(
+            "Polygon array must contain at least 3 pairs of [lat_deg, lon_deg] coordinates",
+        ));
     }
 
     let num_points = polygon_flat_deg.len() / 2;
@@ -1518,7 +1659,9 @@ pub fn generate_airspace_volume_mesh(
     for i in 0..num_points {
         let lat_deg = polygon_flat_deg[i * 2];
         let lon_deg = polygon_flat_deg[i * 2 + 1];
-        polygon.push(olayer_core::geodesy::coords::LatLon::from_degrees(lat_deg, lon_deg, 0.0));
+        polygon.push(olayer_core::geodesy::coords::LatLon::from_degrees(
+            lat_deg, lon_deg, 0.0,
+        ));
     }
 
     let mesh = olayer_core::volumetric::generate_airspace_volume_mesh(&polygon, floor_m, ceiling_m)
@@ -1544,11 +1687,17 @@ pub fn generate_trajectory_ribbon_mesh(
         let lat_deg = waypoints_flat_deg[i * 3];
         let lon_deg = waypoints_flat_deg[i * 3 + 1];
         let alt_m = waypoints_flat_deg[i * 3 + 2];
-        waypoints.push(olayer_core::geodesy::coords::LatLon::from_degrees(lat_deg, lon_deg, alt_m));
+        waypoints.push(olayer_core::geodesy::coords::LatLon::from_degrees(
+            lat_deg, lon_deg, alt_m,
+        ));
     }
 
-    let mesh = olayer_core::volumetric::generate_trajectory_ribbon_mesh(&waypoints, ribbon_width_m, scalars.as_deref())
-        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let mesh = olayer_core::volumetric::generate_trajectory_ribbon_mesh(
+        &waypoints,
+        ribbon_width_m,
+        scalars.as_deref(),
+    )
+    .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
     Ok(WasmRibbonMesh { inner: mesh })
 }
@@ -1723,20 +1872,15 @@ mod tests {
     fn test_wasm_interpolator_flow() {
         let mut engine = WasmInterpolationEngine::new();
         let update_res = engine.update_target(
-            "FL456",
-            -0.41, // lat (radians)
+            "FL456", -0.41, // lat (radians)
             -0.81, // lon (radians)
-            5000.0,
-            200.0,
-            0.0,
-            0.0,
-            2000.0,
+            5000.0, 200.0, 0.0, 0.0, 2000.0,
         );
         assert!(update_res.is_ok());
 
         let targets_val = engine.interpolate_all(2010.0);
         assert!(targets_val.is_ok());
-        
+
         let removed = engine.remove_target("FL456");
         assert!(removed);
     }
@@ -1744,9 +1888,7 @@ mod tests {
     #[wasm_bindgen_test]
     fn test_wasm_interpolator_with_threshold() {
         let mut engine = WasmInterpolationEngine::with_stale_threshold(15.0);
-        let update_res = engine.update_target(
-            "TGT1", 0.0, 0.0, 100.0, 10.0, 0.0, 0.0, 100.0,
-        );
+        let update_res = engine.update_target("TGT1", 0.0, 0.0, 100.0, 10.0, 0.0, 0.0, 100.0);
         assert!(update_res.is_ok());
 
         // At t = 110.0 (dt = 10.0s <= 15.0s), target should be present
@@ -1772,7 +1914,12 @@ mod tests {
     }
 
     /// Builds a minimal mock DTED Level 0 tile (4x4) for WASM tests.
-    fn create_mock_dted0(origin_lat: &str, origin_lon: &str, num_cols: usize, num_rows: usize) -> Vec<u8> {
+    fn create_mock_dted0(
+        origin_lat: &str,
+        origin_lon: &str,
+        num_cols: usize,
+        num_rows: usize,
+    ) -> Vec<u8> {
         let mut data = vec![b' '; 3428];
         data[0..4].copy_from_slice(b"UHL1");
         let lon_bytes = format!("{: <8}", origin_lon);
@@ -1836,10 +1983,7 @@ mod tests {
         assert!(key.is_ok());
 
         // Route in degrees: from (-22.9, -48.0) to (-22.9, -47.9)
-        let route = [
-            -22.9_f64, -48.0, 0.0,
-            -22.9_f64, -47.9, 0.0,
-        ];
+        let route = [-22.9_f64, -48.0, 0.0, -22.9_f64, -47.9, 0.0];
 
         let profile = engine.get_vertical_profile(&route, 2000.0);
         assert!(profile.is_ok());
@@ -1862,9 +2006,7 @@ mod tests {
 
     #[wasm_bindgen_test]
     fn test_wasm_camera_state() {
-        let cam = WasmCameraState::new(
-            0.41, -0.81, 1000.0, 2.0, 0.5, 0.35, 0.0, 1.6, 250000.0,
-        );
+        let cam = WasmCameraState::new(0.41, -0.81, 1000.0, 2.0, 0.5, 0.35, 0.0, 1.6, 250000.0);
         assert_eq!(cam.center_lat, 0.41);
         assert_eq!(cam.center_lon, -0.81);
         assert_eq!(cam.center_height, 1000.0);
@@ -1896,8 +2038,10 @@ mod tests {
     #[wasm_bindgen_test]
     fn test_wasm_projection_lcc() {
         let proj = WasmProjection::new_lcc(
-            -20.0_f64.to_radians(), -25.0_f64.to_radians(),
-            -23.0_f64.to_radians(), -46.0_f64.to_radians(),
+            -20.0_f64.to_radians(),
+            -25.0_f64.to_radians(),
+            -23.0_f64.to_radians(),
+            -46.0_f64.to_radians(),
         );
         let xy = proj.project(-23.0_f64.to_radians(), -46.0_f64.to_radians(), 0.0);
         assert!(xy.is_ok());
@@ -1922,9 +2066,7 @@ mod tests {
     #[wasm_bindgen_test]
     fn test_wasm_projection_2d_view_proj_matrix() {
         let proj = WasmProjection::new_stereographic(0.0, 0.0);
-        let cam = WasmCameraState::new(
-            0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 100000.0,
-        );
+        let cam = WasmCameraState::new(0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 100000.0);
         let m = proj.get_view_proj_matrix(&cam);
         assert!(m.is_ok());
         let flat = m.unwrap();
@@ -1934,9 +2076,7 @@ mod tests {
     #[wasm_bindgen_test]
     fn test_wasm_projection_3d_view_proj_matrix() {
         let proj = WasmProjection::new_stereographic(0.0, 0.0);
-        let cam = WasmCameraState::new(
-            0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 100000.0,
-        );
+        let cam = WasmCameraState::new(0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 100000.0);
         let m = proj.get_3d_view_proj_matrix(&cam);
         assert!(m.is_ok());
         let flat = m.unwrap();
@@ -1946,9 +2086,7 @@ mod tests {
     #[wasm_bindgen_test]
     fn test_wasm_projection_25d_view_proj_matrix() {
         let proj = WasmProjection::new_web_mercator();
-        let cam = WasmCameraState::new(
-            0.0, 0.0, 0.0, 1.0, 0.0, 0.35, 0.0, 1.0, 100000.0,
-        );
+        let cam = WasmCameraState::new(0.0, 0.0, 0.0, 1.0, 0.0, 0.35, 0.0, 1.0, 100000.0);
         let m = proj.get_25d_view_proj_matrix(&cam);
         assert!(m.is_ok());
         let flat = m.unwrap();
@@ -2060,9 +2198,7 @@ mod tests {
     #[wasm_bindgen_test]
     fn test_wasm_projection_type_roundtrip() {
         let proj = WasmProjection::new_stereographic(0.0, 0.0);
-        let cam = WasmCameraState::new(
-            0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 100000.0,
-        );
+        let cam = WasmCameraState::new(0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 100000.0);
         let m = proj.get_view_proj_matrix(&cam);
         assert!(m.is_ok());
         let flat = m.unwrap();
@@ -2118,9 +2254,7 @@ mod unit_tests {
 
     #[test]
     fn test_wasm_camera_state_pure() {
-        let cam = WasmCameraState::new(
-            0.41, -0.81, 1000.0, 2.0, 0.5, 0.35, 0.0, 1.6, 250000.0,
-        );
+        let cam = WasmCameraState::new(0.41, -0.81, 1000.0, 2.0, 0.5, 0.35, 0.0, 1.6, 250000.0);
         assert_eq!(cam.center_lat, 0.41);
         assert_eq!(cam.center_lon, -0.81);
         assert_eq!(cam.center_height, 1000.0);
@@ -2187,17 +2321,14 @@ mod unit_tests {
         let model = WasmMagneticModel::new();
         assert_eq!(model.epoch(), 2025.0);
         assert_eq!(model.model_name(), "WMM-2025");
-        let dec = model.get_declination(
-            40.64_f64.to_radians(),
-            -73.78_f64.to_radians(),
-            0.0,
-            2025.0,
-        );
+        let dec =
+            model.get_declination(40.64_f64.to_radians(), -73.78_f64.to_radians(), 0.0, 2025.0);
         let dec_deg = dec.to_degrees();
         assert!(dec_deg > -15.0 && dec_deg < -10.0);
 
         // Test dynamic from_cof
-        let cof_str = "2030.0 WMM-2030 11/20/2029\n1 0 -29396.6 0.0 11.6 0.0\n1 1 -1404.9 4589.6 12.3 -23.4";
+        let cof_str =
+            "2030.0 WMM-2030 11/20/2029\n1 0 -29396.6 0.0 11.6 0.0\n1 1 -1404.9 4589.6 12.3 -23.4";
         let custom_model = WasmMagneticModel::from_cof(cof_str).unwrap();
         assert_eq!(custom_model.epoch(), 2030.0);
         assert_eq!(custom_model.model_name(), "WMM-2030");
@@ -2209,20 +2340,12 @@ mod unit_tests {
         assert!(dev.cross_track_error_meters < 0.0); // North of Eastbound track -> negative XTK
         assert!(dev.along_track_distance_meters > 0.0);
 
-        let coords = [
-            0.0, 0.0, 0.0,
-            0.0, 0.1, 0.0,
-            0.1, 0.1, 0.0,
-            0.1, 0.0, 0.0,
-        ];
+        let coords = [0.0, 0.0, 0.0, 0.0, 0.1, 0.0, 0.1, 0.1, 0.0, 0.1, 0.0, 0.0];
         let poly = WasmGeodesicPolygon::new(&coords);
         assert!(poly.contains_point(0.05, 0.05));
         assert!(!poly.contains_point(0.2, 0.2));
 
-        let inter = geodesic_intersection(
-            0.0, -0.1, 0.0, 0.1,
-            -0.1, 0.0, 0.1, 0.0,
-        );
+        let inter = geodesic_intersection(0.0, -0.1, 0.0, 0.1, -0.1, 0.0, 0.1, 0.0);
         assert!(inter.is_some());
         let pt = inter.unwrap();
         assert!(pt.lat.abs() < 1e-6);
@@ -2297,7 +2420,8 @@ mod unit_tests {
             ]
         }"#;
 
-        let ds = WasmAeronauticalDataset::from_geojson(geojson).expect("Parse GeoJSON in WASM failed");
+        let ds =
+            WasmAeronauticalDataset::from_geojson(geojson).expect("Parse GeoJSON in WASM failed");
         assert_eq!(ds.airspace_count(), 1);
         assert_eq!(ds.navaid_count(), 1);
         assert_eq!(ds.total_feature_count(), 2);
@@ -2319,7 +2443,9 @@ mod unit_tests {
             // 500m in Mapbox RGB: [1, 154, 40, 255]
             rgba_buf.extend_from_slice(&[1, 154, 40, 255]);
         }
-        engine.load_rgb_tile(10, 512, 512, "mapbox", &rgba_buf, 2, 2).unwrap();
+        engine
+            .load_rgb_tile(10, 512, 512, "mapbox", &rgba_buf, 2, 2)
+            .unwrap();
         assert_eq!(engine.rgb_cache_size(), 1);
 
         let elev = engine.get_elevation(-0.05, 0.05).unwrap();
@@ -2380,12 +2506,7 @@ mod unit_tests {
     #[test]
     fn test_wasm_volumetric_overlays_pure() {
         // Airspace volume mesh
-        let polygon = [
-            51.0, -0.5,
-            51.0, 0.5,
-            51.5, 0.5,
-            51.5, -0.5,
-        ];
+        let polygon = [51.0, -0.5, 51.0, 0.5, 51.5, 0.5, 51.5, -0.5];
         let mesh = generate_airspace_volume_mesh(&polygon, 1000.0, 5000.0).unwrap();
         assert_eq!(mesh.vertex_count(), 28);
         assert_eq!(mesh.index_count(), 36);
@@ -2393,9 +2514,7 @@ mod unit_tests {
 
         // Trajectory ribbon mesh
         let waypoints = [
-            40.0, -74.0, 1000.0,
-            40.5, -73.5, 5000.0,
-            41.0, -73.0, 10000.0,
+            40.0, -74.0, 1000.0, 40.5, -73.5, 5000.0, 41.0, -73.0, 10000.0,
         ];
         let ribbon = generate_trajectory_ribbon_mesh(&waypoints, 200.0, None).unwrap();
         assert_eq!(ribbon.vertex_count(), 6);
@@ -2407,8 +2526,7 @@ mod unit_tests {
     fn test_wasm_declutter_pure() {
         // Two targets nearby: [x, y, heading, width, height, priority]
         let targets = [
-            100.0, 100.0, -1.0, 50.0, 20.0, 0.0,
-            105.0, 105.0, -1.0, 50.0, 20.0, 1.0,
+            100.0, 100.0, -1.0, 50.0, 20.0, 0.0, 105.0, 105.0, -1.0, 50.0, 20.0, 1.0,
         ];
         let solved = solve_label_placements_flat(&targets, 25.0, 2.0).unwrap();
         assert_eq!(solved.len(), 20); // 2 targets * 10 floats

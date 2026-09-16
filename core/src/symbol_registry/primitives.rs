@@ -1,4 +1,4 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 /// RGBA colour for symbol primitives.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]

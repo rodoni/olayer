@@ -1,6 +1,6 @@
-use std::sync::Arc;
 use olayer_core::geodesy::LatLon;
 use olayer_native::NativeController;
+use std::sync::Arc;
 
 /// A simulated radar target for the desktop demo.
 pub struct SimulatedTarget {
@@ -29,14 +29,16 @@ pub fn update_simulated_targets(
         t.lat += lat_offset;
         t.lon += lon_offset;
 
-        let _ = controller.interpolator.update_target(olayer_core::interpolator::TargetState {
-            id: t.id.clone(),
-            last_position: LatLon::new(t.lat, t.lon, t.alt),
-            speed_mps: t.speed,
-            track_heading_rad: t.heading,
-            vertical_rate_mps: 0.0,
-            last_ping_time: current_time,
-        });
+        let _ = controller
+            .interpolator
+            .update_target(olayer_core::interpolator::TargetState {
+                id: t.id.clone(),
+                last_position: LatLon::new(t.lat, t.lon, t.alt),
+                speed_mps: t.speed,
+                track_heading_rad: t.heading,
+                vertical_rate_mps: 0.0,
+                last_ping_time: current_time,
+            });
         updated += 1;
     }
 

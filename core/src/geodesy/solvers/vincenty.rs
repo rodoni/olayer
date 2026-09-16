@@ -1,8 +1,8 @@
 #![allow(clippy::many_single_char_names)]
 
 use crate::geodesy::coords::LatLon;
-use crate::geodesy::errors::GeodesyError;
 use crate::geodesy::ellipsoid::Ellipsoid;
+use crate::geodesy::errors::GeodesyError;
 use crate::geodesy::math::{normalize_bearing, normalize_longitude};
 use crate::geodesy::solvers::haversine::HaversineSolver;
 use crate::geodesy::solvers::{GeodeticResult, GeodeticSolver};
@@ -21,9 +21,20 @@ impl GeodeticSolver for VincentySolver {
     const EXPECTED_ACCURACY_METERS: f64 = 1e-3;
 
     #[inline]
-    fn inverse(&self, p1: &LatLon, p2: &LatLon, ellipsoid: &Ellipsoid) -> Result<GeodeticResult, GeodesyError> {
-        debug_assert!(p1.validate().is_ok(), "Invalid start coordinate in Vincenty::inverse: {p1:?}");
-        debug_assert!(p2.validate().is_ok(), "Invalid end coordinate in Vincenty::inverse: {p2:?}");
+    fn inverse(
+        &self,
+        p1: &LatLon,
+        p2: &LatLon,
+        ellipsoid: &Ellipsoid,
+    ) -> Result<GeodeticResult, GeodesyError> {
+        debug_assert!(
+            p1.validate().is_ok(),
+            "Invalid start coordinate in Vincenty::inverse: {p1:?}"
+        );
+        debug_assert!(
+            p2.validate().is_ok(),
+            "Invalid end coordinate in Vincenty::inverse: {p2:?}"
+        );
 
         let lat1 = p1.lat;
         let lon1 = p1.lon;
@@ -125,7 +136,8 @@ impl GeodeticSolver for VincentySolver {
         }
 
         let u_sq = cos2_alpha * (a * a - b * b) / (b * b);
-        let a_coeff = 1.0 + u_sq / 16384.0 * (4096.0 + u_sq * (-768.0 + u_sq * (320.0 - 175.0 * u_sq)));
+        let a_coeff =
+            1.0 + u_sq / 16384.0 * (4096.0 + u_sq * (-768.0 + u_sq * (320.0 - 175.0 * u_sq)));
         let b_coeff = u_sq / 1024.0 * (256.0 + u_sq * (-128.0 + u_sq * (74.0 - 47.0 * u_sq)));
 
         let delta_sigma = b_coeff
@@ -144,20 +156,34 @@ impl GeodeticSolver for VincentySolver {
 
         let final_sin_lambda = lambda.sin();
         let final_cos_lambda = lambda.cos();
-        let initial_bearing = normalize_bearing((cos_u2 * final_sin_lambda).atan2(
-            cos_u1 * sin_u2 - sin_u1 * cos_u2 * final_cos_lambda,
-        ));
+        let initial_bearing = normalize_bearing(
+            (cos_u2 * final_sin_lambda).atan2(cos_u1 * sin_u2 - sin_u1 * cos_u2 * final_cos_lambda),
+        );
 
-        let final_bearing = normalize_bearing((cos_u1 * final_sin_lambda).atan2(
-            -sin_u1 * cos_u2 + cos_u1 * sin_u2 * final_cos_lambda,
-        ));
+        let final_bearing = normalize_bearing(
+            (cos_u1 * final_sin_lambda)
+                .atan2(-sin_u1 * cos_u2 + cos_u1 * sin_u2 * final_cos_lambda),
+        );
 
-        Ok(GeodeticResult::new(distance, initial_bearing, final_bearing))
+        Ok(GeodeticResult::new(
+            distance,
+            initial_bearing,
+            final_bearing,
+        ))
     }
 
     #[inline]
-    fn direct(&self, p1: &LatLon, bearing_rad: f64, distance_meters: f64, ellipsoid: &Ellipsoid) -> Result<LatLon, GeodesyError> {
-        debug_assert!(p1.validate().is_ok(), "Invalid start coordinate in Vincenty::direct: {p1:?}");
+    fn direct(
+        &self,
+        p1: &LatLon,
+        bearing_rad: f64,
+        distance_meters: f64,
+        ellipsoid: &Ellipsoid,
+    ) -> Result<LatLon, GeodesyError> {
+        debug_assert!(
+            p1.validate().is_ok(),
+            "Invalid start coordinate in Vincenty::direct: {p1:?}"
+        );
 
         if distance_meters.abs() < 1e-12 {
             return Ok(*p1);
@@ -189,7 +215,8 @@ impl GeodeticSolver for VincentySolver {
         let cos2_alpha = 1.0 - sin_alpha * sin_alpha;
 
         let u_sq = cos2_alpha * (a * a - b * b) / (b * b);
-        let a_coeff = 1.0 + u_sq / 16384.0 * (4096.0 + u_sq * (-768.0 + u_sq * (320.0 - 175.0 * u_sq)));
+        let a_coeff =
+            1.0 + u_sq / 16384.0 * (4096.0 + u_sq * (-768.0 + u_sq * (320.0 - 175.0 * u_sq)));
         let b_coeff = u_sq / 1024.0 * (256.0 + u_sq * (-128.0 + u_sq * (74.0 - 47.0 * u_sq)));
 
         let mut sigma = distance_meters / (b * a_coeff);
@@ -243,7 +270,8 @@ impl GeodeticSolver for VincentySolver {
                 .sqrt(),
         );
 
-        let lambda = (sin_sigma * sin_alpha1).atan2(cos_u1 * cos_sigma - sin_u1 * sin_sigma * cos_alpha1);
+        let lambda =
+            (sin_sigma * sin_alpha1).atan2(cos_u1 * cos_sigma - sin_u1 * sin_sigma * cos_alpha1);
         let c = f / 16.0 * cos2_alpha * (4.0 + f * (4.0 - 3.0 * cos2_alpha));
         let l = lambda
             - (1.0 - c)

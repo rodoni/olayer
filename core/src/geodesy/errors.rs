@@ -18,10 +18,7 @@ impl fmt::Display for GeodesyError {
                 f,
                 "Longitude is out of range [-180, 180] degrees: {val} degrees"
             ),
-            Self::MagneticModelError(msg) => write!(
-                f,
-                "Magnetic model error: {msg}"
-            ),
+            Self::MagneticModelError(msg) => write!(f, "Magnetic model error: {msg}"),
         }
     }
 }

@@ -1,13 +1,15 @@
+use olayer_core::geodesy::LatLon;
+use olayer_core::projections::{LambertConformalConic, Stereographic, WebMercator};
+use olayer_native::{
+    project_lla_to_screen, GeoserverWmtsSource, MapDataSource, NativeController,
+    NativeLayerManager, NativeMapDataStack, RasterTileUpload, WgpuCpuVertexPipeline,
+    WgpuGpuPipeline,
+};
 use std::sync::Arc;
 use winit::{
-    event::{Event, WindowEvent, MouseButton, ElementState, MouseScrollDelta},
+    event::{ElementState, Event, MouseButton, MouseScrollDelta, WindowEvent},
     event_loop::EventLoop,
     window::WindowBuilder,
-};
-use olayer_core::geodesy::LatLon;
-use olayer_core::projections::{Stereographic, LambertConformalConic, WebMercator};
-use olayer_native::{
-    NativeController, NativeLayerManager, NativeMapDataStack, MapDataSource, GeoserverWmtsSource, WgpuGpuPipeline, WgpuCpuVertexPipeline, RasterTileUpload, project_lla_to_screen
 };
 
 mod sim;
@@ -42,7 +44,8 @@ fn main() {
         power_preference: wgpu::PowerPreference::HighPerformance,
         compatible_surface: Some(&surface),
         force_fallback_adapter: false,
-    })).unwrap();
+    }))
+    .unwrap();
 
     let (device, queue) = pollster::block_on(adapter.request_device(
         &wgpu::DeviceDescriptor {
@@ -51,10 +54,13 @@ fn main() {
             required_limits: wgpu::Limits::default(),
         },
         None,
-    )).unwrap();
+    ))
+    .unwrap();
 
     let size = window.inner_size();
-    let mut config = surface.get_default_config(&adapter, size.width, size.height).unwrap();
+    let mut config = surface
+        .get_default_config(&adapter, size.width, size.height)
+        .unwrap();
     if size.width > 0 && size.height > 0 {
         surface.configure(&device, &config);
     }
@@ -87,7 +93,7 @@ fn main() {
         for lon in -48i32..=-45i32 {
             let lat_str = format!("{:02}0000{}", lat.abs(), if lat < 0 { "S" } else { "N" });
             let lon_str = format!("{:03}0000{}", lon.abs(), if lon < 0 { "W" } else { "E" });
-            
+
             // Build mock DTED Level 0 binary tile
             let col_size = 11 + 100 * 2;
             let total_size = 3428 + 100 * col_size;
@@ -99,7 +105,7 @@ fn main() {
             data[24..28].copy_from_slice(b"0300");
             data[47..51].copy_from_slice(b"0100");
             data[51..55].copy_from_slice(b"0100");
-            
+
             let mut offset = 3428;
             for c in 0..100 {
                 data[offset] = 0xAA;
@@ -107,7 +113,11 @@ fn main() {
                 for r in 0..100 {
                     let lat_fraction = r as f64 / 100.0;
                     let lon_fraction = c as f64 / 100.0;
-                    let elevation = (500.0 + 400.0 * (lat_fraction * std::f64::consts::PI * 4.0).sin() * (lon_fraction * std::f64::consts::PI * 4.0).cos()) as i16;
+                    let elevation = (500.0
+                        + 400.0
+                            * (lat_fraction * std::f64::consts::PI * 4.0).sin()
+                            * (lon_fraction * std::f64::consts::PI * 4.0).cos())
+                        as i16;
                     let be = elevation.to_be_bytes();
                     let idx = val_offset + r * 2;
                     data[idx] = be[0];
@@ -115,7 +125,7 @@ fn main() {
                 }
                 offset += col_size;
             }
-            
+
             let _ = map_data_stack.load_dted_buffer(&data, &mut controller.terrain);
         }
     }
@@ -137,7 +147,8 @@ fn main() {
     let mut terrain_azimuth = 315.0f32;
     let mut terrain_taws_altitude = 1200.0f32;
     let mut terrain_contour_interval = 0.0f32;
-    let mut egui_tile_textures: std::collections::HashMap<String, egui::TextureHandle> = std::collections::HashMap::new();
+    let mut egui_tile_textures: std::collections::HashMap<String, egui::TextureHandle> =
+        std::collections::HashMap::new();
 
     // Mouse drag state
     let mut is_dragging = false;

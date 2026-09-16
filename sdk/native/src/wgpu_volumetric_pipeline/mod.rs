@@ -41,7 +41,8 @@ impl WgpuVolumetricPipeline {
         // 1. Airspace Shader with Fresnel edge glow
         let airspace_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Volumetric Airspace Shader"),
-            source: wgpu::ShaderSource::Wgsl(r#"
+            source: wgpu::ShaderSource::Wgsl(
+                r#"
 struct Uniforms {
     view_proj: mat4x4<f32>,
     base_color: vec4<f32>,
@@ -82,13 +83,16 @@ fn fs_airspace(in: VertexOutput) -> @location(0) vec4<f32> {
     let color = mix(uniforms.base_color, uniforms.edge_color, in.height_ratio * 0.3 + glow);
     return color;
 }
-"#.into()),
+"#
+                .into(),
+            ),
         });
 
         // 2. Trajectory Ribbon Shader with scalar altitude gradient
         let ribbon_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Trajectory Ribbon Shader"),
-            source: wgpu::ShaderSource::Wgsl(r#"
+            source: wgpu::ShaderSource::Wgsl(
+                r#"
 struct Uniforms {
     view_proj: mat4x4<f32>,
     base_color: vec4<f32>,
@@ -129,7 +133,9 @@ fn fs_ribbon(in: VertexOutput) -> @location(0) vec4<f32> {
     let edge_boost = smoothstep(0.0, 0.15, edge_dist);
     return vec4<f32>(ramp_color.rgb * (0.7 + 0.3 * edge_boost), ramp_color.a);
 }
-"#.into()),
+"#
+                .into(),
+            ),
         });
 
         let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -179,10 +185,26 @@ fn fs_ribbon(in: VertexOutput) -> @location(0) vec4<f32> {
                     array_stride: std::mem::size_of::<GpuVolumetricVertex>() as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
                     attributes: &[
-                        wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x3, offset: 0, shader_location: 0 },
-                        wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x3, offset: 12, shader_location: 1 },
-                        wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32, offset: 24, shader_location: 2 },
-                        wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32, offset: 28, shader_location: 3 },
+                        wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32x3,
+                            offset: 0,
+                            shader_location: 0,
+                        },
+                        wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32x3,
+                            offset: 12,
+                            shader_location: 1,
+                        },
+                        wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32,
+                            offset: 24,
+                            shader_location: 2,
+                        },
+                        wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32,
+                            offset: 28,
+                            shader_location: 3,
+                        },
                     ],
                 }],
             },
@@ -216,10 +238,26 @@ fn fs_ribbon(in: VertexOutput) -> @location(0) vec4<f32> {
                     array_stride: std::mem::size_of::<GpuRibbonVertex>() as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
                     attributes: &[
-                        wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x3, offset: 0, shader_location: 0 },
-                        wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x3, offset: 12, shader_location: 1 },
-                        wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x2, offset: 24, shader_location: 2 },
-                        wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32, offset: 32, shader_location: 3 },
+                        wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32x3,
+                            offset: 0,
+                            shader_location: 0,
+                        },
+                        wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32x3,
+                            offset: 12,
+                            shader_location: 1,
+                        },
+                        wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32x2,
+                            offset: 24,
+                            shader_location: 2,
+                        },
+                        wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32,
+                            offset: 32,
+                            shader_location: 3,
+                        },
                     ],
                 }],
             },
@@ -256,7 +294,11 @@ fn fs_ribbon(in: VertexOutput) -> @location(0) vec4<f32> {
             .vertices
             .iter()
             .map(|v| GpuVolumetricVertex {
-                position: [v.position_ecef[0] as f32, v.position_ecef[1] as f32, v.position_ecef[2] as f32],
+                position: [
+                    v.position_ecef[0] as f32,
+                    v.position_ecef[1] as f32,
+                    v.position_ecef[2] as f32,
+                ],
                 normal: v.normal,
                 height_ratio: v.height_ratio,
                 is_edge: v.is_edge,
@@ -288,7 +330,11 @@ fn fs_ribbon(in: VertexOutput) -> @location(0) vec4<f32> {
             .vertices
             .iter()
             .map(|v| GpuRibbonVertex {
-                position: [v.position_ecef[0] as f32, v.position_ecef[1] as f32, v.position_ecef[2] as f32],
+                position: [
+                    v.position_ecef[0] as f32,
+                    v.position_ecef[1] as f32,
+                    v.position_ecef[2] as f32,
+                ],
                 normal: v.normal,
                 uv: v.uv,
                 scalar: v.scalar,

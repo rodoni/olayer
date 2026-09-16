@@ -2,7 +2,7 @@ use crate::aeronautical::dataset::AeronauticalDataset;
 use crate::aeronautical::errors::AeronauticalError;
 use crate::aeronautical::types::{
     AeronauticalAirspace, AeronauticalAirway, AeronauticalNavaid, AirspaceType, AirwaySegment,
-    AirwayType, AltitudeLimit, NavaidType,
+    AirwayType, AltitudeLimit, NavaidType, SegmentDirection,
 };
 use crate::geodesy::coords::LatLon;
 use quick_xml::events::{BytesStart, Event};
@@ -187,6 +187,8 @@ struct AeronauticalAirspaceBuilder {
     pos_list_str: String,
     pos_dimension: usize,
     active_limit_is_upper: bool,
+    has_lower_limit: bool,
+    has_upper_limit: bool,
 }
 
 impl AeronauticalAirspaceBuilder {
@@ -237,6 +239,7 @@ impl AeronauticalAirspaceBuilder {
             "type" | "AirspaceType" => self.airspace_type_str = text.to_string(),
             "identifier" if self.uid.is_empty() => self.uid = text.to_string(),
             "lowerLimit" => {
+                self.has_lower_limit = true;
                 if let Ok(v) = text.trim().parse::<f64>() {
                     self.lower_limit_val = v;
                 } else {
@@ -244,6 +247,7 @@ impl AeronauticalAirspaceBuilder {
                 }
             }
             "upperLimit" => {
+                self.has_upper_limit = true;
                 if let Ok(v) = text.trim().parse::<f64>() {
                     self.upper_limit_val = v;
                 } else {
@@ -260,15 +264,34 @@ impl AeronauticalAirspaceBuilder {
 
     fn build(self) -> Result<Option<AeronauticalAirspace>, AeronauticalError> {
         let uid = if self.uid.is_empty() {
-            "AIRSPACE".to_string()
+            return Err(AeronauticalError::MissingRequiredField(
+                "airspace identifier".into(),
+            ));
         } else {
             self.uid
         };
         let name = if self.name.is_empty() {
-            uid.clone()
+            return Err(AeronauticalError::MissingRequiredField(
+                "airspace name".into(),
+            ));
         } else {
             self.name
         };
+        if self.airspace_type_str.is_empty() {
+            return Err(AeronauticalError::MissingRequiredField(
+                "airspace type".into(),
+            ));
+        }
+        if !self.has_lower_limit {
+            return Err(AeronauticalError::MissingRequiredField(
+                "lower limit".into(),
+            ));
+        }
+        if !self.has_upper_limit {
+            return Err(AeronauticalError::MissingRequiredField(
+                "upper limit".into(),
+            ));
+        }
 
         let airspace_type = match self.airspace_type_str.to_uppercase().as_str() {
             "FIR" => AirspaceType::Fir,
@@ -448,7 +471,7 @@ impl AeronauticalAirwayBuilder {
             ));
         }
 
-        let mut segments = Vec::new();
+        let mut segments = Vec::with_capacity(waypoints.len() - 1);
         for i in 0..waypoints.len() - 1 {
             segments.push(AirwaySegment {
                 from_ident: format!("{ident}_{i}"),
@@ -458,7 +481,7 @@ impl AeronauticalAirwayBuilder {
                 mea_m: None,
                 maa_m: None,
                 inbound_bearing_deg: None,
-                is_unidirectional: false,
+                direction: SegmentDirection::Bidirectional,
             });
         }
 
@@ -495,7 +518,7 @@ fn parse_gml_pos_list(pos_list: &str, dimension: usize) -> Result<Vec<LatLon>, A
         ));
     }
 
-    let mut points = Vec::new();
+    let mut points = Vec::with_capacity(tokens.len() / dimension);
     let mut i = 0;
     while i + 1 < tokens.len() {
         let lat_deg = tokens[i];
@@ -519,6 +542,11 @@ fn parse_single_gml_pos(pos: &str) -> Result<Option<LatLon>, AeronauticalError> 
         })
         .collect::<Result<_, _>>()?;
 
+    if !(2..=3).contains(&tokens.len()) {
+        return Err(AeronauticalError::InvalidCoordinateString(
+            "single position must contain exactly 2 or 3 values".into(),
+        ));
+    }
     if tokens.len() >= 2 {
         let lat_deg = tokens[0];
         let lon_deg = tokens[1];
@@ -583,8 +611,12 @@ fn parse_altitude_limit(
     }
 
     if is_fl {
-        let fl = val.round() as u32;
-        Ok(AltitudeLimit::from_flight_level(fl))
+        if val.fract() != 0.0 {
+            return Err(AeronauticalError::InvalidAltitude(
+                "flight level must be an integer".into(),
+            ));
+        }
+        AltitudeLimit::from_flight_level(val)
     } else if uom.eq_ignore_ascii_case("FT") {
         AltitudeLimit::amsl(val * 0.3048)
     } else {

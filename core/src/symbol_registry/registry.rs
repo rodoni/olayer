@@ -28,7 +28,11 @@ impl SymbolRegistry {
     /// If a provider can resolve the code, any matching SLD style rules are
     /// applied before the symbol is returned.
     #[inline]
-    pub fn resolve_symbol(&self, code: &str, style: &StyleRegistry) -> Result<ResolvedSymbol, SymbologyError> {
+    pub fn resolve_symbol(
+        &self,
+        code: &str,
+        style: &StyleRegistry,
+    ) -> Result<ResolvedSymbol, SymbologyError> {
         for provider in &self.providers {
             if provider.can_resolve(code) {
                 let symbol = provider.resolve(code, style)?;
@@ -98,8 +102,8 @@ fn apply_sld_style(mut symbol: ResolvedSymbol, style: &StyleRegistry) -> Resolve
                 if let Some(sld_color) = parse_hex_color(&sld_stroke.color) {
                     for primitive in &mut symbol.primitives {
                         match primitive {
-                            SymbolPrimitive::Path { ref mut stroke, .. } |
-                            SymbolPrimitive::Circle { ref mut stroke, .. } => {
+                            SymbolPrimitive::Path { ref mut stroke, .. }
+                            | SymbolPrimitive::Circle { ref mut stroke, .. } => {
                                 if let Some(ref mut stroke_val) = stroke {
                                     stroke_val.color = sld_color;
                                     stroke_val.width = sld_stroke.width;
@@ -116,8 +120,8 @@ fn apply_sld_style(mut symbol: ResolvedSymbol, style: &StyleRegistry) -> Resolve
                     sld_color.a = (sld_fill.opacity * 255.0) as u8;
                     for primitive in &mut symbol.primitives {
                         match primitive {
-                            SymbolPrimitive::Path { ref mut fill, .. } |
-                            SymbolPrimitive::Circle { ref mut fill, .. } => {
+                            SymbolPrimitive::Path { ref mut fill, .. }
+                            | SymbolPrimitive::Circle { ref mut fill, .. } => {
                                 if let Some(ref mut fill_val) = fill {
                                     *fill_val = sld_color;
                                 }

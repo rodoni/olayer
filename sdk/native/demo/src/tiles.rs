@@ -1,5 +1,5 @@
-use std::collections::HashSet;
 use olayer_native::NativeController;
+use std::collections::HashSet;
 
 /// Converts geodetic coordinates to OpenStreetMap / Web Mercator tile indices.
 pub fn latlon_to_tile(lat_rad: f64, lon_rad: f64, zoom: u32) -> (u32, u32) {

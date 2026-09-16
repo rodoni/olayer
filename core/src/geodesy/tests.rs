@@ -1,7 +1,7 @@
-use super::conversions::{ecef_to_lla, lla_to_ecef, lla_to_enu, enu_to_lla};
+use super::conversions::{ecef_to_lla, enu_to_lla, lla_to_ecef, lla_to_enu};
 use super::coords::LatLon;
-use super::errors::GeodesyError;
 use super::ellipsoid::Ellipsoid;
+use super::errors::GeodesyError;
 use super::local_frame::{EnuPoint, LocalTangentFrame, NedPoint, STANDARD_RADAR_K_FACTOR};
 use super::magnetic::MagneticModel;
 use super::solvers::{GeodeticSolver, HaversineSolver, VincentySolver};
@@ -30,20 +30,26 @@ fn test_latlon_validation() {
     assert_eq!(valid.validate(), Ok(()));
 
     let invalid_lat = LatLon::from_degrees(95.0, 0.0, 0.0);
-    assert!(matches!(invalid_lat.validate(), Err(GeodesyError::LatitudeOutOfRange(_))));
+    assert!(matches!(
+        invalid_lat.validate(),
+        Err(GeodesyError::LatitudeOutOfRange(_))
+    ));
 
     let invalid_lon = LatLon::from_degrees(0.0, 185.0, 0.0);
-    assert!(matches!(invalid_lon.validate(), Err(GeodesyError::LongitudeOutOfRange(_))));
+    assert!(matches!(
+        invalid_lon.validate(),
+        Err(GeodesyError::LongitudeOutOfRange(_))
+    ));
 }
 
 #[test]
 fn test_lla_ecef_roundtrip() {
     let ellipsoid = Ellipsoid::wgs84();
-    
+
     // Test points: Greenwich, North Pole, South Pole, Equator/Greenwich intersection
     let test_points = vec![
         LatLon::from_degrees(51.4778, -0.0015, 100.0), // Greenwich
-        LatLon::from_degrees(90.0, 0.0, 50.0),        // North Pole
+        LatLon::from_degrees(90.0, 0.0, 50.0),         // North Pole
         LatLon::from_degrees(-90.0, 45.0, 10.0),       // South Pole
         LatLon::from_degrees(0.0, 0.0, 0.0),           // Equator Prime Meridian
         LatLon::from_degrees(-23.5505, -46.6333, 800.0), // São Paulo
@@ -57,8 +63,13 @@ fn test_lla_ecef_roundtrip() {
         let (lat_b, lon_b, h_b) = back.to_degrees();
 
         // High precision checks
-        assert!((lat_d - lat_b).abs() < 1e-9, "Latitude mismatch: {} vs {}", lat_d, lat_b);
-        
+        assert!(
+            (lat_d - lat_b).abs() < 1e-9,
+            "Latitude mismatch: {} vs {}",
+            lat_d,
+            lat_b
+        );
+
         // For poles, longitude is singular, so only verify if latitude is 90
         if lat_d.abs() < 89.9999 {
             // Normalise longitude difference to handle wrapping
@@ -66,10 +77,20 @@ fn test_lla_ecef_roundtrip() {
             if diff_lon > 180.0 {
                 diff_lon = 360.0 - diff_lon;
             }
-            assert!(diff_lon < 1e-9, "Longitude mismatch: {} vs {}", lon_d, lon_b);
+            assert!(
+                diff_lon < 1e-9,
+                "Longitude mismatch: {} vs {}",
+                lon_d,
+                lon_b
+            );
         }
-        
-        assert!((h_d - h_b).abs() < 1e-3, "Height mismatch: {} vs {}", h_d, h_b); // millimetric precision
+
+        assert!(
+            (h_d - h_b).abs() < 1e-3,
+            "Height mismatch: {} vs {}",
+            h_d,
+            h_b
+        ); // millimetric precision
     }
 }
 
@@ -77,10 +98,10 @@ fn test_lla_ecef_roundtrip() {
 fn test_lla_enu_roundtrip() {
     let ellipsoid = Ellipsoid::wgs84();
     let origin = LatLon::from_degrees(-23.5505, -46.6333, 800.0); // São Paulo Center
-    
+
     // Nearby point (approx 10km away north-east and 200m up)
     let target = LatLon::from_degrees(-23.4505, -46.5333, 1000.0);
-    
+
     let enu = lla_to_enu(&target, &origin, &ellipsoid);
     let back = enu_to_lla(&enu, &origin, &ellipsoid);
 
@@ -90,16 +111,20 @@ fn test_lla_enu_roundtrip() {
     assert!((lat_t - lat_b).abs() < 1e-9);
     assert!((lon_t - lon_b).abs() < 1e-9);
     assert!((h_t - h_b).abs() < 1e-3);
-    
+
     // Verify displacement values are logical (moving North/East increases coordinates)
     assert!(enu.east > 0.0);
     assert!(enu.north > 0.0);
-    
+
     // The Up component equals the height difference minus the Earth curvature drop
     // over the horizontal ENU distance (≈15.1 km). Drop ≈ d² / (2·a).
     let expected_up = 200.0 - (enu.distance_2d().powi(2) / (2.0 * ellipsoid.a));
-    assert!((enu.up - expected_up).abs() < 1.0,
-        "ENU up mismatch: expected ~{}, got {}", expected_up, enu.up);
+    assert!(
+        (enu.up - expected_up).abs() < 1.0,
+        "ENU up mismatch: expected ~{}, got {}",
+        expected_up,
+        enu.up
+    );
 }
 
 #[test]
@@ -112,16 +137,26 @@ fn test_haversine_solver() {
     let lhr = LatLon::from_degrees(51.4775, -0.461389, 0.0);
 
     let result = solver.inverse(&jfk, &lhr, &ellipsoid).unwrap();
-    
+
     // Spherical distance should be around 5560 km for mean radius
-    assert!(result.distance > 5_500_000.0 && result.distance < 5_600_000.0, "Haversine distance was {}", result.distance);
-    
+    assert!(
+        result.distance > 5_500_000.0 && result.distance < 5_600_000.0,
+        "Haversine distance was {}",
+        result.distance
+    );
+
     // Bearing from NY to London should be northeast (approx 51 degrees)
     let bearing_deg = result.initial_bearing.to_degrees();
-    assert!(bearing_deg > 45.0 && bearing_deg < 60.0, "Initial bearing was {}", bearing_deg);
+    assert!(
+        bearing_deg > 45.0 && bearing_deg < 60.0,
+        "Initial bearing was {}",
+        bearing_deg
+    );
 
     // Direct solver roundtrip
-    let projected = solver.direct(&jfk, result.initial_bearing, result.distance, &ellipsoid).unwrap();
+    let projected = solver
+        .direct(&jfk, result.initial_bearing, result.distance, &ellipsoid)
+        .unwrap();
     let (lat_p, lon_p, _) = projected.to_degrees();
     let (lat_l, lon_l, _) = lhr.to_degrees();
 
@@ -139,13 +174,19 @@ fn test_vincenty_solver_precision() {
     let zurich = LatLon::from_degrees(47.376887, 8.541694, 0.0);
 
     let result = solver.inverse(&munich, &zurich, &ellipsoid).unwrap();
-    
+
     // Reference distance for Munich to Zurich coordinates is 242682.04 meters on WGS84
     let expected_distance = 242682.04;
-    assert!((result.distance - expected_distance).abs() < 1.0, "Vincenty distance delta: {}", (result.distance - expected_distance).abs());
+    assert!(
+        (result.distance - expected_distance).abs() < 1.0,
+        "Vincenty distance delta: {}",
+        (result.distance - expected_distance).abs()
+    );
 
     // Direct solver projection
-    let projected = solver.direct(&munich, result.initial_bearing, result.distance, &ellipsoid).unwrap();
+    let projected = solver
+        .direct(&munich, result.initial_bearing, result.distance, &ellipsoid)
+        .unwrap();
     let (lat_p, lon_p, _) = projected.to_degrees();
     let (lat_z, lon_z, _) = zurich.to_degrees();
 
@@ -167,22 +208,30 @@ fn test_vincenty_antipodal_fallback() {
     // This call should fallback to Haversine instead of failing or looping forever
     let result = solver.inverse(&p1, &p2, &ellipsoid);
     assert!(result.is_ok());
-    
+
     let res = result.unwrap();
     // Distance should be approximately half of earth circumference (approx 20,015 km)
-    assert!(res.distance > 20_000_000.0 && res.distance < 20_100_000.0, "Distance: {}", res.distance);
+    assert!(
+        res.distance > 20_000_000.0 && res.distance < 20_100_000.0,
+        "Distance: {}",
+        res.distance
+    );
 }
 
 #[test]
 fn test_ecef_lla_poles() {
     let ellipsoid = Ellipsoid::wgs84();
-    
+
     // North Pole — longitude is singular; ecef_to_lla should return lon = 0
     let np = LatLon::from_degrees(90.0, 123.0, 100.0);
     let ecef_np = lla_to_ecef(&np, &ellipsoid);
     let back_np = ecef_to_lla(&ecef_np, &ellipsoid);
     assert!((back_np.lat.to_degrees() - 90.0).abs() < 1e-9);
-    assert!(back_np.lon.abs() < 1e-12, "Longitude at North Pole should be 0, got {}", back_np.lon);
+    assert!(
+        back_np.lon.abs() < 1e-12,
+        "Longitude at North Pole should be 0, got {}",
+        back_np.lon
+    );
     assert!((back_np.height - 100.0).abs() < 1e-3);
 
     // South Pole
@@ -190,18 +239,22 @@ fn test_ecef_lla_poles() {
     let ecef_sp = lla_to_ecef(&sp, &ellipsoid);
     let back_sp = ecef_to_lla(&ecef_sp, &ellipsoid);
     assert!((back_sp.lat.to_degrees() + 90.0).abs() < 1e-9);
-    assert!(back_sp.lon.abs() < 1e-12, "Longitude at South Pole should be 0, got {}", back_sp.lon);
+    assert!(
+        back_sp.lon.abs() < 1e-12,
+        "Longitude at South Pole should be 0, got {}",
+        back_sp.lon
+    );
     assert!((back_sp.height - 50.0).abs() < 1e-3);
 }
 
 #[test]
 fn test_ecef_lla_antimeridian() {
     let ellipsoid = Ellipsoid::wgs84();
-    
+
     let p = LatLon::from_degrees(0.0, 179.999999, 0.0);
     let ecef = lla_to_ecef(&p, &ellipsoid);
     let back = ecef_to_lla(&ecef, &ellipsoid);
-    
+
     assert!((back.lat.to_degrees() - 0.0).abs() < 1e-9);
     assert!((back.lon.to_degrees() - 179.999999).abs() < 1e-9);
     assert!((back.height - 0.0).abs() < 1e-3);
@@ -210,12 +263,12 @@ fn test_ecef_lla_antimeridian() {
 #[test]
 fn test_ecef_lla_high_altitude() {
     let ellipsoid = Ellipsoid::wgs84();
-    
+
     // Satellite-like altitude
     let sat = LatLon::from_degrees(45.0, 45.0, 400_000.0);
     let ecef = lla_to_ecef(&sat, &ellipsoid);
     let back = ecef_to_lla(&ecef, &ellipsoid);
-    
+
     // Bowring's closed-form method loses a small amount of precision at very high
     // altitudes (satellite orbits). Tolerances are relaxed accordingly.
     assert!((back.lat.to_degrees() - 45.0).abs() < 1e-7);
@@ -227,10 +280,10 @@ fn test_ecef_lla_high_altitude() {
 fn test_vincenty_coincident_points() {
     let ellipsoid = Ellipsoid::wgs84();
     let solver = VincentySolver;
-    
+
     let p = LatLon::from_degrees(10.0, 20.0, 0.0);
     let result = solver.inverse(&p, &p, &ellipsoid).unwrap();
-    
+
     assert_eq!(result.distance, 0.0);
     assert_eq!(result.initial_bearing, 0.0);
     assert_eq!(result.final_bearing, 0.0);
@@ -240,13 +293,15 @@ fn test_vincenty_coincident_points() {
 fn test_vincenty_sub_meter_roundtrip() {
     let ellipsoid = Ellipsoid::wgs84();
     let solver = VincentySolver;
-    
+
     let p1 = LatLon::from_degrees(0.0, 0.0, 0.0);
     let p2 = LatLon::from_degrees(0.0, 0.000001, 0.0); // ~0.11 meters
-    
+
     let result = solver.inverse(&p1, &p2, &ellipsoid).unwrap();
-    let projected = solver.direct(&p1, result.initial_bearing, result.distance, &ellipsoid).unwrap();
-    
+    let projected = solver
+        .direct(&p1, result.initial_bearing, result.distance, &ellipsoid)
+        .unwrap();
+
     assert!((projected.lat - p2.lat).abs() < 1e-12);
     assert!((projected.lon - p2.lon).abs() < 1e-12);
 }
@@ -334,7 +389,8 @@ fn test_radar_look_angles_and_refraction() {
     assert!(elevation > 0.1 && elevation < 0.3);
 
     // Test with standard 4/3 tropospheric refraction
-    let (slant_ref, az_ref, elev_ref) = frame.radar_look_angles_refracted(&target_north, STANDARD_RADAR_K_FACTOR);
+    let (slant_ref, az_ref, elev_ref) =
+        frame.radar_look_angles_refracted(&target_north, STANDARD_RADAR_K_FACTOR);
     assert_eq!(slant_ref, slant);
     assert_eq!(az_ref, azimuth);
     // Refracted apparent elevation should be slightly lower due to downward beam curvature
@@ -355,25 +411,37 @@ fn test_world_magnetic_model_2025() {
     println!("London Elements: X={:.1} nT, Y={:.1} nT, Z={:.1} nT, H={:.1} nT, F={:.1} nT, Declination={:.4} deg",
         elements_london.x_nt, elements_london.y_nt, elements_london.z_nt,
         elements_london.horizontal_intensity_nt, elements_london.total_intensity_nt, dec_london_deg);
-    assert!(dec_london_deg > -1.0 && dec_london_deg < 5.0, "London declination: {dec_london_deg}");
+    assert!(
+        dec_london_deg > -1.0 && dec_london_deg < 5.0,
+        "London declination: {dec_london_deg}"
+    );
 
     // 2. New York (JFK): 40.64 N, -73.78 W -> Declination ~ -12.5 to -13.5 deg West in 2025
     let jfk = LatLon::from_degrees(40.64, -73.78, 0.0);
     let dec_jfk = model.get_declination(&jfk, 2025.0);
     let dec_jfk_deg = dec_jfk.to_degrees();
-    assert!(dec_jfk_deg > -15.0 && dec_jfk_deg < -10.0, "JFK declination: {dec_jfk_deg}");
+    assert!(
+        dec_jfk_deg > -15.0 && dec_jfk_deg < -10.0,
+        "JFK declination: {dec_jfk_deg}"
+    );
 
     // 3. São Paulo (GRU): -23.43 S, -46.47 W -> Declination ~ -21.0 to -23.0 deg West in 2025
     let gru = LatLon::from_degrees(-23.43, -46.47, 750.0);
     let dec_gru = model.get_declination(&gru, 2025.0);
     let dec_gru_deg = dec_gru.to_degrees();
-    assert!(dec_gru_deg > -25.0 && dec_gru_deg < -19.0, "GRU declination: {dec_gru_deg}");
+    assert!(
+        dec_gru_deg > -25.0 && dec_gru_deg < -19.0,
+        "GRU declination: {dec_gru_deg}"
+    );
 
     // 4. Tokyo (HND): 35.55 N, 139.78 E -> Declination ~ -7.5 to -9.0 deg West in 2025
     let hnd = LatLon::from_degrees(35.55, 139.78, 0.0);
     let dec_hnd = model.get_declination(&hnd, 2025.0);
     let dec_hnd_deg = dec_hnd.to_degrees();
-    assert!(dec_hnd_deg > -11.0 && dec_hnd_deg < -6.0, "HND declination: {dec_hnd_deg}");
+    assert!(
+        dec_hnd_deg > -11.0 && dec_hnd_deg < -6.0,
+        "HND declination: {dec_hnd_deg}"
+    );
 
     // Bearing transformations roundtrip
     let true_bearing = 45.0_f64.to_radians();
@@ -384,11 +452,16 @@ fn test_world_magnetic_model_2025() {
     // Magnetic elements sanity check
     let elements = model.get_magnetic_elements(&jfk, 2025.0);
     assert!(elements.total_intensity_nt > 45000.0 && elements.total_intensity_nt < 55000.0);
-    assert!(elements.horizontal_intensity_nt > 15000.0 && elements.horizontal_intensity_nt < 25000.0);
+    assert!(
+        elements.horizontal_intensity_nt > 15000.0 && elements.horizontal_intensity_nt < 25000.0
+    );
     assert_eq!(elements.declination_rad, dec_jfk);
 
     // Static convenience methods match instance methods
-    assert_eq!(MagneticModel::get_default_declination(&jfk, 2025.0), dec_jfk);
+    assert_eq!(
+        MagneticModel::get_default_declination(&jfk, 2025.0),
+        dec_jfk
+    );
 }
 
 fn generate_wmm_normal_cof_text() -> String {
@@ -416,7 +489,11 @@ fn generate_wmmhr_highres_cof_text(max_degree: usize) -> String {
     for n in 13..=max_degree {
         for m in 0..=n {
             let g = 50.0 / ((n * n) as f64) * (m as f64).cos();
-            let h = if m == 0 { 0.0 } else { 50.0 / ((n * n) as f64) * (m as f64).sin() };
+            let h = if m == 0 {
+                0.0
+            } else {
+                50.0 / ((n * n) as f64) * (m as f64).sin()
+            };
             s.push_str(&format!(
                 "{:3} {:3} {:10.4} {:10.4}        0.0        0.0\n",
                 n, m, g, h
@@ -440,7 +517,8 @@ fn test_wmm_normal_resolution_cof_load_and_evaluate() {
     assert_eq!(model_from_str.coefficients().entries.len(), 90);
 
     // 2. Test file loader
-    let temp_file_path = std::env::temp_dir().join(format!("test_wmm_normal_{}.cof", std::process::id()));
+    let temp_file_path =
+        std::env::temp_dir().join(format!("test_wmm_normal_{}.cof", std::process::id()));
     std::fs::write(&temp_file_path, &cof_text).unwrap();
 
     let model_from_file = MagneticModel::from_cof_file(&temp_file_path).unwrap();
@@ -454,14 +532,14 @@ fn test_wmm_normal_resolution_cof_load_and_evaluate() {
     // 3. Verify equality with built-in WMM-2025 across global test points
     let built_in = MagneticModel::wmm2025();
     let test_points = [
-        LatLon::from_degrees(51.5, -0.1, 0.0),      // London
-        LatLon::from_degrees(40.64, -73.78, 0.0),   // New York JFK
+        LatLon::from_degrees(51.5, -0.1, 0.0),       // London
+        LatLon::from_degrees(40.64, -73.78, 0.0),    // New York JFK
         LatLon::from_degrees(-23.43, -46.47, 750.0), // São Paulo GRU
-        LatLon::from_degrees(35.55, 139.78, 0.0),   // Tokyo HND
-        LatLon::from_degrees(-33.86, 151.20, 10.0), // Sydney
-        LatLon::from_degrees(90.0, 0.0, 0.0),       // North Pole
-        LatLon::from_degrees(-90.0, 0.0, 0.0),      // South Pole
-        LatLon::from_degrees(0.0, 0.0, 0.0),        // Equator Prime Meridian
+        LatLon::from_degrees(35.55, 139.78, 0.0),    // Tokyo HND
+        LatLon::from_degrees(-33.86, 151.20, 10.0),  // Sydney
+        LatLon::from_degrees(90.0, 0.0, 0.0),        // North Pole
+        LatLon::from_degrees(-90.0, 0.0, 0.0),       // South Pole
+        LatLon::from_degrees(0.0, 0.0, 0.0),         // Equator Prime Meridian
     ];
 
     for pt in &test_points {
@@ -471,7 +549,9 @@ fn test_wmm_normal_resolution_cof_load_and_evaluate() {
 
         assert!((el_builtin.declination_rad - el_file.declination_rad).abs() < 1e-9);
         assert!((el_builtin.inclination_rad - el_file.inclination_rad).abs() < 1e-9);
-        assert!((el_builtin.horizontal_intensity_nt - el_file.horizontal_intensity_nt).abs() < 1e-6);
+        assert!(
+            (el_builtin.horizontal_intensity_nt - el_file.horizontal_intensity_nt).abs() < 1e-6
+        );
         assert!((el_builtin.total_intensity_nt - el_file.total_intensity_nt).abs() < 1e-6);
         assert!((el_builtin.x_nt - el_file.x_nt).abs() < 1e-6);
         assert!((el_builtin.y_nt - el_file.y_nt).abs() < 1e-6);
@@ -500,10 +580,14 @@ fn test_wmm_high_resolution_cof_load_and_evaluate() {
     assert_eq!(model_from_str.model_name(), "WMMHR-2025");
     assert_eq!(model_from_str.release_date(), "11/20/2024");
     assert_eq!(model_from_str.max_degree(), high_res_degree);
-    assert_eq!(model_from_str.coefficients().entries.len(), expected_coeff_count);
+    assert_eq!(
+        model_from_str.coefficients().entries.len(),
+        expected_coeff_count
+    );
 
     // 2. Test file loader
-    let temp_file_path = std::env::temp_dir().join(format!("test_wmmhr_highres_{}.cof", std::process::id()));
+    let temp_file_path =
+        std::env::temp_dir().join(format!("test_wmmhr_highres_{}.cof", std::process::id()));
     std::fs::write(&temp_file_path, &cof_text).unwrap();
 
     let model_from_file = MagneticModel::from_cof_file(&temp_file_path).unwrap();
@@ -512,25 +596,34 @@ fn test_wmm_high_resolution_cof_load_and_evaluate() {
     assert_eq!(model_from_file.epoch(), 2025.0);
     assert_eq!(model_from_file.model_name(), "WMMHR-2025");
     assert_eq!(model_from_file.max_degree(), high_res_degree);
-    assert_eq!(model_from_file.coefficients().entries.len(), expected_coeff_count);
+    assert_eq!(
+        model_from_file.coefficients().entries.len(),
+        expected_coeff_count
+    );
 
     // 3. Evaluate high resolution spherical harmonic expansion
     let test_points = [
-        LatLon::from_degrees(51.5, -0.1, 0.0),      // London
-        LatLon::from_degrees(40.64, -73.78, 0.0),   // New York JFK
+        LatLon::from_degrees(51.5, -0.1, 0.0),       // London
+        LatLon::from_degrees(40.64, -73.78, 0.0),    // New York JFK
         LatLon::from_degrees(-23.43, -46.47, 750.0), // São Paulo GRU
-        LatLon::from_degrees(35.55, 139.78, 0.0),   // Tokyo HND
-        LatLon::from_degrees(0.0, 0.0, 0.0),        // Equator Prime Meridian
+        LatLon::from_degrees(35.55, 139.78, 0.0),    // Tokyo HND
+        LatLon::from_degrees(0.0, 0.0, 0.0),         // Equator Prime Meridian
     ];
 
     for pt in &test_points {
         let el = model_from_file.get_magnetic_elements(pt, 2026.5);
 
         // Verify valid geomagnetic ranges
-        assert!(el.total_intensity_nt > 20000.0 && el.total_intensity_nt < 70000.0,
-            "Total intensity {} nT out of reasonable Earth bounds", el.total_intensity_nt);
-        assert!(el.horizontal_intensity_nt > 10000.0 && el.horizontal_intensity_nt < 45000.0,
-            "Horizontal intensity {} nT out of bounds", el.horizontal_intensity_nt);
+        assert!(
+            el.total_intensity_nt > 20000.0 && el.total_intensity_nt < 70000.0,
+            "Total intensity {} nT out of reasonable Earth bounds",
+            el.total_intensity_nt
+        );
+        assert!(
+            el.horizontal_intensity_nt > 10000.0 && el.horizontal_intensity_nt < 45000.0,
+            "Horizontal intensity {} nT out of bounds",
+            el.horizontal_intensity_nt
+        );
 
         // Vector magnitude consistency: H = sqrt(X^2 + Y^2), F = sqrt(H^2 + Z^2)
         let computed_h = el.x_nt.hypot(el.y_nt);
@@ -539,8 +632,14 @@ fn test_wmm_high_resolution_cof_load_and_evaluate() {
         assert!((el.total_intensity_nt - computed_f).abs() < 1e-6);
 
         // Angular bounds
-        assert!(el.declination_rad >= -std::f64::consts::PI && el.declination_rad <= std::f64::consts::PI);
-        assert!(el.inclination_rad >= -std::f64::consts::FRAC_PI_2 && el.inclination_rad <= std::f64::consts::FRAC_PI_2);
+        assert!(
+            el.declination_rad >= -std::f64::consts::PI
+                && el.declination_rad <= std::f64::consts::PI
+        );
+        assert!(
+            el.inclination_rad >= -std::f64::consts::FRAC_PI_2
+                && el.inclination_rad <= std::f64::consts::FRAC_PI_2
+        );
 
         // Bearing transformations roundtrip
         let true_bearing = 45.0_f64.to_radians();
@@ -594,7 +693,10 @@ fn test_dynamic_magnetic_model_error_handling() {
 
     // Non-existent file path for from_cof_file
     let missing_file_err = MagneticModel::from_cof_file("this_path_does_not_exist_at_all_wmm.cof");
-    assert!(matches!(missing_file_err, Err(GeodesyError::MagneticModelError(_))));
+    assert!(matches!(
+        missing_file_err,
+        Err(GeodesyError::MagneticModelError(_))
+    ));
 }
 
 // ============================================================================
@@ -614,7 +716,10 @@ fn test_cross_track_error_and_along_track_distance() {
     let pos_on_track = LatLon::from_degrees(0.0, 5.0, 0.0);
     let dev1 = compute_route_deviation(&start, &end, &pos_on_track);
     assert!(dev1.cross_track_error_meters.abs() < 1.0);
-    let expected_atd = solver.inverse(&start, &pos_on_track, &ell).unwrap().distance;
+    let expected_atd = solver
+        .inverse(&start, &pos_on_track, &ell)
+        .unwrap()
+        .distance;
     assert!((dev1.along_track_distance_meters - expected_atd).abs() < 5.0);
 
     // Position 2: Displaced South (Right of Eastbound track) -> Positive XTK
@@ -626,7 +731,9 @@ fn test_cross_track_error_and_along_track_distance() {
     // Position 3: Displaced North (Left of Eastbound track) -> Negative XTK
     let pos_left = LatLon::from_degrees(1.0, 5.0, 0.0);
     let dev3 = compute_route_deviation(&start, &end, &pos_left);
-    assert!(dev3.cross_track_error_meters < -110_000.0 && dev3.cross_track_error_meters > -112_000.0);
+    assert!(
+        dev3.cross_track_error_meters < -110_000.0 && dev3.cross_track_error_meters > -112_000.0
+    );
 
     // Position 4: Displaced behind start (e.g. 0N, -1E) -> Negative ATD
     let pos_behind = LatLon::from_degrees(0.0, -1.0, 0.0);
@@ -669,7 +776,7 @@ fn test_geodesic_polygon_containment_and_antimeridian() {
     ]);
 
     let inside_pt = LatLon::from_degrees(-23.55, -46.63, 0.0); // São Paulo city
-    let outside_pt = LatLon::from_degrees(-15.0, -47.0, 0.0);  // Brasília (North)
+    let outside_pt = LatLon::from_degrees(-15.0, -47.0, 0.0); // Brasília (North)
 
     assert!(sp_sector.contains_point(&inside_pt));
     assert!(!sp_sector.contains_point(&outside_pt));
@@ -691,9 +798,18 @@ fn test_geodesic_polygon_containment_and_antimeridian() {
     let tonga = LatLon::from_degrees(-21.0, -175.0, 0.0);
     let sydney = LatLon::from_degrees(-33.86, 151.20, 0.0); // Outside
 
-    assert!(pacific_sector.contains_point(&fiji), "Fiji should be contained in Pacific sector");
-    assert!(pacific_sector.contains_point(&tonga), "Tonga should be contained in Pacific sector");
-    assert!(!pacific_sector.contains_point(&sydney), "Sydney should NOT be contained");
+    assert!(
+        pacific_sector.contains_point(&fiji),
+        "Fiji should be contained in Pacific sector"
+    );
+    assert!(
+        pacific_sector.contains_point(&tonga),
+        "Tonga should be contained in Pacific sector"
+    );
+    assert!(
+        !pacific_sector.contains_point(&sydney),
+        "Sydney should NOT be contained"
+    );
 
     // 3. North Polar Polygon
     let polar_sector = GeodesicPolygon::new(vec![

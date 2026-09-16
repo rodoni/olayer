@@ -3,14 +3,8 @@ use std::fmt;
 /// Errors arising during 3D volumetric mesh generation and ribbon extrusion.
 #[derive(Debug, PartialEq)]
 pub enum VolumetricError {
-    InsufficientVertices {
-        expected: usize,
-        actual: usize,
-    },
-    InvalidAltitudeBounds {
-        floor_m: f64,
-        ceiling_m: f64,
-    },
+    InsufficientVertices { expected: usize, actual: usize },
+    InvalidAltitudeBounds { floor_m: f64, ceiling_m: f64 },
     TriangulationFailed(String),
     InvalidRibbonParameters(String),
     DegenerateGeometry(String),
@@ -20,7 +14,10 @@ impl fmt::Display for VolumetricError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InsufficientVertices { expected, actual } => {
-                write!(f, "Insufficient vertices: expected at least {expected}, found {actual}")
+                write!(
+                    f,
+                    "Insufficient vertices: expected at least {expected}, found {actual}"
+                )
             }
             Self::InvalidAltitudeBounds { floor_m, ceiling_m } => {
                 write!(

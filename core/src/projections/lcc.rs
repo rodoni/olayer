@@ -1,7 +1,7 @@
+use super::{Projection, ProjectionError};
 use crate::geodesy::coords::LatLon;
 use crate::geodesy::ellipsoid::Ellipsoid;
 use crate::geodesy::math::normalize_longitude;
-use super::{Projection, ProjectionError};
 
 /// Safe latitude limit for LCC to avoid numerical instability at the poles.
 const CLAMP_LIMIT: f64 = 89.9_f64.to_radians();
@@ -98,7 +98,10 @@ impl Projection for LambertConformalConic {
 
     #[inline]
     fn project(&self, lla: &LatLon) -> Result<(f64, f64), ProjectionError> {
-        debug_assert!(lla.validate().is_ok(), "Invalid LLA in LCC::project: {lla:?}");
+        debug_assert!(
+            lla.validate().is_ok(),
+            "Invalid LLA in LCC::project: {lla:?}"
+        );
 
         let lat = lla.lat;
         let lon = lla.lon;

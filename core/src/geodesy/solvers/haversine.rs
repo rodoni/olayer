@@ -1,8 +1,8 @@
 #![allow(clippy::many_single_char_names)]
 
 use crate::geodesy::coords::LatLon;
-use crate::geodesy::errors::GeodesyError;
 use crate::geodesy::ellipsoid::Ellipsoid;
+use crate::geodesy::errors::GeodesyError;
 use crate::geodesy::math::{normalize_bearing, normalize_longitude};
 use crate::geodesy::solvers::{GeodeticResult, GeodeticSolver};
 
@@ -20,9 +20,20 @@ impl GeodeticSolver for HaversineSolver {
     const EXPECTED_ACCURACY_METERS: f64 = 1.0;
 
     #[inline]
-    fn inverse(&self, p1: &LatLon, p2: &LatLon, ellipsoid: &Ellipsoid) -> Result<GeodeticResult, GeodesyError> {
-        debug_assert!(p1.validate().is_ok(), "Invalid start coordinate in Haversine::inverse: {p1:?}");
-        debug_assert!(p2.validate().is_ok(), "Invalid end coordinate in Haversine::inverse: {p2:?}");
+    fn inverse(
+        &self,
+        p1: &LatLon,
+        p2: &LatLon,
+        ellipsoid: &Ellipsoid,
+    ) -> Result<GeodeticResult, GeodesyError> {
+        debug_assert!(
+            p1.validate().is_ok(),
+            "Invalid start coordinate in Haversine::inverse: {p1:?}"
+        );
+        debug_assert!(
+            p2.validate().is_ok(),
+            "Invalid end coordinate in Haversine::inverse: {p2:?}"
+        );
 
         let lat1 = p1.lat;
         let lon1 = p1.lon;
@@ -48,12 +59,25 @@ impl GeodeticSolver for HaversineSolver {
         let x_final = lat2.cos() * lat1.sin() - lat2.sin() * lat1.cos() * (-dlon).cos();
         let final_bearing = normalize_bearing(y_final.atan2(x_final) + std::f64::consts::PI);
 
-        Ok(GeodeticResult::new(distance, initial_bearing, final_bearing))
+        Ok(GeodeticResult::new(
+            distance,
+            initial_bearing,
+            final_bearing,
+        ))
     }
 
     #[inline]
-    fn direct(&self, p1: &LatLon, bearing_rad: f64, distance_meters: f64, ellipsoid: &Ellipsoid) -> Result<LatLon, GeodesyError> {
-        debug_assert!(p1.validate().is_ok(), "Invalid start coordinate in Haversine::direct: {p1:?}");
+    fn direct(
+        &self,
+        p1: &LatLon,
+        bearing_rad: f64,
+        distance_meters: f64,
+        ellipsoid: &Ellipsoid,
+    ) -> Result<LatLon, GeodesyError> {
+        debug_assert!(
+            p1.validate().is_ok(),
+            "Invalid start coordinate in Haversine::direct: {p1:?}"
+        );
         let lat1 = p1.lat;
         let lon1 = p1.lon;
         let ad = distance_meters / ellipsoid.authalic_radius; // angular distance

@@ -10,10 +10,10 @@ pub mod errors;
 
 use crate::geodesy::coords::LatLon;
 
+pub use errors::ProjectionError;
 pub use lcc::LambertConformalConic;
 pub use mercator::WebMercator;
 pub use stereographic::Stereographic;
-pub use errors::ProjectionError;
 
 pub use crate::camera::CameraState;
 
@@ -35,7 +35,9 @@ pub trait Projection {
     /// projections may override it if they require a specialized matrix pipeline.
     #[inline]
     fn get_view_proj_matrix(&self, camera: &CameraState) -> Result<[f32; 16], ProjectionError> {
-        camera.validate().map_err(|_| ProjectionError::InvalidCameraState)?;
+        camera
+            .validate()
+            .map_err(|_| ProjectionError::InvalidCameraState)?;
         let (cx, cy) = self.project(&camera.center)?;
 
         let view_trans = matrix::Matrix4::translation(-cx as f32, -cy as f32, 0.0);

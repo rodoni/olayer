@@ -1,7 +1,7 @@
 use olayer_core::geodesy::LatLon;
-use olayer_core::terrain::{AltitudeMode, AltitudeUnknownPolicy, TerrainEngine};
 use olayer_core::interpolator::InterpolationEngine;
-use olayer_core::projections::{Projection, CameraState, Stereographic};
+use olayer_core::projections::{CameraState, Projection, Stereographic};
+use olayer_core::terrain::{AltitudeMode, AltitudeUnknownPolicy, TerrainEngine};
 
 /// Controller wrapping WASM-equivalent engines for native environments.
 ///
@@ -31,12 +31,12 @@ impl NativeController {
 
         let camera = CameraState::with_attitude(
             LatLon::new(center_lat, center_lon, 0.0),
-            1.0,  // zoom
-            0.0,  // rotation
+            1.0,                  // zoom
+            0.0,                  // rotation
             35.0f64.to_radians(), // default 2.5D pitch
-            0.0,  // roll
-            1.0,  // aspect ratio (updated dynamically)
-            250000.0, // viewport base meters
+            0.0,                  // roll
+            1.0,                  // aspect ratio (updated dynamically)
+            250000.0,             // viewport base meters
         );
 
         Self {
@@ -53,7 +53,12 @@ impl NativeController {
 
     /// Helper to create and initialize a new `GeoserverWmtsSource`.
     #[inline]
-    pub fn create_geoserver_source(&self, id: &str, base_url: &str, layer_name: &str) -> crate::native_map_data_stack::GeoserverWmtsSource {
+    pub fn create_geoserver_source(
+        &self,
+        id: &str,
+        base_url: &str,
+        layer_name: &str,
+    ) -> crate::native_map_data_stack::GeoserverWmtsSource {
         crate::native_map_data_stack::GeoserverWmtsSource::new(id, base_url, layer_name)
     }
 
@@ -68,7 +73,14 @@ impl NativeController {
         unknown_policy: AltitudeUnknownPolicy,
         mesh_height: Option<f64>,
     ) -> Result<f64, olayer_core::terrain::TerrainError> {
-        self.terrain.resolve_altitude(lat_rad, lon_rad, input_height, mode, unknown_policy, mesh_height)
+        self.terrain.resolve_altitude(
+            lat_rad,
+            lon_rad,
+            input_height,
+            mode,
+            unknown_policy,
+            mesh_height,
+        )
     }
 
     #[inline]

@@ -14,5 +14,5 @@ pub use geojson_parser::{export_dataset_to_geojson, parse_geojson_aviation_str};
 pub use types::{
     AeronauticalAirport, AeronauticalAirspace, AeronauticalAirway, AeronauticalNavaid,
     AeronauticalRunway, AirspaceType, AirwaySegment, AirwayType, AltitudeLimit, AltitudeReference,
-    NavaidType,
+    NavaidType, SegmentDirection,
 };

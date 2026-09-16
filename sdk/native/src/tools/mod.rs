@@ -318,7 +318,9 @@ impl TacticalToolsManager {
         let inv = solver.inverse(&from_pt, &to_pt, &ell).unwrap_or_else(|_| {
             let p1 = LatLon::from_degrees(from_lat_deg, from_lon_deg, 0.0);
             let p2 = LatLon::from_degrees(to_lat_deg, to_lon_deg, 0.0);
-            olayer_core::geodesy::solvers::HaversineSolver.inverse(&p1, &p2, &ell).unwrap()
+            olayer_core::geodesy::solvers::HaversineSolver
+                .inverse(&p1, &p2, &ell)
+                .unwrap()
         });
 
         let dist_m = inv.distance;
@@ -380,7 +382,9 @@ impl TacticalToolsManager {
         for &t_min in intervals_minutes {
             let dist_nm = ground_speed_knots * (t_min / 60.0);
             let dist_m = dist_nm * METERS_PER_NAUTICAL_MILE;
-            let projected = solver.direct(&origin, track_rad, dist_m, &ell).unwrap_or(origin);
+            let projected = solver
+                .direct(&origin, track_rad, dist_m, &ell)
+                .unwrap_or(origin);
             let (p_lat, p_lon, _) = projected.to_degrees();
             ticks.push(PplTick {
                 time_minutes: t_min,
@@ -418,7 +422,9 @@ impl TacticalToolsManager {
         // Turn 1 center (at Fix, 90 deg perpendicular to inbound course)
         let perp_sign = if is_right { 1.0 } else { -1.0 };
         let bearing_to_turn1_center = normalize_bearing(theta_inbound + perp_sign * (PI / 2.0));
-        let turn1_center = solver.direct(&fix, bearing_to_turn1_center, turn_radius_m, &ell).unwrap_or(fix);
+        let turn1_center = solver
+            .direct(&fix, bearing_to_turn1_center, turn_radius_m, &ell)
+            .unwrap_or(fix);
 
         let steps = config.points_per_turn.max(4);
         let mut polyline = Vec::with_capacity(steps * 2 + 6);
@@ -432,7 +438,9 @@ impl TacticalToolsManager {
             let frac = i as f64 / steps as f64;
             let sweep = if is_right { frac * PI } else { -frac * PI };
             let angle = normalize_bearing(start_angle_1 + sweep);
-            let pt = solver.direct(&turn1_center, angle, turn_radius_m, &ell).unwrap_or(turn1_center);
+            let pt = solver
+                .direct(&turn1_center, angle, turn_radius_m, &ell)
+                .unwrap_or(turn1_center);
             let (lat_d, lon_d, _) = pt.to_degrees();
             polyline.push((lat_d, lon_d));
         }
@@ -443,20 +451,26 @@ impl TacticalToolsManager {
             LatLon::from_degrees(lat_d, lon_d, 0.0)
         };
         let theta_outbound = normalize_bearing(theta_inbound + PI);
-        let outbound_end = solver.direct(&outbound_start, theta_outbound, leg_dist_m, &ell).unwrap_or(outbound_start);
+        let outbound_end = solver
+            .direct(&outbound_start, theta_outbound, leg_dist_m, &ell)
+            .unwrap_or(outbound_start);
         let (ob_lat, ob_lon, _) = outbound_end.to_degrees();
         polyline.push((ob_lat, ob_lon));
 
         // 4. Turn 2 (Inbound turn, 180 degree arc back to inbound course)
         let bearing_to_turn2_center = normalize_bearing(theta_outbound + perp_sign * (PI / 2.0));
-        let turn2_center = solver.direct(&outbound_end, bearing_to_turn2_center, turn_radius_m, &ell).unwrap_or(outbound_end);
+        let turn2_center = solver
+            .direct(&outbound_end, bearing_to_turn2_center, turn_radius_m, &ell)
+            .unwrap_or(outbound_end);
         let start_angle_2 = normalize_bearing(bearing_to_turn2_center + PI);
 
         for i in 1..=steps {
             let frac = i as f64 / steps as f64;
             let sweep = if is_right { frac * PI } else { -frac * PI };
             let angle = normalize_bearing(start_angle_2 + sweep);
-            let pt = solver.direct(&turn2_center, angle, turn_radius_m, &ell).unwrap_or(turn2_center);
+            let pt = solver
+                .direct(&turn2_center, angle, turn_radius_m, &ell)
+                .unwrap_or(turn2_center);
             let (lat_d, lon_d, _) = pt.to_degrees();
             polyline.push((lat_d, lon_d));
         }
@@ -471,7 +485,8 @@ impl TacticalToolsManager {
     pub fn generate_ils_cone(&self, config: &IlsConeConfig) -> IlsGeometry {
         let ell = Ellipsoid::wgs84();
         let solver = VincentySolver;
-        let threshold = LatLon::from_degrees(config.threshold_lat_deg, config.threshold_lon_deg, 0.0);
+        let threshold =
+            LatLon::from_degrees(config.threshold_lat_deg, config.threshold_lon_deg, 0.0);
 
         // Approach corridor extends backwards from the runway threshold (heading - 180 deg)
         let rwy_heading_rad = config.runway_heading_deg.to_radians();
@@ -486,7 +501,9 @@ impl TacticalToolsManager {
         let left_bearing = normalize_bearing(approach_back_rad - half_fov_rad);
         let right_bearing = normalize_bearing(approach_back_rad + half_fov_rad);
 
-        let left_pt = solver.direct(&threshold, left_bearing, cone_dist_m, &ell).unwrap_or(threshold);
+        let left_pt = solver
+            .direct(&threshold, left_bearing, cone_dist_m, &ell)
+            .unwrap_or(threshold);
         let (left_lat, left_lon, _) = left_pt.to_degrees();
         cone_polygon.push((left_lat, left_lon));
 
@@ -495,12 +512,16 @@ impl TacticalToolsManager {
         for i in 1..arc_steps {
             let frac = i as f64 / arc_steps as f64;
             let angle = normalize_bearing(left_bearing + frac * (config.fov_deg.to_radians()));
-            let arc_pt = solver.direct(&threshold, angle, cone_dist_m, &ell).unwrap_or(threshold);
+            let arc_pt = solver
+                .direct(&threshold, angle, cone_dist_m, &ell)
+                .unwrap_or(threshold);
             let (a_lat, a_lon, _) = arc_pt.to_degrees();
             cone_polygon.push((a_lat, a_lon));
         }
 
-        let right_pt = solver.direct(&threshold, right_bearing, cone_dist_m, &ell).unwrap_or(threshold);
+        let right_pt = solver
+            .direct(&threshold, right_bearing, cone_dist_m, &ell)
+            .unwrap_or(threshold);
         let (right_lat, right_lon, _) = right_pt.to_degrees();
         cone_polygon.push((right_lat, right_lon));
 
@@ -509,7 +530,9 @@ impl TacticalToolsManager {
 
         // 2. Extended centerline
         let centerline_dist_m = config.extended_centerline_nm * METERS_PER_NAUTICAL_MILE;
-        let far_centerline_pt = solver.direct(&threshold, approach_back_rad, centerline_dist_m, &ell).unwrap_or(threshold);
+        let far_centerline_pt = solver
+            .direct(&threshold, approach_back_rad, centerline_dist_m, &ell)
+            .unwrap_or(threshold);
         let (far_lat, far_lon, _) = far_centerline_pt.to_degrees();
         let extended_centerline = vec![
             (config.threshold_lat_deg, config.threshold_lon_deg),
@@ -525,11 +548,21 @@ impl TacticalToolsManager {
         let max_nm = config.extended_centerline_nm.floor() as usize;
         for nm in 1..=max_nm {
             let d_m = nm as f64 * METERS_PER_NAUTICAL_MILE;
-            let center_tick = solver.direct(&threshold, approach_back_rad, d_m, &ell).unwrap_or(threshold);
-            let tick_len = if nm % 5 == 0 { crossbar_half_len_m * 2.0 } else { crossbar_half_len_m };
+            let center_tick = solver
+                .direct(&threshold, approach_back_rad, d_m, &ell)
+                .unwrap_or(threshold);
+            let tick_len = if nm % 5 == 0 {
+                crossbar_half_len_m * 2.0
+            } else {
+                crossbar_half_len_m
+            };
 
-            let left_tick = solver.direct(&center_tick, perp_left, tick_len, &ell).unwrap_or(center_tick);
-            let right_tick = solver.direct(&center_tick, perp_right, tick_len, &ell).unwrap_or(center_tick);
+            let left_tick = solver
+                .direct(&center_tick, perp_left, tick_len, &ell)
+                .unwrap_or(center_tick);
+            let right_tick = solver
+                .direct(&center_tick, perp_right, tick_len, &ell)
+                .unwrap_or(center_tick);
 
             let (c_lat, c_lon, _) = center_tick.to_degrees();
             let (l_lat, l_lon, _) = left_tick.to_degrees();
@@ -568,7 +601,9 @@ impl TacticalToolsManager {
 
             for i in 0..=steps {
                 let bearing_rad = (i as f64 / steps as f64) * 2.0 * PI;
-                let pt = solver.direct(&center, bearing_rad, radius_m, &ell).unwrap_or(center);
+                let pt = solver
+                    .direct(&center, bearing_rad, radius_m, &ell)
+                    .unwrap_or(center);
                 let (lat_d, lon_d, _) = pt.to_degrees();
                 ring.push((lat_d, lon_d));
             }
@@ -599,8 +634,11 @@ impl TacticalToolsManager {
 
         for i in 0..num_spokes {
             let spoke_bearing_deg = i as f64 * interval_deg;
-            let true_bearing_rad = normalize_bearing(spoke_bearing_deg.to_radians() + declination_rad);
-            let outer_pt = solver.direct(&center, true_bearing_rad, radius_m, &ell).unwrap_or(center);
+            let true_bearing_rad =
+                normalize_bearing(spoke_bearing_deg.to_radians() + declination_rad);
+            let outer_pt = solver
+                .direct(&center, true_bearing_rad, radius_m, &ell)
+                .unwrap_or(center);
             let (out_lat, out_lon, _) = outer_pt.to_degrees();
 
             spokes.push(vec![
@@ -721,7 +759,10 @@ mod tests {
 
         // Extended centerline has 2 points
         assert_eq!(ils.extended_centerline.len(), 2);
-        assert_eq!(ils.extended_centerline[0], (config.threshold_lat_deg, config.threshold_lon_deg));
+        assert_eq!(
+            ils.extended_centerline[0],
+            (config.threshold_lat_deg, config.threshold_lon_deg)
+        );
 
         // 15 tick marks for 15 NM
         assert_eq!(ils.tick_marks.len(), 15);

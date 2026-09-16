@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 fn main() {
     let crate_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
-    
+
     // Attempt to load cbindgen.toml config, fallback to default if missing
     let config_path = PathBuf::from(&crate_dir).join("cbindgen.toml");
     let config = if config_path.exists() {

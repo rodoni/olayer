@@ -70,7 +70,8 @@ pub fn triangulate_polygon_2d(points: &[[f64; 2]]) -> Result<Vec<[usize; 3]>, Vo
     let mut triangles = Vec::with_capacity(n - 2);
 
     let is_convex = |prev: [f64; 2], curr: [f64; 2], next: [f64; 2]| -> bool {
-        let cross = (curr[0] - prev[0]) * (next[1] - prev[1]) - (curr[1] - prev[1]) * (next[0] - prev[0]);
+        let cross =
+            (curr[0] - prev[0]) * (next[1] - prev[1]) - (curr[1] - prev[1]) * (next[0] - prev[0]);
         cross > 1e-14
     };
 

@@ -1,10 +1,10 @@
 #![allow(clippy::too_many_arguments)]
 
-use std::sync::Arc;
-use olayer_core::geodesy::LatLon;
-use olayer_core::projections::{Projection, CameraState};
-use usvg::TreeParsing;
 use crate::native_controller::NativeController;
+use olayer_core::geodesy::LatLon;
+use olayer_core::projections::{CameraState, Projection};
+use std::sync::Arc;
+use usvg::TreeParsing;
 
 /// Struct responsible for CPU-side projections and plotting targets/billboards in egui.
 ///
@@ -63,7 +63,8 @@ impl WgpuCpuVertexPipeline {
                 let r_earth = 6378137.0;
                 let vector_time = 60.0;
                 let lat_offset = (speed_mps * vector_time * t.heading_rad.cos()) / r_earth;
-                let lon_offset = (speed_mps * vector_time * t.heading_rad.sin()) / (r_earth * t.position.lat.cos());
+                let lon_offset = (speed_mps * vector_time * t.heading_rad.sin())
+                    / (r_earth * t.position.lat.cos());
                 if let Some(end_pos) = project_lla_to_screen(
                     t.position.lat + lat_offset,
                     t.position.lon + lon_offset,
@@ -75,7 +76,10 @@ impl WgpuCpuVertexPipeline {
                     width,
                     height,
                 ) {
-                    painter.line_segment([pos, end_pos], egui::Stroke::new(1.0, egui::Color32::from_rgb(0, 176, 255)));
+                    painter.line_segment(
+                        [pos, end_pos],
+                        egui::Stroke::new(1.0, egui::Color32::from_rgb(0, 176, 255)),
+                    );
                 }
 
                 // Target data blocks (labels)
@@ -117,7 +121,10 @@ pub fn project_lla_to_screen(
     height: u32,
 ) -> Option<egui::Pos2> {
     if view_mode == "3D" {
-        let xyz = olayer_core::geodesy::lla_to_ecef(&LatLon::new(lat, lon, alt), &olayer_core::geodesy::ellipsoid::Ellipsoid::wgs84());
+        let xyz = olayer_core::geodesy::lla_to_ecef(
+            &LatLon::new(lat, lon, alt),
+            &olayer_core::geodesy::ellipsoid::Ellipsoid::wgs84(),
+        );
         let x = xyz.x as f32;
         let y = xyz.y as f32;
         let z = xyz.z as f32;
@@ -126,7 +133,10 @@ pub fn project_lla_to_screen(
         let r_earth = 6378137.0f64;
         let base_dist = 15000000.0f64;
         let dist = r_earth + (base_dist / camera.zoom);
-        let cam_xyz = olayer_core::geodesy::lla_to_ecef(&LatLon::new(camera.center.lat, camera.center.lon, dist - r_earth), &olayer_core::geodesy::ellipsoid::Ellipsoid::wgs84());
+        let cam_xyz = olayer_core::geodesy::lla_to_ecef(
+            &LatLon::new(camera.center.lat, camera.center.lon, dist - r_earth),
+            &olayer_core::geodesy::ellipsoid::Ellipsoid::wgs84(),
+        );
         let dot = cam_xyz.x * xyz.x + cam_xyz.y * xyz.y + cam_xyz.z * xyz.z;
         if dot < r_earth * r_earth {
             return None;
@@ -188,8 +198,8 @@ pub fn rasterize_svg(svg_data: &str, width: u32, height: u32) -> Result<Vec<u8>,
     let tree = usvg::Tree::from_str(svg_data, &opt)
         .map_err(|e| format!("Failed to parse SVG: {:?}", e))?;
 
-    let mut pixmap = resvg::tiny_skia::Pixmap::new(width, height)
-        .ok_or("Failed to allocate Pixmap")?;
+    let mut pixmap =
+        resvg::tiny_skia::Pixmap::new(width, height).ok_or("Failed to allocate Pixmap")?;
 
     resvg::render(
         &tree,
@@ -207,8 +217,8 @@ pub fn rasterize_svg(svg_data: &str, width: u32, height: u32) -> Result<Vec<u8>,
 #[cfg(test)]
 mod tests {
     use super::*;
-    use olayer_core::projections::Stereographic;
     use olayer_core::geodesy::ellipsoid::Ellipsoid;
+    use olayer_core::projections::Stereographic;
 
     #[test]
     fn test_project_lla_to_screen_2d_center() {
@@ -224,14 +234,7 @@ mod tests {
         );
         let vp = camera.get_2d_view_proj_matrix(&projection).unwrap();
 
-        let pos = project_lla_to_screen(
-            0.0, 0.0, 0.0,
-            "2D",
-            &camera,
-            &projection,
-            &vp,
-            800, 600,
-        );
+        let pos = project_lla_to_screen(0.0, 0.0, 0.0, "2D", &camera, &projection, &vp, 800, 600);
         assert!(pos.is_some());
         let p = pos.unwrap();
         // Center of screen at 800x600 with no rotation should be roughly (400, 300)
@@ -254,14 +257,7 @@ mod tests {
         let vp = camera.get_2d_view_proj_matrix(&projection).unwrap();
 
         // A point slightly north of center should be above center on screen
-        let pos = project_lla_to_screen(
-            0.01, 0.0, 0.0,
-            "2D",
-            &camera,
-            &projection,
-            &vp,
-            800, 600,
-        );
+        let pos = project_lla_to_screen(0.01, 0.0, 0.0, "2D", &camera, &projection, &vp, 800, 600);
         assert!(pos.is_some());
         let p = pos.unwrap();
         // Screen Y goes down, so north is smaller Y
@@ -283,14 +279,7 @@ mod tests {
         let vp = camera.get_2d_view_proj_matrix(&projection).unwrap();
 
         // A point slightly east of center should be to the right on screen
-        let pos = project_lla_to_screen(
-            0.0, 0.01, 0.0,
-            "2D",
-            &camera,
-            &projection,
-            &vp,
-            800, 600,
-        );
+        let pos = project_lla_to_screen(0.0, 0.01, 0.0, "2D", &camera, &projection, &vp, 800, 600);
         assert!(pos.is_some());
         let p = pos.unwrap();
         assert!(p.x > 400.0);
@@ -311,14 +300,7 @@ mod tests {
         let vp = camera.get_2d_view_proj_matrix(&projection).unwrap();
 
         // With 90° rotation, a point north of center should appear to the right
-        let pos = project_lla_to_screen(
-            0.01, 0.0, 0.0,
-            "2D",
-            &camera,
-            &projection,
-            &vp,
-            800, 600,
-        );
+        let pos = project_lla_to_screen(0.01, 0.0, 0.0, "2D", &camera, &projection, &vp, 800, 600);
         assert!(pos.is_some());
         let p = pos.unwrap();
         assert!(p.x > 400.0);
@@ -340,12 +322,15 @@ mod tests {
 
         // The antipode (0, 180°) is a singularity for Stereographic centered at (0, 0)
         let pos = project_lla_to_screen(
-            0.0, std::f64::consts::PI, 0.0,
+            0.0,
+            std::f64::consts::PI,
+            0.0,
             "2D",
             &camera,
             &projection,
             &vp,
-            800, 600,
+            800,
+            600,
         );
         assert!(pos.is_none());
     }

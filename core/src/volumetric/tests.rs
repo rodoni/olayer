@@ -7,12 +7,7 @@ use crate::volumetric::triangulation::{signed_area_2d, triangulate_polygon_2d};
 #[test]
 fn test_signed_area_and_triangulation() {
     // CCW Square: (0,0) -> (1,0) -> (1,1) -> (0,1)
-    let square_ccw = vec![
-        [0.0, 0.0],
-        [1.0, 0.0],
-        [1.0, 1.0],
-        [0.0, 1.0],
-    ];
+    let square_ccw = vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
     let area_ccw = signed_area_2d(&square_ccw);
     assert!((area_ccw - 1.0).abs() < 1e-6);
 
@@ -65,11 +60,17 @@ fn test_airspace_volume_mesh_generation() {
 
     // Verify error when floor >= ceiling
     let err_alt = generate_airspace_volume_mesh(&polygon, 5000.0, 1000.0);
-    assert!(matches!(err_alt, Err(VolumetricError::InvalidAltitudeBounds { .. })));
+    assert!(matches!(
+        err_alt,
+        Err(VolumetricError::InvalidAltitudeBounds { .. })
+    ));
 
     // Verify error on < 3 vertices
     let err_vert = generate_airspace_volume_mesh(&polygon[0..2], 1000.0, 5000.0);
-    assert!(matches!(err_vert, Err(VolumetricError::InsufficientVertices { .. })));
+    assert!(matches!(
+        err_vert,
+        Err(VolumetricError::InsufficientVertices { .. })
+    ));
 }
 
 #[test]
@@ -102,11 +103,15 @@ fn test_trajectory_ribbon_mesh_generation() {
 
     // Custom scalars test
     let custom_scalars = vec![0.1, 0.4, 0.8, 1.0];
-    let custom_ribbon = generate_trajectory_ribbon_mesh(&waypoints, ribbon_width_m, Some(&custom_scalars)).unwrap();
+    let custom_ribbon =
+        generate_trajectory_ribbon_mesh(&waypoints, ribbon_width_m, Some(&custom_scalars)).unwrap();
     assert_eq!(custom_ribbon.vertices[0].scalar, 0.1);
     assert_eq!(custom_ribbon.vertices[2].scalar, 0.4);
 
     // Error on negative ribbon width
     let err_width = generate_trajectory_ribbon_mesh(&waypoints, -10.0, None);
-    assert!(matches!(err_width, Err(VolumetricError::InvalidRibbonParameters(_))));
+    assert!(matches!(
+        err_width,
+        Err(VolumetricError::InvalidRibbonParameters(_))
+    ));
 }

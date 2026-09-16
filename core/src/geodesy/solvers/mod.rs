@@ -2,8 +2,8 @@ pub mod haversine;
 pub mod vincenty;
 
 use super::coords::LatLon;
-use super::errors::GeodesyError;
 use super::ellipsoid::Ellipsoid;
+use super::errors::GeodesyError;
 
 pub use haversine::HaversineSolver;
 pub use vincenty::VincentySolver;
@@ -45,8 +45,19 @@ pub trait GeodeticSolver {
     const EXPECTED_ACCURACY_METERS: f64;
 
     /// Computes the geodetic distance and bearings between two coordinates (Inverse Problem).
-    fn inverse(&self, p1: &LatLon, p2: &LatLon, ellipsoid: &Ellipsoid) -> Result<GeodeticResult, GeodesyError>;
+    fn inverse(
+        &self,
+        p1: &LatLon,
+        p2: &LatLon,
+        ellipsoid: &Ellipsoid,
+    ) -> Result<GeodeticResult, GeodesyError>;
 
     /// Projects a new coordinate from a starting point, initial bearing (azimuth), and distance (Direct Problem).
-    fn direct(&self, p1: &LatLon, bearing_rad: f64, distance_meters: f64, ellipsoid: &Ellipsoid) -> Result<LatLon, GeodesyError>;
+    fn direct(
+        &self,
+        p1: &LatLon,
+        bearing_rad: f64,
+        distance_meters: f64,
+        ellipsoid: &Ellipsoid,
+    ) -> Result<LatLon, GeodesyError>;
 }

@@ -79,7 +79,7 @@ fn test_horizontal_translation() {
     let start_pos = LatLon::from_degrees(-23.5505, -46.6333, 1000.0); // São Paulo
     let heading = 90.0_f64.to_radians(); // East
     let speed = 250.0; // m/s
-    
+
     let state = TargetState {
         id: Arc::from("ALVO1"),
         last_position: start_pos,
@@ -108,7 +108,7 @@ fn test_horizontal_translation() {
 fn test_vertical_rate_translation() {
     let mut engine = InterpolationEngine::new();
     let start_pos = LatLon::from_degrees(0.0, 0.0, 1000.0);
-    
+
     let state = TargetState {
         id: Arc::from("CLIMBER"),
         last_position: start_pos,
@@ -207,8 +207,14 @@ fn test_status_reports_stale_and_clock_skewed_targets() {
     let batch = engine.interpolate_all_with_status(120.0).unwrap();
     assert!(batch.targets.is_empty());
     assert_eq!(batch.skipped.len(), 2);
-    assert!(batch.skipped.iter().any(|target| target.quality == PredictionQuality::Stale));
-    assert!(batch.skipped.iter().any(|target| target.quality == PredictionQuality::ClockSkewed));
+    assert!(batch
+        .skipped
+        .iter()
+        .any(|target| target.quality == PredictionQuality::Stale));
+    assert!(batch
+        .skipped
+        .iter()
+        .any(|target| target.quality == PredictionQuality::ClockSkewed));
 }
 
 #[test]
