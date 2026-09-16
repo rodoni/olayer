@@ -22,6 +22,16 @@ fn test_camera_state_validation() {
     // viewport_base_meters = 0 should fail
     let bad_base = CameraState::new(center, 1.0, 0.0, 1.0, 0.0);
     assert_eq!(bad_base.validate(), Err(CameraError::InvalidViewportBase));
+
+    let bad_center = CameraState::new(LatLon::new(f64::NAN, 0.0, 0.0), 1.0, 0.0, 1.0, 100_000.0);
+    assert_eq!(bad_center.validate(), Err(CameraError::InvalidCenter));
+
+    let bad_attitude =
+        CameraState::with_attitude(center, 1.0, f64::INFINITY, 0.0, 0.0, 1.0, 100_000.0);
+    assert_eq!(bad_attitude.validate(), Err(CameraError::InvalidAttitude));
+
+    let bad_zoom_nan = CameraState::new(center, f64::NAN, 0.0, 1.0, 100_000.0);
+    assert_eq!(bad_zoom_nan.validate(), Err(CameraError::InvalidZoom));
 }
 
 #[test]
@@ -48,7 +58,8 @@ fn test_camera_25d_view_proj_matrix() {
     let wm = WebMercator::new(ellipsoid);
     let center = LatLon::from_degrees(0.0, 0.0, 0.0);
 
-    let camera = CameraState::with_attitude(center, 1.0, 0.0, 35.0_f64.to_radians(), 0.0, 1.0, 100_000.0);
+    let camera =
+        CameraState::with_attitude(center, 1.0, 0.0, 35.0_f64.to_radians(), 0.0, 1.0, 100_000.0);
     let matrix = camera.get_25d_view_proj_matrix(&wm);
     assert!(matrix.is_ok());
 
@@ -82,6 +93,29 @@ fn test_camera_error_display() {
         CameraError::InvalidViewportBase.to_string(),
         "Invalid camera state: viewport base meters must be greater than zero"
     );
+    assert_eq!(
+        CameraError::InvalidCenter.to_string(),
+        "Invalid camera center"
+    );
+}
+
+#[test]
+fn test_camera_rejects_non_finite_projection_values() {
+    let projection = WebMercator::new(Ellipsoid::wgs84());
+    let camera = CameraState::new(
+        LatLon::new(0.0, 0.0, 0.0),
+        f64::MIN_POSITIVE,
+        0.0,
+        1.0,
+        100_000.0,
+    );
+
+    assert_eq!(
+        camera.get_2d_view_proj_matrix(&projection),
+        Err(CameraError::InvalidProjectionValue {
+            name: "viewport width"
+        })
+    );
 }
 
 #[test]
@@ -103,7 +137,15 @@ fn test_camera_2d_with_rotation() {
     let wm = WebMercator::new(ellipsoid);
     let center = LatLon::from_degrees(0.0, 0.0, 0.0);
 
-    let camera = CameraState::with_attitude(center, 1.0, std::f64::consts::PI / 2.0, 0.0, 0.0, 1.0, 100_000.0);
+    let camera = CameraState::with_attitude(
+        center,
+        1.0,
+        std::f64::consts::PI / 2.0,
+        0.0,
+        0.0,
+        1.0,
+        100_000.0,
+    );
     let matrix = camera.get_2d_view_proj_matrix(&wm);
     assert!(matrix.is_ok());
     let m = matrix.unwrap();

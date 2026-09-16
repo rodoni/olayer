@@ -1,31 +1,31 @@
-use std::fmt;
 use crate::projections::ProjectionError;
+use thiserror::Error;
 
 /// Errors that can occur during camera operations.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Error)]
 pub enum CameraError {
+    /// The camera center is not a finite coordinate in the valid geodetic range.
+    #[error("Invalid camera center")]
+    InvalidCenter,
+    /// One or more camera attitude angles is not finite.
+    #[error("Invalid camera attitude")]
+    InvalidAttitude,
     /// The camera zoom factor is invalid (must be greater than zero).
+    #[error("Invalid camera state: zoom must be greater than zero")]
     InvalidZoom,
     /// The camera viewport aspect ratio is invalid (must be greater than zero).
+    #[error("Invalid camera state: aspect ratio must be greater than zero")]
     InvalidAspectRatio,
     /// The camera viewport base meters value is invalid (must be greater than zero).
+    #[error("Invalid camera state: viewport base meters must be greater than zero")]
     InvalidViewportBase,
+    /// A value needed to build a projection matrix is not finite or positive.
+    #[error("Invalid projection value: {name}")]
+    InvalidProjectionValue { name: &'static str },
     /// An error occurred in the underlying cartographic projection.
+    #[error("Projection error: {0}")]
     Projection(ProjectionError),
 }
-
-impl fmt::Display for CameraError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::InvalidZoom => write!(f, "Invalid camera state: zoom must be greater than zero"),
-            Self::InvalidAspectRatio => write!(f, "Invalid camera state: aspect ratio must be greater than zero"),
-            Self::InvalidViewportBase => write!(f, "Invalid camera state: viewport base meters must be greater than zero"),
-            Self::Projection(err) => write!(f, "Projection error: {err}"),
-        }
-    }
-}
-
-impl std::error::Error for CameraError {}
 
 impl From<ProjectionError> for CameraError {
     #[inline]
