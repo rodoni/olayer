@@ -1853,7 +1853,7 @@ pub unsafe extern "C" fn olayer_declutter_solve_labels(
             None
         };
         core_targets.push(olayer_core::declutter::LabelTarget {
-            id: format!("target_{i}"),
+            id: format!("target_{i}").into(),
             x: t.x,
             y: t.y,
             heading_rad,

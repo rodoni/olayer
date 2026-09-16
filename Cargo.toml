@@ -6,3 +6,6 @@ members = [
     "sdk/native",
     "sdk/native/demo",
 ]
+
+[workspace.dependencies]
+ahash = "0.8"

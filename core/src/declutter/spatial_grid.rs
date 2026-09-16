@@ -1,17 +1,18 @@
 use crate::declutter::types::Rect2D;
-use std::collections::HashMap;
+use ahash::AHashMap;
 
 /// Uniform 2D spatial hash grid for $O(1)$ fast bounding box collision queries.
+#[derive(Debug, Clone)]
 pub struct SpatialHashGrid {
     cell_size: f32,
-    cells: HashMap<(i32, i32), Vec<usize>>,
+    cells: AHashMap<(i32, i32), Vec<usize>>,
 }
 
 impl SpatialHashGrid {
     pub fn new(cell_size: f32) -> Self {
         Self {
             cell_size: if cell_size > 0.0 { cell_size } else { 64.0 },
-            cells: HashMap::new(),
+            cells: AHashMap::new(),
         }
     }
 
@@ -35,13 +36,13 @@ impl SpatialHashGrid {
     }
 
     /// Queries all item indices overlapping the given bounding box.
-    pub fn query_candidates(&self, rect: &Rect2D) -> Vec<usize> {
+    pub fn query_candidates(&self, rect: &Rect2D, candidates: &mut Vec<usize>) {
+        candidates.clear();
         let min_cx = self.grid_coord(rect.x);
         let max_cx = self.grid_coord(rect.x + rect.width);
         let min_cy = self.grid_coord(rect.y);
         let max_cy = self.grid_coord(rect.y + rect.height);
 
-        let mut candidates = Vec::new();
         for cx in min_cx..=max_cx {
             for cy in min_cy..=max_cy {
                 if let Some(list) = self.cells.get(&(cx, cy)) {
@@ -51,7 +52,6 @@ impl SpatialHashGrid {
         }
         candidates.sort_unstable();
         candidates.dedup();
-        candidates
     }
 
     pub fn clear(&mut self) {

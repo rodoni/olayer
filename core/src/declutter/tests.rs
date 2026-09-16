@@ -17,7 +17,8 @@ fn test_rect2d_and_spatial_grid() {
     grid.insert(1, &r2);
     grid.insert(2, &r3);
 
-    let candidates = grid.query_candidates(&r1);
+    let mut candidates = Vec::new();
+    grid.query_candidates(&r1, &mut candidates);
     assert!(candidates.contains(&0));
     assert!(candidates.contains(&1));
     assert!(!candidates.contains(&2));
@@ -42,7 +43,7 @@ fn test_line_segments_intersect() {
 fn test_single_target_prefers_northeast() {
     let engine = DeclutterEngine::with_default_config();
     let targets = vec![LabelTarget {
-        id: "AFR101".to_string(),
+        id: "AFR101".into(),
         x: 100.0,
         y: 100.0,
         heading_rad: None,
@@ -63,7 +64,7 @@ fn test_heading_avoidance() {
     let engine = DeclutterEngine::with_default_config();
     // Aircraft heading North-East (45 deg = PI/4 rad)
     let targets = vec![LabelTarget {
-        id: "BAW202".to_string(),
+        id: "BAW202".into(),
         x: 200.0,
         y: 200.0,
         heading_rad: Some(std::f32::consts::FRAC_PI_4),
@@ -93,7 +94,7 @@ fn test_cluster_deconfliction_no_overlap() {
     // 4 aircraft tightly clustered within 15 pixels of each other
     let targets = vec![
         LabelTarget {
-            id: "T1".to_string(),
+            id: "T1".into(),
             x: 200.0,
             y: 200.0,
             heading_rad: None,
@@ -102,7 +103,7 @@ fn test_cluster_deconfliction_no_overlap() {
             priority: 0,
         },
         LabelTarget {
-            id: "T2".to_string(),
+            id: "T2".into(),
             x: 205.0,
             y: 205.0,
             heading_rad: None,
@@ -111,7 +112,7 @@ fn test_cluster_deconfliction_no_overlap() {
             priority: 1,
         },
         LabelTarget {
-            id: "T3".to_string(),
+            id: "T3".into(),
             x: 195.0,
             y: 205.0,
             heading_rad: None,
@@ -120,7 +121,7 @@ fn test_cluster_deconfliction_no_overlap() {
             priority: 2,
         },
         LabelTarget {
-            id: "T4".to_string(),
+            id: "T4".into(),
             x: 200.0,
             y: 195.0,
             heading_rad: None,

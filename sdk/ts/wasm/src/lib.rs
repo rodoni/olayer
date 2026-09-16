@@ -1413,7 +1413,8 @@ impl WasmAeronauticalDataset {
         let center = LatLon::new(lat_rad, lon_rad, 0.0);
         let navaids = self
             .inner
-            .find_navaids_within_radius(&center, radius_meters);
+            .find_navaids_within_radius(&center, radius_meters)
+            .map_err(|error| JsValue::from_str(&error.to_string()))?;
         serde_wasm_bindgen::to_value(&navaids).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
@@ -1744,7 +1745,7 @@ pub fn solve_label_placements_flat(
         let heading_rad = if hdg_val >= 0.0 { Some(hdg_val) } else { None };
 
         targets.push(olayer_core::declutter::LabelTarget {
-            id: format!("target_{i}"),
+            id: format!("target_{i}").into(),
             x,
             y,
             heading_rad,

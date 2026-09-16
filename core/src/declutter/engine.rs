@@ -4,6 +4,7 @@ use crate::declutter::types::{
 };
 
 /// High-performance 8-octant force-directed label anti-cluttering solver.
+#[derive(Debug, Clone)]
 pub struct DeclutterEngine {
     config: DeclutterConfig,
 }
@@ -75,6 +76,9 @@ impl DeclutterEngine {
     }
 
     /// Solves optimal label placement across all provided targets.
+    ///
+    /// # Panics
+    /// This function does not panic for valid Rust inputs.
     pub fn solve(&self, targets: &[LabelTarget]) -> Vec<LabelPlacement> {
         let n = targets.len();
         if n == 0 {
@@ -82,11 +86,13 @@ impl DeclutterEngine {
         }
 
         // Sort targets by priority (highest priority 0 first)
-        let mut sorted_indices: Vec<usize> = (0..n).collect();
+        let mut sorted_indices = Vec::with_capacity(n);
+        sorted_indices.extend(0..n);
         sorted_indices.sort_by_key(|&i| targets[i].priority);
 
         let mut placements: Vec<Option<LabelPlacement>> = vec![None; n];
         let mut grid = SpatialHashGrid::new(self.config.leader_length_px * 2.0 + 50.0);
+        let mut candidate_indices = Vec::with_capacity(16);
 
         // ====================================================================
         // Pass 1: Greedy Placement
@@ -112,7 +118,7 @@ impl DeclutterEngine {
                 cost += hdg_conflict * self.config.weight_heading;
 
                 // 3. Overlap cost using Spatial Grid
-                let candidate_indices = grid.query_candidates(&expanded_rect);
+                grid.query_candidates(&expanded_rect, &mut candidate_indices);
                 let mut overlap_area = 0.0;
                 let mut leader_crossings = 0;
 
@@ -176,11 +182,14 @@ impl DeclutterEngine {
                 }
 
                 let target = &targets[idx];
-                let mut best_octant = placements[idx].as_ref().unwrap().octant;
+                let Some(current) = placements[idx].as_ref() else {
+                    continue;
+                };
+                let mut best_octant = current.octant;
                 let mut best_cost = current_cost;
-                let mut best_rect = placements[idx].as_ref().unwrap().rect;
-                let mut best_start = placements[idx].as_ref().unwrap().leader_start;
-                let mut best_end = placements[idx].as_ref().unwrap().leader_end;
+                let mut best_rect = current.rect;
+                let mut best_start = current.leader_start;
+                let mut best_end = current.leader_end;
 
                 for octant in OctantDirection::all() {
                     let (rect, start, end) = Self::compute_candidate_geometry(
@@ -194,7 +203,7 @@ impl DeclutterEngine {
                     cost += Self::compute_heading_conflict(octant, target.heading_rad)
                         * self.config.weight_heading;
 
-                    let candidate_indices = grid.query_candidates(&expanded_rect);
+                    grid.query_candidates(&expanded_rect, &mut candidate_indices);
                     let mut overlap_area = 0.0;
                     let mut leader_crossings = 0;
 
@@ -244,6 +253,6 @@ impl DeclutterEngine {
             }
         }
 
-        placements.into_iter().map(|p| p.unwrap()).collect()
+        placements.into_iter().flatten().collect()
     }
 }

@@ -1,4 +1,41 @@
 use serde::{Deserialize, Serialize};
+use std::fmt;
+
+/// Stable identifier for a declutter target and its solved label placement.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[repr(transparent)]
+pub struct TargetId(Box<str>);
+
+impl TargetId {
+    /// Returns the identifier as a borrowed string slice.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<String> for TargetId {
+    fn from(value: String) -> Self {
+        Self(value.into_boxed_str())
+    }
+}
+
+impl From<&str> for TargetId {
+    fn from(value: &str) -> Self {
+        Self(value.into())
+    }
+}
+
+impl AsRef<str> for TargetId {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl fmt::Display for TargetId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
 
 /// 8-octant leader arm directions relative to the target symbol center.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -112,7 +149,7 @@ impl Rect2D {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LabelTarget {
     /// Unique target identifier (callsign/track number).
-    pub id: String,
+    pub id: TargetId,
     /// Screen coordinate X in pixels.
     pub x: f32,
     /// Screen coordinate Y in pixels.
@@ -130,7 +167,7 @@ pub struct LabelTarget {
 /// Solved optimal placement for a target's label.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LabelPlacement {
-    pub id: String,
+    pub id: TargetId,
     pub octant: OctantDirection,
     pub rect: Rect2D,
     pub leader_start: [f32; 2],
