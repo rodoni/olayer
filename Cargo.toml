@@ -9,3 +9,4 @@ members = [
 
 [workspace.dependencies]
 ahash = "0.8"
+getrandom = { version = "0.3", features = ["wasm_js"] }

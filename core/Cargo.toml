@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 ahash.workspace = true
+getrandom.workspace = true
 lru = "0.12"
 flate2 = "1"
 quick-xml = "0.31.0"
