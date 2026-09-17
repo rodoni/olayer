@@ -45,6 +45,10 @@ pub trait GeodeticSolver {
     const EXPECTED_ACCURACY_METERS: f64;
 
     /// Computes the geodetic distance and bearings between two coordinates (Inverse Problem).
+    ///
+    /// # Errors
+    /// Returns [`GeodesyError`] when either coordinate is invalid or the solver
+    /// cannot compute a valid result.
     fn inverse(
         &self,
         p1: &LatLon,
@@ -53,6 +57,10 @@ pub trait GeodeticSolver {
     ) -> Result<GeodeticResult, GeodesyError>;
 
     /// Projects a new coordinate from a starting point, initial bearing (azimuth), and distance (Direct Problem).
+    ///
+    /// # Errors
+    /// Returns [`GeodesyError`] when the starting coordinate is invalid or the
+    /// solver cannot compute a valid result.
     fn direct(
         &self,
         p1: &LatLon,

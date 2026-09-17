@@ -1,6 +1,9 @@
 use crate::declutter::engine::DeclutterEngine;
 use crate::declutter::spatial_grid::{line_segments_intersect, SpatialHashGrid};
-use crate::declutter::types::{DeclutterConfig, LabelTarget, OctantDirection, Rect2D};
+use crate::declutter::types::{
+    DeclutterConfig, LabelTarget, OctantDirection, Rect2D, TargetId,
+};
+use serde_json::json;
 
 #[test]
 fn test_rect2d_and_spatial_grid() {
@@ -25,6 +28,33 @@ fn test_rect2d_and_spatial_grid() {
 }
 
 #[test]
+fn test_spatial_grid_reuses_and_clears_candidate_buffer() {
+    let near = Rect2D::new(0.0, 0.0, 10.0, 10.0);
+    let far = Rect2D::new(100.0, 100.0, 10.0, 10.0);
+    let mut grid = SpatialHashGrid::new(32.0);
+    grid.insert(1, &near);
+    grid.insert(2, &far);
+
+    let mut candidates = vec![999];
+    grid.query_candidates(&near, &mut candidates);
+    assert_eq!(candidates, vec![1]);
+
+    grid.query_candidates(&far, &mut candidates);
+    assert_eq!(candidates, vec![2]);
+}
+
+#[test]
+fn test_spatial_grid_uses_fallback_for_non_positive_cell_size() {
+    let rect = Rect2D::new(0.0, 0.0, 10.0, 10.0);
+    let mut grid = SpatialHashGrid::new(0.0);
+    grid.insert(7, &rect);
+
+    let mut candidates = Vec::new();
+    grid.query_candidates(&rect, &mut candidates);
+    assert_eq!(candidates, vec![7]);
+}
+
+#[test]
 fn test_line_segments_intersect() {
     // Intersecting X
     let p1 = [0.0, 0.0];
@@ -37,6 +67,31 @@ fn test_line_segments_intersect() {
     let p5 = [0.0, 5.0];
     let p6 = [10.0, 15.0];
     assert!(!line_segments_intersect(p1, p2, p5, p6));
+
+    // Collinear and endpoint-touching segments are not proper crossings.
+    let p7 = [2.0, 2.0];
+    let p8 = [8.0, 8.0];
+    let p9 = [10.0, 10.0];
+    assert!(!line_segments_intersect(p1, p2, p7, p8));
+    assert!(!line_segments_intersect(p1, p2, p2, p9));
+}
+
+#[test]
+fn test_empty_target_set_returns_no_placements() {
+    let engine = DeclutterEngine::with_default_config();
+
+    assert!(engine.solve(&[]).is_empty());
+}
+
+#[test]
+fn test_target_id_serde_round_trip() {
+    let id = TargetId::from("AFR101");
+    let encoded = serde_json::to_value(&id).unwrap();
+    assert_eq!(encoded, json!("AFR101"));
+
+    let decoded: TargetId = serde_json::from_value(encoded).unwrap();
+    assert_eq!(decoded, id);
+    assert_eq!(decoded.as_str(), "AFR101");
 }
 
 #[test]

@@ -243,6 +243,11 @@ impl LocalTangentFrame {
         let d_2d = enu.distance_2d();
 
         // Tropospheric downward bending: effective Earth radius R_eff = k * a
+        let k_factor = if k_factor.is_finite() && k_factor > 0.0 {
+            k_factor
+        } else {
+            4.0 / 3.0
+        };
         let effective_radius = k_factor * self.ellipsoid.a;
         let delta_h = (d_2d * d_2d) / (2.0 * effective_radius);
         let effective_up = enu.up_m - delta_h;

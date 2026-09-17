@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use crate::geodesy::errors::GeodesyError;
 
 /// Vertical reference used by a geodetic height.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -17,9 +18,13 @@ pub struct Height {
 }
 
 impl Height {
-    pub fn new(meters: f64, datum: VerticalDatum) -> Result<Self, &'static str> {
+    /// Creates a finite height with the specified vertical datum.
+    ///
+    /// # Errors
+    /// Returns [`GeodesyError::InvalidHeight`] when `meters` is not finite.
+    pub fn new(meters: f64, datum: VerticalDatum) -> Result<Self, GeodesyError> {
         if !meters.is_finite() {
-            return Err("height must be finite");
+            return Err(GeodesyError::InvalidHeight(meters));
         }
         Ok(Self { meters, datum })
     }

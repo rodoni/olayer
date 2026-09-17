@@ -1,4 +1,4 @@
-#![allow(clippy::unreadable_literal)]
+#![expect(clippy::unreadable_literal, reason = "Published geodetic constants preserve precision")]
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Ellipsoid {
@@ -12,28 +12,51 @@ pub struct Ellipsoid {
 
 impl Ellipsoid {
     /// Creates a new reference ellipsoid from the semi-major axis (a) and flattening (f).
+    ///
+    /// # Errors
+    /// Returns [`GeodesyError::InvalidSemiMajorAxis`] or
+    /// [`GeodesyError::InvalidFlattening`] when the parameters are non-finite
+    /// or outside their physical ranges.
     #[inline]
-    pub const fn new(a: f64, f: f64) -> Self {
+    pub fn new(a: f64, f: f64) -> Result<Self, GeodesyError> {
+        if !a.is_finite() || a <= 0.0 {
+            return Err(GeodesyError::InvalidSemiMajorAxis(a));
+        }
+        if !f.is_finite() || !(0.0..1.0).contains(&f) {
+            return Err(GeodesyError::InvalidFlattening(f));
+        }
         let b = a * (1.0 - f);
         let e_sq = f * (2.0 - f);
         let e_prime_sq = e_sq / (1.0 - e_sq);
         // Authalic radius: radius of a sphere with the same surface area as the ellipsoid.
         // Approximation used for spherical distance formulas (Haversine).
         let authalic_radius = (2.0 * a + b) / 3.0;
-        Self {
+        Ok(Self {
             a,
             b,
             f,
             e_sq,
             e_prime_sq,
             authalic_radius,
-        }
+        })
     }
 
     /// Returns the standard WGS84 ellipsoid configuration.
     #[inline]
     pub const fn wgs84() -> Self {
-        Self::new(6378137.0, 1.0 / 298.257223563)
+        let a = 6378137.0;
+        let f = 1.0 / 298.257223563;
+        let b = a * (1.0 - f);
+        let e_sq = f * (2.0 - f);
+        let e_prime_sq = e_sq / (1.0 - e_sq);
+        Self {
+            a,
+            b,
+            f,
+            e_sq,
+            e_prime_sq,
+            authalic_radius: (2.0 * a + b) / 3.0,
+        }
     }
 
     /// Computes the radius of curvature in the prime vertical (N) for a given latitude in radians.
@@ -43,3 +66,4 @@ impl Ellipsoid {
         self.a / (1.0 - self.e_sq * sin_lat * sin_lat).sqrt()
     }
 }
+use crate::geodesy::errors::GeodesyError;

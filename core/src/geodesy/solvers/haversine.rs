@@ -1,5 +1,3 @@
-#![allow(clippy::many_single_char_names)]
-
 use crate::geodesy::coords::LatLon;
 use crate::geodesy::ellipsoid::Ellipsoid;
 use crate::geodesy::errors::GeodesyError;
@@ -26,14 +24,8 @@ impl GeodeticSolver for HaversineSolver {
         p2: &LatLon,
         ellipsoid: &Ellipsoid,
     ) -> Result<GeodeticResult, GeodesyError> {
-        debug_assert!(
-            p1.validate().is_ok(),
-            "Invalid start coordinate in Haversine::inverse: {p1:?}"
-        );
-        debug_assert!(
-            p2.validate().is_ok(),
-            "Invalid end coordinate in Haversine::inverse: {p2:?}"
-        );
+        p1.validate()?;
+        p2.validate()?;
 
         let lat1 = p1.lat;
         let lon1 = p1.lon;
@@ -45,7 +37,7 @@ impl GeodeticSolver for HaversineSolver {
 
         // Haversine formula
         let a = (dlat / 2.0).sin().powi(2) + lat1.cos() * lat2.cos() * (dlon / 2.0).sin().powi(2);
-        let c = 2.0 * a.sqrt().asin();
+        let c = 2.0 * a.clamp(0.0, 1.0).sqrt().asin();
 
         let distance = ellipsoid.authalic_radius * c;
 
@@ -74,15 +66,20 @@ impl GeodeticSolver for HaversineSolver {
         distance_meters: f64,
         ellipsoid: &Ellipsoid,
     ) -> Result<LatLon, GeodesyError> {
-        debug_assert!(
-            p1.validate().is_ok(),
-            "Invalid start coordinate in Haversine::direct: {p1:?}"
-        );
+        p1.validate()?;
+        if !bearing_rad.is_finite() {
+            return Err(GeodesyError::NonFiniteBearing);
+        }
+        if !distance_meters.is_finite() {
+            return Err(GeodesyError::NonFiniteDistance);
+        }
         let lat1 = p1.lat;
         let lon1 = p1.lon;
         let ad = distance_meters / ellipsoid.authalic_radius; // angular distance
 
-        let lat2 = (lat1.sin() * ad.cos() + lat1.cos() * ad.sin() * bearing_rad.cos()).asin();
+        let lat2 = (lat1.sin() * ad.cos() + lat1.cos() * ad.sin() * bearing_rad.cos())
+            .clamp(-1.0, 1.0)
+            .asin();
         let y = bearing_rad.sin() * ad.sin() * lat1.cos();
         let x = ad.cos() - lat1.sin() * lat2.sin();
         let lon2 = lon1 + y.atan2(x);

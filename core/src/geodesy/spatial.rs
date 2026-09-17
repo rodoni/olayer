@@ -1,7 +1,7 @@
 use crate::geodesy::coords::LatLon;
 use crate::geodesy::ellipsoid::Ellipsoid;
 use crate::geodesy::math::{normalize_bearing, normalize_longitude};
-use crate::geodesy::solvers::{GeodeticSolver, VincentySolver};
+use crate::geodesy::solvers::{GeodeticSolver, HaversineSolver, VincentySolver};
 use serde::{Deserialize, Serialize};
 use std::f64::consts::PI;
 
@@ -34,23 +34,19 @@ pub fn compute_route_deviation(
     let earth_radius = ell.a;
 
     // Segment bearing theta12 and distance
-    let seg_res = solver
-        .inverse(segment_start, segment_end, &ell)
-        .unwrap_or_else(|_| {
-            let (p1, p2) = (to_unit_vector(segment_start), to_unit_vector(segment_end));
-            let dist = angle_between(&p1, &p2) * earth_radius;
-            crate::geodesy::solvers::GeodeticResult::new(dist, 0.0, 0.0)
-        });
+    let seg_res = solver.inverse(segment_start, segment_end, &ell).unwrap_or_else(|_| {
+        HaversineSolver
+            .inverse(segment_start, segment_end, &ell)
+            .unwrap_or_else(|_| crate::geodesy::solvers::GeodeticResult::new(0.0, 0.0, 0.0))
+    });
     let theta12 = seg_res.initial_bearing;
 
     // Bearing and distance from start to position pos
-    let pos_res = solver
-        .inverse(segment_start, pos, &ell)
-        .unwrap_or_else(|_| {
-            let (p1, p3) = (to_unit_vector(segment_start), to_unit_vector(pos));
-            let dist = angle_between(&p1, &p3) * earth_radius;
-            crate::geodesy::solvers::GeodeticResult::new(dist, 0.0, 0.0)
-        });
+    let pos_res = solver.inverse(segment_start, pos, &ell).unwrap_or_else(|_| {
+        HaversineSolver
+            .inverse(segment_start, pos, &ell)
+            .unwrap_or_else(|_| crate::geodesy::solvers::GeodeticResult::new(0.0, 0.0, 0.0))
+    });
     let d13 = pos_res.distance;
     let theta13 = pos_res.initial_bearing;
 
@@ -76,15 +72,16 @@ pub fn compute_route_deviation(
     let atd_meters = atd_sign * delta_at_mag * earth_radius;
 
     // Projected nearest point on the route segment
-    let nearest_point = if atd_meters >= 0.0 {
+    let projected_atd_meters = atd_meters.clamp(0.0, seg_res.distance);
+    let nearest_point = if projected_atd_meters >= 0.0 {
         solver
-            .direct(segment_start, theta12, atd_meters, &ell)
+            .direct(segment_start, theta12, projected_atd_meters, &ell)
             .unwrap_or(*segment_start)
     } else {
         // Project backwards along reciprocal bearing
         let back_bearing = normalize_bearing(theta12 + PI);
         solver
-            .direct(segment_start, back_bearing, -atd_meters, &ell)
+            .direct(segment_start, back_bearing, -projected_atd_meters, &ell)
             .unwrap_or(*segment_start)
     };
 
@@ -218,7 +215,7 @@ impl GeodesicPolygon {
             return solver
                 .inverse(point, &self.vertices[0], &ell)
                 .map(|r| r.distance)
-                .unwrap_or(0.0);
+                .unwrap_or(f64::INFINITY);
         }
 
         let mut min_distance = f64::INFINITY;
@@ -233,7 +230,7 @@ impl GeodesicPolygon {
             let seg_len = solver
                 .inverse(v1, v2, &ell)
                 .map(|r| r.distance)
-                .unwrap_or(0.0);
+                .unwrap_or(f64::INFINITY);
 
             let edge_dist = if dev.along_track_distance_meters >= 0.0
                 && dev.along_track_distance_meters <= seg_len
@@ -243,12 +240,12 @@ impl GeodesicPolygon {
                 solver
                     .inverse(point, v1, &ell)
                     .map(|r| r.distance)
-                    .unwrap_or(0.0)
+                    .unwrap_or(f64::INFINITY)
             } else {
                 solver
                     .inverse(point, v2, &ell)
                     .map(|r| r.distance)
-                    .unwrap_or(0.0)
+                    .unwrap_or(f64::INFINITY)
             };
 
             if edge_dist < min_distance {
@@ -278,7 +275,7 @@ impl GeodesicPolygon {
         let is_ccw = self.is_counter_clockwise();
         let offset_angle = if is_ccw { PI / 2.0 } else { -PI / 2.0 };
 
-        let mut buffered_vertices = Vec::new();
+        let mut buffered_vertices = Vec::with_capacity(n * (segs + 1));
 
         for i in 0..n {
             let prev_idx = if i == 0 { n - 1 } else { i - 1 };
@@ -287,12 +284,12 @@ impl GeodesicPolygon {
             let curr = &self.vertices[i];
             let next = &self.vertices[next_idx];
 
-            let leg_in_res = solver
-                .inverse(&self.vertices[prev_idx], curr, &ell)
-                .unwrap_or_else(|_| crate::geodesy::solvers::GeodeticResult::new(0.0, 0.0, 0.0));
-            let leg_out_res = solver
-                .inverse(curr, next, &ell)
-                .unwrap_or_else(|_| crate::geodesy::solvers::GeodeticResult::new(0.0, 0.0, 0.0));
+            let Ok(leg_in_res) = solver.inverse(&self.vertices[prev_idx], curr, &ell) else {
+                continue;
+            };
+            let Ok(leg_out_res) = solver.inverse(curr, next, &ell) else {
+                continue;
+            };
 
             let normal_in = normalize_bearing(leg_in_res.final_bearing + offset_angle);
             let normal_out = normalize_bearing(leg_out_res.initial_bearing + offset_angle);

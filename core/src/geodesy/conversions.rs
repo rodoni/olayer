@@ -1,4 +1,4 @@
-#![allow(clippy::many_single_char_names)]
+#![expect(clippy::many_single_char_names, reason = "Variables follow standard geodetic notation")]
 
 use super::coords::{Ecef, Enu, LatLon};
 use super::ellipsoid::Ellipsoid;
@@ -6,10 +6,6 @@ use super::ellipsoid::Ellipsoid;
 /// Converts Geodetic coordinates (LLA) to Cartesian Earth-Centered, Earth-Fixed (ECEF) coordinates.
 #[inline]
 pub fn lla_to_ecef(lla: &LatLon, ellipsoid: &Ellipsoid) -> Ecef {
-    debug_assert!(
-        lla.validate().is_ok(),
-        "Invalid LLA passed to lla_to_ecef: {lla:?}"
-    );
     let lat = lla.lat;
     let lon = lla.lon;
     let h = lla.height;
@@ -40,6 +36,11 @@ pub fn ecef_to_lla(ecef: &Ecef, ellipsoid: &Ellipsoid) -> LatLon {
     let e_prime_sq = ellipsoid.e_prime_sq;
 
     let p = x.hypot(y);
+
+    // The Earth's center has no unique geodetic latitude or longitude.
+    if p < 1e-8 && z.abs() < 1e-8 {
+        return LatLon::new(f64::NAN, f64::NAN, f64::NAN);
+    }
 
     // Handle polar axis to avoid division by zero
     // Threshold raised to 1e-8 because floating-point cos(pi/2) is not exactly zero,
@@ -81,10 +82,6 @@ pub fn ecef_to_lla(ecef: &Ecef, ellipsoid: &Ellipsoid) -> LatLon {
 /// relative to a reference geodetic origin.
 #[inline]
 pub fn ecef_to_enu(ecef: &Ecef, origin: &LatLon, ellipsoid: &Ellipsoid) -> Enu {
-    debug_assert!(
-        origin.validate().is_ok(),
-        "Invalid origin passed to ecef_to_enu: {origin:?}"
-    );
     let origin_ecef = lla_to_ecef(origin, ellipsoid);
     let dx = ecef.x - origin_ecef.x;
     let dy = ecef.y - origin_ecef.y;
@@ -106,10 +103,6 @@ pub fn ecef_to_enu(ecef: &Ecef, origin: &LatLon, ellipsoid: &Ellipsoid) -> Enu {
 /// to Cartesian Earth-Centered, Earth-Fixed (ECEF) coordinates.
 #[inline]
 pub fn enu_to_ecef(enu: &Enu, origin: &LatLon, ellipsoid: &Ellipsoid) -> Ecef {
-    debug_assert!(
-        origin.validate().is_ok(),
-        "Invalid origin passed to enu_to_ecef: {origin:?}"
-    );
     let origin_ecef = lla_to_ecef(origin, ellipsoid);
 
     let sin_lat = origin.lat.sin();
@@ -127,14 +120,6 @@ pub fn enu_to_ecef(enu: &Enu, origin: &LatLon, ellipsoid: &Ellipsoid) -> Ecef {
 /// A convenience wrapper to convert Geodetic coordinates (LLA) to Local ENU coordinates directly.
 #[inline]
 pub fn lla_to_enu(lla: &LatLon, origin: &LatLon, ellipsoid: &Ellipsoid) -> Enu {
-    debug_assert!(
-        lla.validate().is_ok(),
-        "Invalid LLA passed to lla_to_enu: {lla:?}"
-    );
-    debug_assert!(
-        origin.validate().is_ok(),
-        "Invalid origin passed to lla_to_enu: {origin:?}"
-    );
     let ecef = lla_to_ecef(lla, ellipsoid);
     ecef_to_enu(&ecef, origin, ellipsoid)
 }
@@ -142,10 +127,6 @@ pub fn lla_to_enu(lla: &LatLon, origin: &LatLon, ellipsoid: &Ellipsoid) -> Enu {
 /// A convenience wrapper to convert Local ENU coordinates directly to Geodetic coordinates (LLA).
 #[inline]
 pub fn enu_to_lla(enu: &Enu, origin: &LatLon, ellipsoid: &Ellipsoid) -> LatLon {
-    debug_assert!(
-        origin.validate().is_ok(),
-        "Invalid origin passed to enu_to_lla: {origin:?}"
-    );
     let ecef = enu_to_ecef(enu, origin, ellipsoid);
     ecef_to_lla(&ecef, ellipsoid)
 }

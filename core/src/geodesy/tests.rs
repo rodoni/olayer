@@ -43,6 +43,31 @@ fn test_latlon_validation() {
 }
 
 #[test]
+fn test_geodesy_rejects_non_finite_coordinates_and_ellipsoids() {
+    let invalid = LatLon::from_degrees(f64::NAN, 0.0, 0.0);
+    assert_eq!(invalid.validate(), Err(GeodesyError::NonFiniteLatitude));
+
+    let invalid_height = LatLon::from_degrees(0.0, 0.0, f64::INFINITY);
+    assert_eq!(
+        invalid_height.validate(),
+        Err(GeodesyError::NonFiniteHeight)
+    );
+
+    assert!(Ellipsoid::new(0.0, 1.0 / 298.257223563).is_err());
+    assert!(Ellipsoid::new(6378137.0, 1.0).is_err());
+}
+
+#[test]
+fn test_ecef_origin_is_not_interpreted_as_a_pole() {
+    let center = super::coords::Ecef::new(0.0, 0.0, 0.0);
+    let lla = ecef_to_lla(&center, &Ellipsoid::wgs84());
+
+    assert!(lla.lat.is_nan());
+    assert!(lla.lon.is_nan());
+    assert!(lla.height.is_nan());
+}
+
+#[test]
 fn test_lla_ecef_roundtrip() {
     let ellipsoid = Ellipsoid::wgs84();
 

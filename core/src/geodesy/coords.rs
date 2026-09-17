@@ -36,8 +36,21 @@ impl LatLon {
     }
 
     /// Validates if the coordinates are in standard ranges.
+    ///
+    /// # Errors
+    /// Returns an error when latitude, longitude, or height is non-finite, or
+    /// when latitude or longitude is outside its valid range.
     #[inline]
     pub fn validate(&self) -> Result<(), GeodesyError> {
+        if !self.lat.is_finite() {
+            return Err(GeodesyError::NonFiniteLatitude);
+        }
+        if !self.lon.is_finite() {
+            return Err(GeodesyError::NonFiniteLongitude);
+        }
+        if !self.height.is_finite() {
+            return Err(GeodesyError::NonFiniteHeight);
+        }
         let lat_deg = self.lat.to_degrees();
         let lon_deg = self.lon.to_degrees();
         if !(-90.0..=90.0).contains(&lat_deg) {

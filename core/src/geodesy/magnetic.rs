@@ -12,6 +12,7 @@ pub const WMM_BASE_EPOCH: f64 = 2025.0;
 
 /// Maximum degree of the standard WMM-2025 spherical harmonic expansion.
 pub const WMM_MAX_DEGREE: usize = 12;
+const MAX_SUPPORTED_MAGNETIC_DEGREE: usize = 256;
 
 /// Magnetic elements computed at a specific point and epoch.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -86,6 +87,10 @@ impl MagneticCoefficients {
     /// - Subsequent lines: `<n> <m> <g_nm> <h_nm> <g_dot_nm> <h_dot_nm>`
     /// - Blank lines and comment lines (starting with `#` or `//`) are ignored.
     /// - Trailing lines starting with `9999` are treated as End-Of-File.
+    ///
+    /// # Errors
+    /// Returns [`GeodesyError::MagneticModelError`] when the header or any
+    /// coefficient row is malformed or contains non-finite values.
     pub fn from_cof_str(cof_content: &str) -> Result<Self, GeodesyError> {
         let mut lines = cof_content
             .lines()
@@ -97,15 +102,20 @@ impl MagneticCoefficients {
             .ok_or_else(|| GeodesyError::MagneticModelError("Empty COF content".to_string()))?;
 
         let header_tokens: Vec<&str> = header.split_whitespace().collect();
-        if header_tokens.is_empty() {
+        if header_tokens.len() < 3 {
             return Err(GeodesyError::MagneticModelError(
-                "Missing COF header".to_string(),
+                "COF header requires epoch, model name, and release date".to_string(),
             ));
         }
 
         let epoch = header_tokens[0].parse::<f64>().map_err(|e| {
             GeodesyError::MagneticModelError(format!("Invalid COF epoch in header '{header}': {e}"))
         })?;
+        if !epoch.is_finite() {
+            return Err(GeodesyError::MagneticModelError(
+                "COF epoch must be finite".into(),
+            ));
+        }
 
         let model_name = header_tokens
             .get(1)
@@ -153,6 +163,17 @@ impl MagneticCoefficients {
                 GeodesyError::MagneticModelError(format!("Invalid h_dot_nm in line '{line}': {e}"))
             })?;
 
+            if n == 0 {
+                return Err(GeodesyError::MagneticModelError(format!(
+                    "Degree n must be at least 1 in line '{line}'"
+                )));
+            }
+            if !g.is_finite() || !h.is_finite() || !g_dot.is_finite() || !h_dot.is_finite() {
+                return Err(GeodesyError::MagneticModelError(format!(
+                    "Magnetic coefficients must be finite in line '{line}'"
+                )));
+            }
+
             if m > n {
                 return Err(GeodesyError::MagneticModelError(format!(
                     "Order m ({m}) cannot exceed degree n ({n}) in line '{line}'"
@@ -186,6 +207,10 @@ impl MagneticCoefficients {
     }
 
     /// Loads magnetic coefficients from a `WMM.COF` formatted file on the filesystem.
+    ///
+    /// # Errors
+    /// Returns [`GeodesyError::MagneticModelError`] when the file cannot be
+    /// read or contains invalid coefficient data.
     pub fn from_cof_file<P: AsRef<std::path::Path>>(path: P) -> Result<Self, GeodesyError> {
         let p = path.as_ref();
         let content = std::fs::read_to_string(p).map_err(|e| {
@@ -951,8 +976,29 @@ impl Default for MagneticModel {
 
 impl MagneticModel {
     /// Creates a magnetic model from a `MagneticCoefficients` collection.
-    pub fn new(coeffs: MagneticCoefficients) -> Self {
-        Self { coeffs }
+    ///
+    /// # Errors
+    /// Returns [`GeodesyError::MagneticModelError`] when the collection has
+    /// invalid dimensions or non-finite coefficients.
+    pub fn new(coeffs: MagneticCoefficients) -> Result<Self, GeodesyError> {
+        if !coeffs.epoch.is_finite()
+            || coeffs.max_degree > MAX_SUPPORTED_MAGNETIC_DEGREE
+            || coeffs.entries.is_empty()
+            || coeffs.entries.iter().any(|entry| {
+                entry.n == 0
+                    || entry.m > entry.n
+                    || entry.n > coeffs.max_degree
+                    || !entry.g.is_finite()
+                    || !entry.h.is_finite()
+                    || !entry.g_dot.is_finite()
+                    || !entry.h_dot.is_finite()
+            })
+        {
+            return Err(GeodesyError::MagneticModelError(
+                "invalid magnetic coefficient collection".into(),
+            ));
+        }
+        Ok(Self { coeffs })
     }
 
     /// Creates a default magnetic model initialized with built-in WMM-2025 coefficients.
@@ -969,15 +1015,22 @@ impl MagneticModel {
     }
 
     /// Loads a magnetic model from a `WMM.COF` formatted string.
+    ///
+    /// # Errors
+    /// Returns [`GeodesyError::MagneticModelError`] for malformed model data.
     pub fn from_cof_str(cof_content: &str) -> Result<Self, GeodesyError> {
         let coeffs = MagneticCoefficients::from_cof_str(cof_content)?;
-        Ok(Self::new(coeffs))
+        Self::new(coeffs)
     }
 
     /// Loads a magnetic model from a `WMM.COF` formatted file on the filesystem.
+    ///
+    /// # Errors
+    /// Returns [`GeodesyError::MagneticModelError`] when the file cannot be
+    /// read or contains malformed model data.
     pub fn from_cof_file<P: AsRef<std::path::Path>>(path: P) -> Result<Self, GeodesyError> {
         let coeffs = MagneticCoefficients::from_cof_file(path)?;
-        Ok(Self::new(coeffs))
+        Self::new(coeffs)
     }
 
     /// Returns the model base epoch in decimal years.
@@ -1020,9 +1073,20 @@ impl MagneticModel {
         point: &LatLon,
         epoch_decimal_year: f64,
     ) -> MagneticElements {
+        if point.validate().is_err() || !epoch_decimal_year.is_finite() {
+            return MagneticElements {
+                declination_rad: f64::NAN,
+                inclination_rad: f64::NAN,
+                horizontal_intensity_nt: f64::NAN,
+                total_intensity_nt: f64::NAN,
+                x_nt: f64::NAN,
+                y_nt: f64::NAN,
+                z_nt: f64::NAN,
+            };
+        }
         let ell = Ellipsoid::wgs84();
         let dt = epoch_decimal_year - self.coeffs.epoch;
-        let max_degree = self.coeffs.max_degree;
+        let max_degree = self.coeffs.max_degree.min(MAX_SUPPORTED_MAGNETIC_DEGREE);
 
         // Convert geodetic coordinates to geocentric spherical coordinates
         let sin_lat = point.lat.sin();
@@ -1036,7 +1100,18 @@ impl MagneticModel {
         let r = p.hypot(z);
 
         // Geocentric latitude and colatitude
-        let lat_geocentric = (z / p).atan();
+        if !r.is_finite() || r <= f64::EPSILON {
+            return MagneticElements {
+                declination_rad: f64::NAN,
+                inclination_rad: f64::NAN,
+                horizontal_intensity_nt: f64::NAN,
+                total_intensity_nt: f64::NAN,
+                x_nt: f64::NAN,
+                y_nt: f64::NAN,
+                z_nt: f64::NAN,
+            };
+        }
+        let lat_geocentric = z.atan2(p);
         let sin_theta = (p / r).clamp(0.0, 1.0);
         let cos_theta = (z / r).clamp(-1.0, 1.0);
 
@@ -1125,7 +1200,7 @@ impl MagneticModel {
         for coeff in &self.coeffs.entries {
             let n = coeff.n;
             let m = coeff.m;
-            if n > max_degree {
+            if n > max_degree || m > n || m > max_degree {
                 continue;
             }
             let idx = n * (n + 1) / 2 + m;

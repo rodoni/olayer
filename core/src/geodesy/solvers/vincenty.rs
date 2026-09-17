@@ -1,4 +1,4 @@
-#![allow(clippy::many_single_char_names)]
+#![expect(clippy::many_single_char_names, reason = "Variables follow standard geodetic notation")]
 
 use crate::geodesy::coords::LatLon;
 use crate::geodesy::ellipsoid::Ellipsoid;
@@ -27,22 +27,17 @@ impl GeodeticSolver for VincentySolver {
         p2: &LatLon,
         ellipsoid: &Ellipsoid,
     ) -> Result<GeodeticResult, GeodesyError> {
-        debug_assert!(
-            p1.validate().is_ok(),
-            "Invalid start coordinate in Vincenty::inverse: {p1:?}"
-        );
-        debug_assert!(
-            p2.validate().is_ok(),
-            "Invalid end coordinate in Vincenty::inverse: {p2:?}"
-        );
+        p1.validate()?;
+        p2.validate()?;
 
         let lat1 = p1.lat;
         let lon1 = p1.lon;
         let lat2 = p2.lat;
         let lon2 = p2.lon;
+        let l = normalize_longitude(lon2 - lon1);
 
         // If points are coincident, return zero distance and zero bearing
-        if (lat1 - lat2).abs() < 1e-12 && (lon1 - lon2).abs() < 1e-12 {
+        if (lat1 - lat2).abs() < 1e-12 && l.abs() < 1e-12 {
             return Ok(GeodeticResult {
                 distance: 0.0,
                 initial_bearing: 0.0,
@@ -66,8 +61,6 @@ impl GeodeticSolver for VincentySolver {
         } else {
             ((1.0 - f) * lat2.tan()).atan()
         };
-
-        let l = lon2 - lon1;
 
         let sin_u1 = u1.sin();
         let cos_u1 = u1.cos();
@@ -180,10 +173,13 @@ impl GeodeticSolver for VincentySolver {
         distance_meters: f64,
         ellipsoid: &Ellipsoid,
     ) -> Result<LatLon, GeodesyError> {
-        debug_assert!(
-            p1.validate().is_ok(),
-            "Invalid start coordinate in Vincenty::direct: {p1:?}"
-        );
+        p1.validate()?;
+        if !bearing_rad.is_finite() {
+            return Err(GeodesyError::NonFiniteBearing);
+        }
+        if !distance_meters.is_finite() {
+            return Err(GeodesyError::NonFiniteDistance);
+        }
 
         if distance_meters.abs() < 1e-12 {
             return Ok(*p1);
