@@ -301,16 +301,16 @@ fn main() {
                                         if projection_name != old_proj {
                                             if projection_name == "Stereographic" {
                                                 controller.view_mode = "2D".to_string();
-                                                controller.projection = Box::new(Stereographic::new(controller.camera.center.lat, controller.camera.center.lon, olayer_core::geodesy::ellipsoid::Ellipsoid::wgs84()));
+                                                controller.projection = Box::new(Stereographic::new(controller.camera.center.lat, controller.camera.center.lon, olayer_core::geodesy::ellipsoid::Ellipsoid::wgs84()).expect("valid stereographic projection"));
                                             } else if projection_name == "LCC" {
                                                 controller.view_mode = "2D".to_string();
-                                                controller.projection = Box::new(LambertConformalConic::new(-20.0f64.to_radians(), -25.0f64.to_radians(), controller.camera.center.lat, controller.camera.center.lon, olayer_core::geodesy::ellipsoid::Ellipsoid::wgs84()));
+                                                controller.projection = Box::new(LambertConformalConic::new(-20.0f64.to_radians(), -25.0f64.to_radians(), controller.camera.center.lat, controller.camera.center.lon, olayer_core::geodesy::ellipsoid::Ellipsoid::wgs84()).expect("valid LCC projection"));
                                             } else if projection_name == "Mercator" {
                                                 controller.view_mode = "2D".to_string();
-                                                controller.projection = Box::new(WebMercator::new(olayer_core::geodesy::ellipsoid::Ellipsoid::wgs84()));
+                                                controller.projection = Box::new(WebMercator::new(olayer_core::geodesy::ellipsoid::Ellipsoid::wgs84()).expect("valid Web Mercator projection"));
                                             } else if projection_name == "2.5D" {
                                                 controller.view_mode = "2.5D".to_string();
-                                                controller.projection = Box::new(WebMercator::new(olayer_core::geodesy::ellipsoid::Ellipsoid::wgs84()));
+                                                controller.projection = Box::new(WebMercator::new(olayer_core::geodesy::ellipsoid::Ellipsoid::wgs84()).expect("valid Web Mercator projection"));
                                             } else if projection_name == "3D" {
                                                 controller.view_mode = "3D".to_string();
                                             }

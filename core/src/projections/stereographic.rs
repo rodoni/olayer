@@ -8,9 +8,9 @@ use crate::geodesy::math::normalize_longitude;
 /// Preserves angles locally around a center of projection. Commonly used for
 /// terminal radar displays (TMA) where the antenna location is the tangent point.
 pub struct Stereographic {
-    pub center_lat: f64,
-    pub center_lon: f64,
-    pub ellipsoid: Ellipsoid,
+    center_lat: f64,
+    center_lon: f64,
+    ellipsoid: Ellipsoid,
     // Cached constants
     chi_c: f64,
     r_c: f64,
@@ -20,7 +20,10 @@ pub struct Stereographic {
 impl Stereographic {
     /// Creates a new Ellipsoidal Stereographic projection.
     #[inline]
-    pub fn new(center_lat_rad: f64, center_lon_rad: f64, ellipsoid: Ellipsoid) -> Self {
+    pub fn new(center_lat_rad: f64, center_lon_rad: f64, ellipsoid: Ellipsoid) -> Result<Self, ProjectionError> {
+        if !center_lat_rad.is_finite() || !center_lon_rad.is_finite() || ellipsoid.a <= 0.0 {
+            return Err(ProjectionError::InvalidInput);
+        }
         let a = ellipsoid.a;
         let e_sq = ellipsoid.e_sq;
         let e = e_sq.sqrt();
@@ -36,14 +39,14 @@ impl Stereographic {
         // Radius of conformal sphere (R_c)
         let r_c = (a * (1.0 - e_sq).sqrt()) / (1.0 - e_sq * sin_phi_c * sin_phi_c);
 
-        Self {
+        Ok(Self {
             center_lat: phi_c,
             center_lon: center_lon_rad,
             ellipsoid,
             chi_c,
             r_c,
             e,
-        }
+        })
     }
 }
 
@@ -73,10 +76,7 @@ impl Projection for Stereographic {
 
     #[inline]
     fn project(&self, lla: &LatLon) -> Result<(f64, f64), ProjectionError> {
-        debug_assert!(
-            lla.validate().is_ok(),
-            "Invalid LLA in Stereographic::project: {lla:?}"
-        );
+        lla.validate().map_err(|_| ProjectionError::InvalidInput)?;
 
         let lat = lla.lat;
         let lon = lla.lon;
@@ -113,6 +113,9 @@ impl Projection for Stereographic {
 
     #[inline]
     fn unproject(&self, x: f64, y: f64) -> Result<LatLon, ProjectionError> {
+        if !x.is_finite() || !y.is_finite() {
+            return Err(ProjectionError::InvalidInput);
+        }
         let rho = x.hypot(y);
 
         if rho.abs() < 1e-10 {
@@ -126,7 +129,8 @@ impl Projection for Stereographic {
         let cos_chi_c = self.chi_c.cos();
 
         // Conformal latitude chi
-        let chi = (cos_c * sin_chi_c + (y * sin_c * cos_chi_c) / rho).asin();
+        let chi_arg = (cos_c * sin_chi_c + (y * sin_c * cos_chi_c) / rho).clamp(-1.0, 1.0);
+        let chi = chi_arg.asin();
 
         // Longitude
         let dlon = (x * sin_c).atan2(rho * cos_chi_c * cos_c - y * sin_chi_c * sin_c);

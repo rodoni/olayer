@@ -14,48 +14,39 @@ const WEB_MERCATOR_LIMIT: f64 = 85.05112878_f64.to_radians();
 /// It is mathematically defined on a sphere of radius `a` (WGS84 semi-major axis).
 /// Passing an ellipsoid other than WGS84 is a logic error.
 pub struct WebMercator {
-    pub ellipsoid: Ellipsoid,
+    ellipsoid: Ellipsoid,
 }
 
 impl Default for WebMercator {
     #[inline]
     fn default() -> Self {
-        Self::new(Ellipsoid::wgs84())
+        Self::new(Ellipsoid::wgs84()).expect("WGS84 is a valid Web Mercator ellipsoid")
     }
 }
 
 impl WebMercator {
     /// Creates a new Web Mercator projection.
     #[inline]
-    pub fn new(ellipsoid: Ellipsoid) -> Self {
-        debug_assert!(
-            (ellipsoid.a - 6378137.0).abs() < 1e-3
-                && (ellipsoid.f - 1.0 / 298.257223563).abs() < 1e-12,
-            "WebMercator is defined on the WGS84 sphere; non-WGS84 ellipsoid passed"
-        );
-        Self { ellipsoid }
+    pub fn new(ellipsoid: Ellipsoid) -> Result<Self, ProjectionError> {
+        if !((ellipsoid.a - 6378137.0).abs() < 1e-3
+            && (ellipsoid.f - 1.0 / 298.257223563).abs() < 1e-12)
+        {
+            return Err(ProjectionError::InvalidParameters);
+        }
+        Ok(Self { ellipsoid })
     }
 }
 
 impl Projection for WebMercator {
     #[inline]
     fn project(&self, lla: &LatLon) -> Result<(f64, f64), ProjectionError> {
-        debug_assert!(
-            lla.validate().is_ok(),
-            "Invalid LLA in WebMercator::project: {lla:?}"
-        );
+        lla.validate().map_err(|_| ProjectionError::InvalidInput)?;
 
         let lat = lla.lat;
         let lon = lla.lon;
         let a = self.ellipsoid.a;
 
         // Clamp latitude to standard Web Mercator limits to avoid infinite y values at the poles.
-        debug_assert!(
-            lat.abs() <= WEB_MERCATOR_LIMIT,
-            "WebMercator::project latitude {} exceeds limit {}; clamping applied",
-            lat.to_degrees(),
-            WEB_MERCATOR_LIMIT.to_degrees()
-        );
         let clamped_lat = lat.clamp(-WEB_MERCATOR_LIMIT, WEB_MERCATOR_LIMIT);
 
         let x = a * lon;
@@ -66,6 +57,9 @@ impl Projection for WebMercator {
 
     #[inline]
     fn unproject(&self, x: f64, y: f64) -> Result<LatLon, ProjectionError> {
+        if !x.is_finite() || !y.is_finite() {
+            return Err(ProjectionError::InvalidInput);
+        }
         let a = self.ellipsoid.a;
 
         let lon = x / a;

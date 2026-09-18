@@ -12,11 +12,9 @@ const CLAMP_LIMIT: f64 = 89.9_f64.to_radians();
 /// latitude and a central meridian. Ideal for mid-latitude regions such as
 /// continental En-Route charts.
 pub struct LambertConformalConic {
-    pub std_parallel_1: f64,
-    pub std_parallel_2: f64,
-    pub origin_lat: f64,
-    pub origin_lon: f64,
-    pub ellipsoid: Ellipsoid,
+    origin_lat: f64,
+    origin_lon: f64,
+    ellipsoid: Ellipsoid,
     // Cached projection constants
     n: f64,
     f_c: f64,
@@ -33,7 +31,13 @@ impl LambertConformalConic {
         origin_lat_rad: f64,
         origin_lon_rad: f64,
         ellipsoid: Ellipsoid,
-    ) -> Self {
+    ) -> Result<Self, ProjectionError> {
+        if [std_parallel_1_rad, std_parallel_2_rad, origin_lat_rad, origin_lon_rad]
+            .iter()
+            .any(|value| !value.is_finite())
+        {
+            return Err(ProjectionError::InvalidInput);
+        }
         let a = ellipsoid.a;
         let e_sq = ellipsoid.e_sq;
         let e = e_sq.sqrt();
@@ -63,12 +67,16 @@ impl LambertConformalConic {
             (m1.ln() - m2.ln()) / (t1.ln() - t2.ln())
         };
 
+        if !n.is_finite() || n.abs() < 1e-12 {
+            return Err(ProjectionError::InvalidParameters);
+        }
         let f_c = m1 / (n * t1.powf(n));
         let rho_0 = a * f_c * t0.powf(n);
+        if !f_c.is_finite() || !rho_0.is_finite() {
+            return Err(ProjectionError::InvalidParameters);
+        }
 
-        Self {
-            std_parallel_1: phi1,
-            std_parallel_2: phi2,
+        Ok(Self {
             origin_lat: phi0,
             origin_lon: origin_lon_rad,
             ellipsoid,
@@ -76,7 +84,7 @@ impl LambertConformalConic {
             f_c,
             rho_0,
             e,
-        }
+        })
     }
 }
 
@@ -98,22 +106,13 @@ impl Projection for LambertConformalConic {
 
     #[inline]
     fn project(&self, lla: &LatLon) -> Result<(f64, f64), ProjectionError> {
-        debug_assert!(
-            lla.validate().is_ok(),
-            "Invalid LLA in LCC::project: {lla:?}"
-        );
+        lla.validate().map_err(|_| ProjectionError::InvalidInput)?;
 
         let lat = lla.lat;
         let lon = lla.lon;
 
         // Guard against latitudes near the poles where the projection formula
         // becomes numerically unstable.
-        debug_assert!(
-            lat.abs() <= CLAMP_LIMIT,
-            "LCC::project received latitude beyond safe limit (|{}| > {}); clamping will be applied",
-            lat.to_degrees(),
-            CLAMP_LIMIT.to_degrees()
-        );
         let clamped_lat = lat.clamp(-CLAMP_LIMIT, CLAMP_LIMIT);
         let sin_clamped = clamped_lat.sin();
 
@@ -131,6 +130,9 @@ impl Projection for LambertConformalConic {
 
     #[inline]
     fn unproject(&self, x: f64, y: f64) -> Result<LatLon, ProjectionError> {
+        if !x.is_finite() || !y.is_finite() || !self.n.is_finite() || !self.f_c.is_finite() {
+            return Err(ProjectionError::InvalidInput);
+        }
         let rho_0_y = self.rho_0 - y;
         let rho = x.hypot(rho_0_y).copysign(self.n);
 
@@ -144,10 +146,17 @@ impl Projection for LambertConformalConic {
         let lon_normalized = normalize_longitude(lon);
 
         let t = if rho.abs() < 1e-10 {
-            0.0
+            return Ok(LatLon::new(
+                if self.n < 0.0 { -std::f64::consts::FRAC_PI_2 } else { std::f64::consts::FRAC_PI_2 },
+                lon_normalized,
+                0.0,
+            ));
         } else {
             (rho / (self.ellipsoid.a * self.f_c)).powf(1.0 / self.n)
         };
+        if !t.is_finite() || t < 0.0 {
+            return Err(ProjectionError::InvalidInput);
+        }
 
         // Iteratively solve for latitude
         let mut lat = std::f64::consts::FRAC_PI_2 - 2.0 * t.atan();

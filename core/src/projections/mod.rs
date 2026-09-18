@@ -20,9 +20,17 @@ pub use crate::camera::CameraState;
 /// Trait for cartographic projections.
 pub trait Projection {
     /// Projects geodetic coordinates (LLA) to 2D plane coordinates (x, y) in meters.
+    ///
+    /// # Errors
+    /// Returns [`ProjectionError::InvalidInput`] for non-finite or out-of-range
+    /// coordinates and [`ProjectionError::Singularity`] at undefined points.
     fn project(&self, lla: &LatLon) -> Result<(f64, f64), ProjectionError>;
 
     /// Unprojects 2D plane coordinates (x, y) in meters back to geodetic coordinates (LLA).
+    ///
+    /// # Errors
+    /// Returns [`ProjectionError::InvalidInput`] for non-finite or invalid
+    /// coordinates, or [`ProjectionError::ConvergenceFailed`] if iteration fails.
     fn unproject(&self, x: f64, y: f64) -> Result<LatLon, ProjectionError>;
 
     /// Dynamically updates the center of projection (point of tangency) if supported.
@@ -33,6 +41,10 @@ pub trait Projection {
     ///
     /// This default implementation is valid for all planar projections. Individual
     /// projections may override it if they require a specialized matrix pipeline.
+    ///
+    /// # Errors
+    /// Returns an error when the camera, projected center, or derived matrix
+    /// parameters are invalid or non-finite.
     #[inline]
     fn get_view_proj_matrix(&self, camera: &CameraState) -> Result<[f32; 16], ProjectionError> {
         camera
@@ -47,7 +59,10 @@ pub trait Projection {
         let w = (camera.viewport_base_meters / camera.zoom) as f32;
         let h = w / camera.aspect_ratio as f32;
 
-        let proj = matrix::Matrix4::ortho(-w / 2.0, w / 2.0, -h / 2.0, h / 2.0, -1000.0, 1000.0);
+        if !w.is_finite() || !h.is_finite() {
+            return Err(ProjectionError::InvalidInput);
+        }
+        let proj = matrix::Matrix4::ortho(-w / 2.0, w / 2.0, -h / 2.0, h / 2.0, -1000.0, 1000.0)?;
         let vp = proj.multiply(&view);
 
         Ok(vp.into_array())

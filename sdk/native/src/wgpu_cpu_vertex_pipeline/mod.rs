@@ -225,7 +225,7 @@ mod tests {
 
     #[test]
     fn test_project_lla_to_screen_2d_center() {
-        let projection = Stereographic::new(0.0, 0.0, Ellipsoid::wgs84());
+        let projection = Stereographic::new(0.0, 0.0, Ellipsoid::wgs84()).unwrap();
         let camera = CameraState::with_attitude(
             LatLon::new(0.0, 0.0, 0.0),
             1.0,
@@ -247,7 +247,7 @@ mod tests {
 
     #[test]
     fn test_project_lla_to_screen_2d_north_offset() {
-        let projection = Stereographic::new(0.0, 0.0, Ellipsoid::wgs84());
+        let projection = Stereographic::new(0.0, 0.0, Ellipsoid::wgs84()).unwrap();
         let camera = CameraState::with_attitude(
             LatLon::new(0.0, 0.0, 0.0),
             1.0,
@@ -269,7 +269,7 @@ mod tests {
 
     #[test]
     fn test_project_lla_to_screen_2d_east_offset() {
-        let projection = Stereographic::new(0.0, 0.0, Ellipsoid::wgs84());
+        let projection = Stereographic::new(0.0, 0.0, Ellipsoid::wgs84()).unwrap();
         let camera = CameraState::with_attitude(
             LatLon::new(0.0, 0.0, 0.0),
             1.0,
@@ -290,7 +290,7 @@ mod tests {
 
     #[test]
     fn test_project_lla_to_screen_2d_rotation() {
-        let projection = Stereographic::new(0.0, 0.0, Ellipsoid::wgs84());
+        let projection = Stereographic::new(0.0, 0.0, Ellipsoid::wgs84()).unwrap();
         let camera = CameraState::with_attitude(
             LatLon::new(0.0, 0.0, 0.0),
             1.0,
@@ -311,7 +311,7 @@ mod tests {
 
     #[test]
     fn test_project_lla_to_screen_singularity() {
-        let projection = Stereographic::new(0.0, 0.0, Ellipsoid::wgs84());
+        let projection = Stereographic::new(0.0, 0.0, Ellipsoid::wgs84()).unwrap();
         let camera = CameraState::with_attitude(
             LatLon::new(0.0, 0.0, 0.0),
             1.0,

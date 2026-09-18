@@ -37,7 +37,7 @@ fn test_camera_state_validation() {
 #[test]
 fn test_camera_2d_view_proj_matrix() {
     let ellipsoid = Ellipsoid::wgs84();
-    let wm = WebMercator::new(ellipsoid);
+    let wm = WebMercator::new(ellipsoid).unwrap();
     let center = LatLon::from_degrees(0.0, 0.0, 0.0);
 
     let camera = CameraState::new(center, 1.0, 0.0, 1.0, 100_000.0);
@@ -55,7 +55,7 @@ fn test_camera_2d_view_proj_matrix() {
 #[test]
 fn test_camera_25d_view_proj_matrix() {
     let ellipsoid = Ellipsoid::wgs84();
-    let wm = WebMercator::new(ellipsoid);
+    let wm = WebMercator::new(ellipsoid).unwrap();
     let center = LatLon::from_degrees(0.0, 0.0, 0.0);
 
     let camera =
@@ -101,7 +101,7 @@ fn test_camera_error_display() {
 
 #[test]
 fn test_camera_rejects_non_finite_projection_values() {
-    let projection = WebMercator::new(Ellipsoid::wgs84());
+        let projection = WebMercator::new(Ellipsoid::wgs84()).unwrap();
     let camera = CameraState::new(
         LatLon::new(0.0, 0.0, 0.0),
         f64::MIN_POSITIVE,
@@ -134,7 +134,7 @@ fn test_camera_with_attitude() {
 #[test]
 fn test_camera_2d_with_rotation() {
     let ellipsoid = Ellipsoid::wgs84();
-    let wm = WebMercator::new(ellipsoid);
+    let wm = WebMercator::new(ellipsoid).unwrap();
     let center = LatLon::from_degrees(0.0, 0.0, 0.0);
 
     let camera = CameraState::with_attitude(

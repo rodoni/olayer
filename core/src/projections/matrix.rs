@@ -31,7 +31,12 @@ impl Matrix4 {
 
     /// Generates an orthographic projection matrix.
     #[inline]
-    pub fn ortho(left: f32, right: f32, bottom: f32, top: f32, near: f32, far: f32) -> Self {
+    pub fn ortho(left: f32, right: f32, bottom: f32, top: f32, near: f32, far: f32) -> Result<Self, super::ProjectionError> {
+        if ![left, right, bottom, top, near, far].iter().all(|value| value.is_finite())
+            || right <= left || top <= bottom || far <= near
+        {
+            return Err(super::ProjectionError::InvalidParameters);
+        }
         let r_l = right - left;
         let t_b = top - bottom;
         let f_n = far - near;
@@ -45,7 +50,7 @@ impl Matrix4 {
         m[14] = -(far + near) / f_n;
         m[15] = 1.0;
 
-        Self { m }
+        Ok(Self { m })
     }
 
     /// Generates a translation matrix.
@@ -99,7 +104,13 @@ impl Matrix4 {
 
     /// Generates a perspective projection matrix.
     #[inline]
-    pub fn perspective(fovy_rad: f32, aspect: f32, near: f32, far: f32) -> Self {
+    pub fn perspective(fovy_rad: f32, aspect: f32, near: f32, far: f32) -> Result<Self, super::ProjectionError> {
+        if ![fovy_rad, aspect, near, far].iter().all(|value| value.is_finite())
+            || !(0.0 < fovy_rad && fovy_rad < std::f32::consts::PI)
+            || aspect <= 0.0 || near <= 0.0 || far <= near
+        {
+            return Err(super::ProjectionError::InvalidParameters);
+        }
         let f = 1.0 / (fovy_rad / 2.0).tan();
         let nf = 1.0 / (near - far);
 
@@ -111,7 +122,7 @@ impl Matrix4 {
         m[14] = 2.0 * far * near * nf;
         m[15] = 0.0;
 
-        Self { m }
+        Ok(Self { m })
     }
 
     /// Returns a shared reference to the underlying column-major array.

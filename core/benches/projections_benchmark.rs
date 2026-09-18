@@ -4,15 +4,16 @@ use olayer_core::projections::{LambertConformalConic, Projection, Stereographic,
 
 fn benchmark_projections(c: &mut Criterion) {
     let ellipsoid = Ellipsoid::wgs84();
-    let stereo = Stereographic::new(-23.55_f64.to_radians(), -46.63_f64.to_radians(), ellipsoid);
+    let stereo = Stereographic::new(-23.55_f64.to_radians(), -46.63_f64.to_radians(), ellipsoid).unwrap();
     let lcc = LambertConformalConic::new(
         33.0_f64.to_radians(),
         45.0_f64.to_radians(),
         0.0_f64.to_radians(),
         -96.0_f64.to_radians(),
         ellipsoid,
-    );
-    let wm = WebMercator::new(ellipsoid);
+    )
+    .unwrap();
+    let wm = WebMercator::new(ellipsoid).unwrap();
 
     let point = LatLon::from_degrees(-23.55, -46.63, 0.0);
 

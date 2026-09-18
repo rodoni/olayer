@@ -38,7 +38,8 @@ fn test_lcc_roundtrip() {
         0.0_f64.to_radians(),
         -96.0_f64.to_radians(),
         ellipsoid,
-    );
+    )
+    .unwrap();
 
     let test_points = vec![
         LatLon::from_degrees(38.8951, -77.0364, 0.0), // Washington DC
@@ -56,7 +57,8 @@ fn test_stereographic_roundtrip() {
         -23.5505_f64.to_radians(),
         -46.6333_f64.to_radians(),
         ellipsoid,
-    );
+    )
+    .unwrap();
 
     let test_points = vec![
         LatLon::from_degrees(-23.5505, -46.6333, 0.0), // Center (São Paulo)
@@ -70,7 +72,7 @@ fn test_stereographic_roundtrip() {
 #[test]
 fn test_web_mercator_roundtrip() {
     let ellipsoid = Ellipsoid::wgs84();
-    let wm = WebMercator::new(ellipsoid);
+    let wm = WebMercator::new(ellipsoid).unwrap();
 
     let test_points = vec![
         LatLon::from_degrees(0.0, 0.0, 0.0),           // Origin
@@ -84,7 +86,7 @@ fn test_web_mercator_roundtrip() {
 #[test]
 fn test_stereographic_antipodal() {
     let ellipsoid = Ellipsoid::wgs84();
-    let stereo = Stereographic::new(0.0, 0.0, ellipsoid);
+    let stereo = Stereographic::new(0.0, 0.0, ellipsoid).unwrap();
 
     // The antipodal point to the center of projection is a singularity
     let antipode = LatLon::from_degrees(0.0, 180.0, 0.0);
@@ -95,7 +97,7 @@ fn test_stereographic_antipodal() {
 #[test]
 fn test_web_mercator_at_limit() {
     let ellipsoid = Ellipsoid::wgs84();
-    let wm = WebMercator::new(ellipsoid);
+    let wm = WebMercator::new(ellipsoid).unwrap();
 
     // Test the exact Web Mercator latitude limit
     let limit = 85.05112878;
@@ -108,7 +110,7 @@ fn test_web_mercator_at_limit() {
 #[test]
 fn test_camera_state_validation() {
     let ellipsoid = Ellipsoid::wgs84();
-    let wm = WebMercator::new(ellipsoid);
+    let wm = WebMercator::new(ellipsoid).unwrap();
     let center = LatLon::from_degrees(0.0, 0.0, 0.0);
 
     // Valid state should succeed
@@ -140,7 +142,7 @@ fn test_camera_state_validation() {
 #[test]
 fn test_view_projection_matrix_with_rotation() {
     let ellipsoid = Ellipsoid::wgs84();
-    let wm = WebMercator::new(ellipsoid);
+    let wm = WebMercator::new(ellipsoid).unwrap();
     let center = LatLon::from_degrees(0.0, 0.0, 0.0);
     let center_proj = wm.project(&center).unwrap();
 
@@ -248,7 +250,7 @@ fn test_matrix4_mul_by_value() {
 #[test]
 fn test_view_projection_matrix() {
     let ellipsoid = Ellipsoid::wgs84();
-    let wm = WebMercator::new(ellipsoid);
+    let wm = WebMercator::new(ellipsoid).unwrap();
 
     // Camera centered at (0, 0)
     let camera = CameraState::new(
@@ -306,7 +308,7 @@ fn test_view_projection_matrix() {
 #[test]
 fn test_stereographic_update_center() {
     let ellipsoid = Ellipsoid::wgs84();
-    let mut stereo = Stereographic::new(0.0, 0.0, ellipsoid);
+    let mut stereo = Stereographic::new(0.0, 0.0, ellipsoid).unwrap();
 
     // Initial center projects to (0, 0)
     let origin = LatLon::new(0.0, 0.0, 0.0);
@@ -346,7 +348,8 @@ fn test_lcc_update_center() {
         0.0_f64.to_radians(),
         -96.0_f64.to_radians(),
         ellipsoid,
-    );
+    )
+    .unwrap();
 
     // Initial center projects to (0, rho_0 - rho_0) = (0, 0)
     let origin = LatLon::new(0.0_f64.to_radians(), -96.0_f64.to_radians(), 0.0);
@@ -375,4 +378,48 @@ fn test_lcc_update_center() {
         LatLon::from_degrees(-23.4505, -46.5333, 0.0),
     ];
     check_roundtrip(&lcc, &test_points);
+}
+
+#[test]
+fn test_projection_rejects_invalid_inputs_and_parameters() {
+    let ellipsoid = Ellipsoid::wgs84();
+    assert!(LambertConformalConic::new(0.0, 0.0, 0.0, 0.0, ellipsoid).is_err());
+    assert!(LambertConformalConic::new(
+        -30.0_f64.to_radians(),
+        30.0_f64.to_radians(),
+        0.0,
+        0.0,
+        ellipsoid,
+    )
+    .is_err());
+
+    let stereo = Stereographic::new(0.0, 0.0, ellipsoid).unwrap();
+    assert!(stereo.project(&LatLon::new(f64::NAN, 0.0, 0.0)).is_err());
+    assert!(stereo.unproject(f64::INFINITY, 0.0).is_err());
+
+    let mercator = WebMercator::new(ellipsoid).unwrap();
+    assert!(mercator.project(&LatLon::new(0.0, f64::NAN, 0.0)).is_err());
+    assert!(mercator.unproject(0.0, f64::NAN).is_err());
+    assert!(mercator.project(&LatLon::from_degrees(90.0, 0.0, 0.0)).is_ok());
+}
+
+#[test]
+fn test_lcc_southern_apex_and_matrix_validation() {
+    let lcc = LambertConformalConic::new(
+        (-30.0_f64).to_radians(),
+        (-60.0_f64).to_radians(),
+        (-45.0_f64).to_radians(),
+        0.0,
+        Ellipsoid::wgs84(),
+    )
+    .unwrap();
+    let (x, y) = lcc
+        .project(&LatLon::from_degrees(-89.0, 0.0, 0.0))
+        .unwrap();
+    let apex_side = lcc.unproject(x, y).unwrap();
+    assert!(apex_side.lat < 0.0);
+
+    assert!(Matrix4::ortho(0.0, 0.0, -1.0, 1.0, -1.0, 1.0).is_err());
+    assert!(Matrix4::perspective(0.0, 1.0, 1.0, 10.0).is_err());
+    assert!(Matrix4::perspective(1.0, 1.0, 10.0, 1.0).is_err());
 }

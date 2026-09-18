@@ -565,7 +565,7 @@ impl WasmProjection {
                     self.lcc_origin_lon,
                     Ellipsoid::wgs84(),
                 );
-                Box::new(lcc)
+                Box::new(lcc.expect("validated LCC parameters"))
             }
             WasmProjectionType::Stereographic => {
                 let stereo = Stereographic::new(
@@ -573,9 +573,9 @@ impl WasmProjection {
                     self.stereo_center_lon,
                     Ellipsoid::wgs84(),
                 );
-                Box::new(stereo)
+                Box::new(stereo.expect("validated stereographic parameters"))
             }
-            WasmProjectionType::WebMercator => Box::new(WebMercator::new(Ellipsoid::wgs84())),
+            WasmProjectionType::WebMercator => Box::new(WebMercator::new(Ellipsoid::wgs84()).expect("WGS84 is valid")),
         }
     }
 

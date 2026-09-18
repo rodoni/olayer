@@ -131,7 +131,7 @@ impl CameraState {
         let aspect = positive_f32(self.aspect_ratio, "aspect ratio")?;
         let h = positive_f32(f64::from(w) / f64::from(aspect), "viewport height")?;
 
-        let proj = Matrix4::ortho(-w / 2.0, w / 2.0, -h / 2.0, h / 2.0, -1000.0, 1000.0);
+        let proj = Matrix4::ortho(-w / 2.0, w / 2.0, -h / 2.0, h / 2.0, -1000.0, 1000.0)?;
         let vp = proj.multiply(&view);
 
         Ok(vp.into_array())
@@ -187,7 +187,7 @@ impl CameraState {
         let aspect = positive_f32(self.aspect_ratio, "aspect ratio")?;
         let near = positive_f32(f64::from(distance) * 0.01, "near plane")?;
         let far = positive_f32(f64::from(distance) * 10.0, "far plane")?;
-        let proj_mat = Matrix4::perspective(fovy, aspect, near, far);
+        let proj_mat = Matrix4::perspective(fovy, aspect, near, far)?;
 
         let vp = proj_mat.multiply(&view);
         Ok(vp.into_array())
@@ -235,7 +235,7 @@ impl CameraState {
         let aspect = positive_f32(self.aspect_ratio, "aspect ratio")?;
         let near = positive_f32(50000.0, "near plane")?;
         let far = positive_f32(40000000.0, "far plane")?;
-        let proj = Matrix4::perspective(fovy, aspect, near, far);
+        let proj = Matrix4::perspective(fovy, aspect, near, far)?;
 
         let vp = proj.multiply(&view);
         Ok(vp.into_array())

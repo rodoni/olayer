@@ -10,6 +10,8 @@ pub enum ProjectionError {
     Singularity,
     /// Iterative solver inside unproject did not converge.
     ConvergenceFailed,
+    InvalidInput,
+    InvalidParameters,
 }
 
 impl fmt::Display for ProjectionError {
@@ -18,6 +20,8 @@ impl fmt::Display for ProjectionError {
             Self::InvalidCameraState => write!(f, "Invalid camera state"),
             Self::Singularity => write!(f, "Projection singularity encountered"),
             Self::ConvergenceFailed => write!(f, "Iterative unprojection failed to converge"),
+            Self::InvalidInput => write!(f, "Invalid projection input"),
+            Self::InvalidParameters => write!(f, "Invalid projection parameters"),
         }
     }
 }
