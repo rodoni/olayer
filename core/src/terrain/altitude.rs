@@ -1,3 +1,4 @@
+use crate::terrain::errors::TerrainError;
 use serde::{Deserialize, Serialize};
 
 /// Defines how an object's input height is interpreted against terrain.
@@ -32,9 +33,9 @@ pub fn resolve_altitude(
     mesh_height: Option<f64>,
     mode: AltitudeMode,
     unknown_policy: AltitudeUnknownPolicy,
-) -> Result<f64, &'static str> {
+) -> Result<f64, TerrainError> {
     if !input_height.is_finite() {
-        return Err("input height must be finite");
+        return Err(TerrainError::AltitudeError("input height must be finite".to_string()));
     }
 
     let required_height = match mode {
@@ -45,19 +46,20 @@ pub fn resolve_altitude(
 
     let base = match required_height {
         Some(value) if value.is_finite() => value,
-        Some(_) => return Err("terrain height must be finite"),
+        Some(_) => return Err(TerrainError::AltitudeError("terrain height must be finite".to_string())),
         None => match unknown_policy {
-            AltitudeUnknownPolicy::Reject => return Err("terrain elevation is unavailable"),
+            AltitudeUnknownPolicy::Reject => return Err(TerrainError::AltitudeError("terrain elevation is unavailable".to_string())),
             AltitudeUnknownPolicy::UseAbsolute => return Ok(input_height),
             AltitudeUnknownPolicy::UseZero => 0.0,
         },
     };
 
-    Ok(match mode {
+    let result = match mode {
         AltitudeMode::ClampToGround => base,
         AltitudeMode::RelativeToGround | AltitudeMode::RelativeToMesh => base + input_height,
         AltitudeMode::Absolute => input_height,
-    })
+    };
+    if result.is_finite() { Ok(result) } else { Err(TerrainError::AltitudeError("resolved height is not finite".to_string())) }
 }
 
 #[cfg(test)]

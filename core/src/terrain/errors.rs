@@ -18,4 +18,8 @@ pub enum TerrainError {
     /// An error occurred parsing a GeoTIFF / Cloud-Optimized GeoTIFF raster.
     #[error("GeoTIFF terrain error: {0}")]
     GeoTiffError(String),
+    #[error("Invalid terrain input: {0}")]
+    InvalidInput(String),
+    #[error("Altitude resolution failed: {0}")]
+    AltitudeError(String),
 }

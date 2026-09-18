@@ -81,6 +81,11 @@ pub fn decode_rgba_buffer(
     let pixel_count = width
         .checked_mul(height)
         .ok_or_else(|| TerrainError::RgbDecodeError("image dimensions overflow".to_string()))?;
+    if let RgbElevationEncoding::Custom { offset, r_scale, g_scale, b_scale } = encoding {
+        if !offset.is_finite() || !r_scale.is_finite() || !g_scale.is_finite() || !b_scale.is_finite() {
+            return Err(TerrainError::RgbDecodeError("custom RGB coefficients must be finite".to_string()));
+        }
+    }
     let expected_len = pixel_count
         .checked_mul(4)
         .ok_or_else(|| TerrainError::RgbDecodeError("RGBA buffer size overflows".to_string()))?;
@@ -101,7 +106,9 @@ pub fn decode_rgba_buffer(
         let g = chunk[1];
         let b = chunk[2];
         let elev = decode_rgb_elevation(r, g, b, encoding);
-        elevations.push(elev as f32);
+        let value = elev as f32;
+        if !value.is_finite() { return Err(TerrainError::RgbDecodeError("decoded elevation is not finite".to_string())); }
+        elevations.push(value);
     }
 
     Ok(elevations)
@@ -141,7 +148,9 @@ pub fn decode_rgb_buffer(
         let g = chunk[1];
         let b = chunk[2];
         let elev = decode_rgb_elevation(r, g, b, encoding);
-        elevations.push(elev as f32);
+        let value = elev as f32;
+        if !value.is_finite() { return Err(TerrainError::RgbDecodeError("decoded elevation is not finite".to_string())); }
+        elevations.push(value);
     }
 
     Ok(elevations)

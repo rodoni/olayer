@@ -219,13 +219,11 @@ impl GeoTiffTile {
         let tiles_across = tile_width.map(|tile| width.div_ceil(tile)).unwrap_or(0);
         for (strip_index, &strip_offset) in strip_offsets.iter().enumerate() {
             if strip_offset >= data.len() {
-                continue;
+                return Err(TerrainError::GeoTiffError("raster strip offset out of bounds".to_string()));
             }
-            let byte_count = strip_byte_counts
-                .get(strip_index)
-                .copied()
-                .unwrap_or(data.len() - strip_offset);
-            let strip_end = strip_offset.saturating_add(byte_count).min(data.len());
+            let byte_count = strip_byte_counts.get(strip_index).copied().unwrap_or(data.len() - strip_offset);
+            let strip_end = strip_offset.checked_add(byte_count).ok_or_else(|| TerrainError::GeoTiffError("raster strip range overflow".to_string()))?;
+            if strip_end > data.len() { return Err(TerrainError::GeoTiffError("raster strip is truncated".to_string())); }
             let compressed_data = &data[strip_offset..strip_end];
             let decoded_data = match compression {
                 1 => compressed_data.to_vec(),
@@ -305,6 +303,10 @@ impl GeoTiffTile {
     /// Samples elevation in meters at a geodetic coordinate (lat/lon in radians) using bilinear interpolation.
     /// Returns `None` if the coordinate is out of bounds or falls on NoData pixels.
     pub fn get_elevation_rad(&self, lat_rad: f64, lon_rad: f64) -> Option<f64> {
+        let expected_len = self.width.checked_mul(self.height)?;
+        if self.width == 0 || self.height == 0 || self.elevations.len() != expected_len {
+            return None;
+        }
         if !self.contains_point_rad(lat_rad, lon_rad) {
             return None;
         }
@@ -408,7 +410,7 @@ fn decode_samples(
                 values.push(if missing { None } else { Some(value as f32) });
             }
         }
-        (16, 2) | (16, 1) => {
+        (16, 2) => {
             let (chunks, _) = data.as_chunks::<2>();
             for chunk in chunks {
                 let value = if is_le {
@@ -419,6 +421,14 @@ fn decode_samples(
                 let missing = nodata.is_some_and(|nd| (value as f64 - nd).abs() < 1e-3)
                     || value == -32767
                     || value == -9999;
+                values.push(if missing { None } else { Some(value as f32) });
+            }
+        }
+        (16, 1) => {
+            let (chunks, _) = data.as_chunks::<2>();
+            for chunk in chunks {
+                let value = if is_le { u16::from_le_bytes([chunk[0], chunk[1]]) } else { u16::from_be_bytes([chunk[0], chunk[1]]) };
+                let missing = nodata.is_some_and(|nd| (value as f64 - nd).abs() < 1e-3);
                 values.push(if missing { None } else { Some(value as f32) });
             }
         }

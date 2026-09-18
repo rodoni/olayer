@@ -244,6 +244,12 @@ impl TerrainEngine {
         lat_rad: f64,
         lon_rad: f64,
     ) -> Result<ElevationSample, TerrainError> {
+        if !lat_rad.is_finite() || !lon_rad.is_finite()
+            || !(-std::f64::consts::FRAC_PI_2..=std::f64::consts::FRAC_PI_2).contains(&lat_rad)
+            || !(-std::f64::consts::PI..=std::f64::consts::PI).contains(&lon_rad)
+        {
+            return Err(TerrainError::InvalidInput("latitude/longitude must be finite and in range".to_string()));
+        }
         let lat_deg = lat_rad.to_degrees();
         let lon_deg = lon_rad.to_degrees();
         let lat_floor = tile_key_floor(lat_deg);
@@ -257,15 +263,13 @@ impl TerrainEngine {
         // 1. Try DTED cache
         let mut tiles = self.tiles.borrow_mut();
         if let Some(tile) = tiles.get(&key) {
-            // Fraction within the tile
-            let delta_lat = (lat_deg - lat_floor as f64).clamp(0.0, 1.0);
-            let delta_lon = (lon_deg - lon_floor as f64).clamp(0.0, 1.0);
-
             if tile.num_rows == 0 || tile.num_cols == 0 {
                 return Err(TerrainError::MalformedData(
                     "DTED tile has empty dimensions".to_string(),
                 ));
             }
+            let delta_lat = (lat_deg - lat_floor as f64).clamp(0.0, 1.0);
+            let delta_lon = (lon_deg - lon_floor as f64).clamp(0.0, 1.0);
             let row_f = delta_lat * (tile.num_rows - 1) as f64;
             let col_f = delta_lon * (tile.num_cols - 1) as f64;
 
@@ -383,8 +387,7 @@ impl TerrainEngine {
         mesh_height: Option<f64>,
     ) -> Result<f64, TerrainError> {
         if mode == AltitudeMode::Absolute {
-            return resolve_altitude(input_height, None, mesh_height, mode, unknown_policy)
-                .map_err(|error| TerrainError::MalformedData(error.to_string()));
+            return resolve_altitude(input_height, None, mesh_height, mode, unknown_policy);
         }
 
         let ground_height = match self.get_elevation_status(lat_rad, lon_rad) {
@@ -401,7 +404,6 @@ impl TerrainEngine {
             mode,
             unknown_policy,
         )
-        .map_err(|error| TerrainError::MalformedData(error.to_string()))
     }
 
     /// Builds a profile while preserving unknown samples or rejecting them by policy.

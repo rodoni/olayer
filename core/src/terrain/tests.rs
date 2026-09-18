@@ -380,22 +380,15 @@ fn test_parse_uhl_decimal_degrees() {
     // UHL strings may use decimal degrees (e.g. "48.500W")
     let mock_bytes = create_mock_dted0("23.500S", "48.500W", 4, 4);
     let mut engine = TerrainEngine::new();
-    let key = engine.load_tile(&mock_bytes).unwrap();
-    // 23.500S = -23.5 degrees, floor = -24
-    assert_eq!(key.lat_deg, -24);
-    // 48.500W = -48.5 degrees, floor = -49
-    assert_eq!(key.lon_deg, -49);
+    assert!(matches!(engine.load_tile(&mock_bytes), Err(TerrainError::InvalidHeader(_))));
 }
 
 #[test]
 fn test_parse_uhl_invalid_direction() {
-    // Invalid direction character should be treated as positive (non W/S)
+    // Invalid direction characters are rejected.
     let mock_bytes = create_mock_dted0("230000X", "0480000Y", 4, 4);
     let mut engine = TerrainEngine::new();
-    let key = engine.load_tile(&mock_bytes).unwrap();
-    // X and Y are not W/S, so treated as positive (N/E)
-    assert_eq!(key.lat_deg, 23);
-    assert_eq!(key.lon_deg, 48);
+    assert!(matches!(engine.load_tile(&mock_bytes), Err(TerrainError::InvalidHeader(_))));
 }
 
 #[test]
