@@ -52,13 +52,18 @@ fn path_matches(path: &[String], prefix: &[&str], last_is_param: bool) -> bool {
 }
 
 fn parse_dash_array(val: &str) -> Result<Vec<f32>, SldError> {
-    let mut result = Vec::new();
-    for part in val.split([' ', ',']) {
+    let mut result = Vec::with_capacity(val.len() / 2);
+    for part in val.split(|c: char| c == ',' || c.is_ascii_whitespace()) {
         let trimmed = part.trim();
         if !trimmed.is_empty() {
             let num = trimmed.parse::<f32>().map_err(|e| {
                 SldError::InvalidValue(format!("Invalid dash_array value '{trimmed}': {e}"))
             })?;
+            if !num.is_finite() || num < 0.0 {
+                return Err(SldError::InvalidValue(format!(
+                    "Dash-array values must be finite and non-negative: '{trimmed}'"
+                )));
+            }
             result.push(num);
         }
     }
@@ -102,7 +107,10 @@ impl SldParser {
                 key
             };
             if local_key == b"name" {
-                self.current_param_name = Some(String::from_utf8_lossy(&attr.value).into_owned());
+                let value = attr
+                    .unescape_value()
+                    .map_err(|err| SldError::XmlError(err.to_string()))?;
+                self.current_param_name = Some(value.into_owned());
                 break;
             }
         }
@@ -160,7 +168,7 @@ impl SldParser {
     }
 
     /// Finalise a `<Rule>` or `<NamedLayer>` element (used for both Start+End and Empty).
-    fn finalise_element(&mut self, tag: &str) {
+    fn finalise_element(&mut self, tag: &str) -> Result<(), SldError> {
         if tag == "Rule" {
             if let Some(rule) = self.current_rule.take() {
                 self.current_rules.push(rule);
@@ -168,11 +176,14 @@ impl SldParser {
         } else if tag == "NamedLayer" {
             if let Some(layer_name) = self.current_layer_name.take() {
                 let rules = std::mem::take(&mut self.current_rules);
-                self.registry.layers.insert(layer_name, rules);
+                if self.registry.layers.insert(layer_name.clone(), rules).is_some() {
+                    return Err(SldError::DuplicateLayer(layer_name));
+                }
             } else {
                 self.current_rules.clear();
             }
         }
+        Ok(())
     }
 
     /// Dispatch text content based on the current XML path.
@@ -196,6 +207,11 @@ impl SldParser {
                         "Invalid MinScaleDenominator '{text_val}': {err}"
                     ))
                 })?;
+                if !val.is_finite() || val < 0.0 {
+                    return Err(SldError::InvalidValue(format!(
+                        "Scale denominator must be finite and non-negative: '{text_val}'"
+                    )));
+                }
                 rule.min_scale = Some(val);
             }
         } else if path_matches(&self.path, &["Rule", "MaxScaleDenominator"], false) {
@@ -205,6 +221,11 @@ impl SldParser {
                         "Invalid MaxScaleDenominator '{text_val}': {err}"
                     ))
                 })?;
+                if !val.is_finite() || val < 0.0 {
+                    return Err(SldError::InvalidValue(format!(
+                        "Scale denominator must be finite and non-negative: '{text_val}'"
+                    )));
+                }
                 rule.max_scale = Some(val);
             }
         } else if path_matches(&self.path, &["LineSymbolizer", "Stroke"], true) {
@@ -253,6 +274,7 @@ impl SldParser {
                     let s = text_val.parse::<f32>().map_err(|err| {
                         SldError::InvalidValue(format!("Invalid Point size '{text_val}': {err}"))
                     })?;
+                    if !s.is_finite() || s < 0.0 { return Err(SldError::InvalidValue("Point size must be finite and non-negative".to_string())); }
                     point.size = s;
                 }
             }
@@ -268,11 +290,13 @@ impl SldParser {
                     match param.as_str() {
                         "stroke" => stroke.color = text_val.to_string(),
                         "stroke-width" => {
-                            stroke.width = text_val.parse::<f32>().map_err(|err| {
+                            let width = text_val.parse::<f32>().map_err(|err| {
                                 SldError::InvalidValue(format!(
                                     "Invalid stroke-width '{text_val}': {err}"
                                 ))
                             })?;
+                            if !width.is_finite() || width < 0.0 { return Err(SldError::InvalidValue("Stroke width must be finite and non-negative".to_string())); }
+                            stroke.width = width;
                         }
                         "stroke-dasharray" => {
                             stroke.dash_array = Some(parse_dash_array(text_val)?);
@@ -292,11 +316,13 @@ impl SldParser {
                     match param.as_str() {
                         "fill" => fill.color = text_val.to_string(),
                         "fill-opacity" => {
-                            fill.opacity = text_val.parse::<f32>().map_err(|err| {
+                            let opacity = text_val.parse::<f32>().map_err(|err| {
                                 SldError::InvalidValue(format!(
                                     "Invalid fill-opacity '{text_val}': {err}"
                                 ))
                             })?;
+                            if !opacity.is_finite() || !(0.0..=1.0).contains(&opacity) { return Err(SldError::InvalidValue("Fill opacity must be finite and within [0, 1]".to_string())); }
+                            fill.opacity = opacity;
                         }
                         _ => {}
                     }
@@ -313,11 +339,13 @@ impl SldParser {
                     match param.as_str() {
                         "font-family" => text.font_family = text_val.to_string(),
                         "font-size" => {
-                            text.font_size = text_val.parse::<f32>().map_err(|err| {
+                            let size = text_val.parse::<f32>().map_err(|err| {
                                 SldError::InvalidValue(format!(
                                     "Invalid font-size '{text_val}': {err}"
                                 ))
                             })?;
+                            if !size.is_finite() || size < 0.0 { return Err(SldError::InvalidValue("Font size must be finite and non-negative".to_string())); }
+                            text.font_size = size;
                         }
                         _ => {}
                     }
@@ -363,6 +391,7 @@ impl SldParser {
                                     "Invalid Point stroke-width '{text_val}': {err}"
                                 ))
                             })?;
+                            if !w.is_finite() || w < 0.0 { return Err(SldError::InvalidValue("Point stroke width must be finite and non-negative".to_string())); }
                             point.stroke_width = Some(w);
                         }
                         _ => {}
@@ -375,6 +404,11 @@ impl SldParser {
 }
 
 /// Parse an SLD XML document into a [`StyleRegistry`].
+///
+/// # Errors
+/// Returns [`SldError::XmlError`] for malformed XML, [`SldError::InvalidValue`]
+/// for invalid numeric values, or [`SldError::DuplicateLayer`] for duplicate
+/// layer names.
 pub fn parse(xml_content: &str) -> Result<StyleRegistry, SldError> {
     let mut reader = Reader::from_str(xml_content);
     reader.trim_text(true);
@@ -397,7 +431,7 @@ pub fn parse(xml_content: &str) -> Result<StyleRegistry, SldError> {
                 if tag == "CssParameter" || tag == "SvgParameter" {
                     parser.current_param_name = None;
                 }
-                parser.finalise_element(&tag);
+                parser.finalise_element(&tag)?;
                 if !parser.path.is_empty() && parser.path.last().unwrap() == &tag {
                     parser.path.pop();
                 }
@@ -408,13 +442,17 @@ pub fn parse(xml_content: &str) -> Result<StyleRegistry, SldError> {
                     parser.extract_param_name(e)?;
                 }
                 parser.init_rule_or_symbolizer(&tag);
-                parser.finalise_element(&tag);
+                parser.finalise_element(&tag)?;
             }
             Ok(Event::Text(ref e)) => {
                 let text = e
                     .unescape()
                     .map_err(|err| SldError::XmlError(err.to_string()))?
                     .into_owned();
+                parser.apply_text(&text)?;
+            }
+            Ok(Event::CData(ref e)) => {
+                let text = String::from_utf8_lossy(e.as_ref());
                 parser.apply_text(&text)?;
             }
             Ok(Event::Eof) => {

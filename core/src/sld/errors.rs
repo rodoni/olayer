@@ -1,21 +1,14 @@
-use std::fmt;
+use thiserror::Error;
 
 /// Errors that can occur while parsing SLD XML documents.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Error)]
 pub enum SldError {
     /// Low-level XML parsing failure.
+    #[error("XML error: {0}")]
     XmlError(String),
     /// A numeric or enum value could not be parsed.
+    #[error("Invalid value: {0}")]
     InvalidValue(String),
+    #[error("duplicate layer: {0}")]
+    DuplicateLayer(String),
 }
-
-impl fmt::Display for SldError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            SldError::XmlError(err) => write!(f, "XML error: {err}"),
-            SldError::InvalidValue(detail) => write!(f, "Invalid value: {detail}"),
-        }
-    }
-}
-
-impl std::error::Error for SldError {}

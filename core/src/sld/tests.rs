@@ -181,6 +181,48 @@ fn test_invalid_numeric_values() {
 }
 
 #[test]
+fn test_cdata_and_escaped_parameter_name() {
+    let xml = r#"
+<StyledLayerDescriptor><NamedLayer><Name><![CDATA[Layer & One]]></Name><UserStyle><FeatureTypeStyle>
+<Rule><TextSymbolizer><Label><PropertyName><![CDATA[population]]></PropertyName></Label></TextSymbolizer>
+<LineSymbolizer><Stroke><CssParameter name="stroke&#45;width">2</CssParameter></Stroke></LineSymbolizer>
+</Rule></FeatureTypeStyle></UserStyle></NamedLayer></StyledLayerDescriptor>
+"#;
+    let registry = parse(xml).unwrap();
+    let rule = &registry.layers["Layer & One"][0];
+    assert_eq!(rule.text.as_ref().unwrap().label_expression, "population");
+    assert_eq!(rule.stroke.as_ref().unwrap().width, 2.0);
+}
+
+#[test]
+fn test_numeric_domains_and_dash_whitespace() {
+    let valid = r#"<StyledLayerDescriptor><NamedLayer><Name>L</Name><Rule>
+<MinScaleDenominator>0</MinScaleDenominator><MaxScaleDenominator>10</MaxScaleDenominator>
+<LineSymbolizer><Stroke><CssParameter name="stroke-dasharray">5,	2
+1</CssParameter></Stroke></LineSymbolizer></Rule></NamedLayer></StyledLayerDescriptor>"#;
+    assert!(parse(valid).is_ok());
+
+    for value in ["-1", "NaN", "inf"] {
+        let xml = format!(
+            "<StyledLayerDescriptor><NamedLayer><Name>L</Name><Rule><MinScaleDenominator>{value}</MinScaleDenominator></Rule></NamedLayer></StyledLayerDescriptor>"
+        );
+        assert!(matches!(parse(&xml), Err(SldError::InvalidValue(_))));
+    }
+
+    let opacity = r#"<StyledLayerDescriptor><NamedLayer><Name>L</Name><Rule><PolygonSymbolizer><Fill><CssParameter name="fill-opacity">2</CssParameter></Fill></PolygonSymbolizer></Rule></NamedLayer></StyledLayerDescriptor>"#;
+    assert!(matches!(parse(opacity), Err(SldError::InvalidValue(_))));
+}
+
+#[test]
+fn test_duplicate_layer_names_rejected() {
+    let xml = r#"<StyledLayerDescriptor>
+<NamedLayer><Name>Duplicate</Name><Rule><Name>A</Name></Rule></NamedLayer>
+<NamedLayer><Name>Duplicate</Name><Rule><Name>B</Name></Rule></NamedLayer>
+</StyledLayerDescriptor>"#;
+    assert!(matches!(parse(xml), Err(SldError::DuplicateLayer(name)) if name == "Duplicate"));
+}
+
+#[test]
 fn test_ignore_namespaces() {
     let xml = r#"
 <sld:StyledLayerDescriptor xmlns:sld="http://www.opengis.net/sld" xmlns:se="http://www.opengis.net/se">
