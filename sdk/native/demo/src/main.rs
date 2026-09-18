@@ -472,7 +472,7 @@ fn main() {
 
                                         let target = SimulatedTarget { id: Arc::from(id), lat, lon, alt, speed, heading };
                                         let _ = controller.interpolator.update_target(olayer_core::interpolator::TargetState {
-                                            id: Arc::clone(&target.id),
+                                            id: target.id.to_string(),
                                             last_position: LatLon::new(target.lat, target.lon, target.alt),
                                             speed_mps: target.speed,
                                             track_heading_rad: target.heading,
@@ -502,9 +502,9 @@ fn main() {
                         let painter = egui_ctx.layer_painter(egui::LayerId::background());
 
                         if layer_manager.show_targets {
-                            let simulated_speeds: std::collections::HashMap<Arc<str>, f64> = simulated_targets
+                            let simulated_speeds: std::collections::HashMap<String, f64> = simulated_targets
                                 .iter()
-                                .map(|st| (Arc::clone(&st.id), st.speed))
+                                .map(|st| (st.id.to_string(), st.speed))
                                 .collect();
 
                             cpu_pipeline.draw_targets(
@@ -521,7 +521,10 @@ fn main() {
 
                         // Flight Profile Panel
                         if let Some(ref selected_id) = selected_target_id {
-                            if let Some(target) = interpolated_targets.iter().find(|t| t.id.as_ref() == selected_id.as_ref()) {
+                            if let Some(target) = interpolated_targets
+                                .iter()
+                                .find(|t| t.id.as_str() == selected_id.as_ref())
+                            {
                                 egui::TopBottomPanel::bottom("flight_profile")
                                     .resizable(false)
                                     .default_height(140.0)

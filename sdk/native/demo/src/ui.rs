@@ -63,7 +63,7 @@ pub fn draw_flight_profile(
         p.add(egui::Shape::convex_polygon(
             points,
             egui::Color32::from_rgba_unmultiplied(141, 110, 99, 100),
-            egui::Stroke::new(1.5, egui::Color32::from_rgb(141, 110, 99)),
+            egui::Stroke::new(1.5_f32, egui::Color32::from_rgb(141, 110, 99)),
         ));
 
         // Draw aircraft line
@@ -73,7 +73,7 @@ pub fn draw_flight_profile(
                 egui::pos2(get_x(0.0), ac_y),
                 egui::pos2(get_x(max_dist), ac_y),
             ],
-            egui::Stroke::new(2.0, egui::Color32::from_rgba_unmultiplied(0, 176, 255, 128)),
+            egui::Stroke::new(2.0_f32, egui::Color32::from_rgba_unmultiplied(0, 176, 255, 128)),
         );
 
         // Draw aircraft dot (represented at 30km distance)
@@ -106,7 +106,7 @@ pub fn draw_flight_profile(
                 egui::pos2(ac_x, ac_y),
                 egui::pos2(ac_x, get_y(ground_under_ac)),
             ],
-            egui::Stroke::new(1.5, clearance_color),
+            egui::Stroke::new(1.5_f32, clearance_color),
         );
 
         p.text(

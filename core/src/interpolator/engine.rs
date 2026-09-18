@@ -3,11 +3,10 @@ use crate::interpolator::errors::InterpolatorError;
 use crate::interpolator::state::{
     InterpolatedTarget, InterpolationBatch, PredictionQuality, SkippedTarget, TargetState,
 };
-use std::collections::HashMap;
-use std::sync::Arc;
+use ahash::AHashMap;
 
 pub struct InterpolationEngine {
-    targets: HashMap<Arc<str>, TargetState>,
+    targets: AHashMap<String, TargetState>,
     stale_threshold: f64,
     // Cached solver/ellipsoid instances to avoid reconstructing them every frame.
     vincenty: VincentySolver,
@@ -21,7 +20,7 @@ impl InterpolationEngine {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            targets: HashMap::new(),
+            targets: AHashMap::new(),
             stale_threshold: 30.0,
             vincenty: VincentySolver,
             haversine: HaversineSolver,
@@ -30,16 +29,24 @@ impl InterpolationEngine {
     }
 
     /// Creates a new [`InterpolationEngine`] with a custom stale threshold in seconds.
+    ///
+    /// # Errors
+    /// Returns [`InterpolatorError::InvalidState`] when `stale_threshold` is
+    /// negative or non-finite.
     #[inline]
-    #[must_use]
-    pub fn with_stale_threshold(stale_threshold: f64) -> Self {
-        Self {
-            targets: HashMap::new(),
+    pub fn with_stale_threshold(stale_threshold: f64) -> Result<Self, InterpolatorError> {
+        if !stale_threshold.is_finite() || stale_threshold < 0.0 {
+            return Err(InterpolatorError::InvalidState(format!(
+                "Stale threshold must be finite and non-negative: {stale_threshold}"
+            )));
+        }
+        Ok(Self {
+            targets: AHashMap::new(),
             stale_threshold,
             vincenty: VincentySolver,
             haversine: HaversineSolver,
             ellipsoid: Ellipsoid::wgs84(),
-        }
+        })
     }
 
     /// Inserts or updates a target state. Validates the state before insertion.
@@ -51,7 +58,7 @@ impl InterpolationEngine {
     #[inline]
     pub fn update_target(&mut self, state: TargetState) -> Result<(), InterpolatorError> {
         state.validate()?;
-        self.targets.insert(Arc::clone(&state.id), state);
+        self.targets.insert(state.id.clone(), state);
         Ok(())
     }
 
@@ -80,13 +87,17 @@ impl InterpolationEngine {
     }
 
     /// Interpolates all targets and reports targets excluded from the batch.
+    ///
+    /// # Errors
+    /// Returns [`InterpolatorError::GeodesyFailure`] when both geodetic
+    /// interpolation methods fail for a target.
     #[inline]
     pub fn interpolate_all_with_status(
         &self,
         current_time: f64,
     ) -> Result<InterpolationBatch, InterpolatorError> {
         let mut results = Vec::with_capacity(self.targets.len());
-        let mut skipped = Vec::new();
+        let mut skipped = Vec::with_capacity(self.targets.len());
 
         for (id, state) in &self.targets {
             if !current_time.is_finite() || !state.last_ping_time.is_finite() {

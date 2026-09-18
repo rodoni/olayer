@@ -10,7 +10,6 @@ use olayer_core::projections::{
 use olayer_core::sld::StyleRegistry;
 use olayer_core::symbol_registry::{providers::DeclarativeProvider, SymbolRegistry};
 use olayer_core::terrain::TerrainEngine;
-use std::sync::Arc;
 use wasm_bindgen::prelude::*;
 
 /// WASM compatible wrapper for LatLon geodetic coordinates.
@@ -367,10 +366,11 @@ impl WasmInterpolationEngine {
     }
 
     /// Creates a new WasmInterpolationEngine with a custom stale threshold in seconds.
-    pub fn with_stale_threshold(stale_threshold: f64) -> WasmInterpolationEngine {
-        WasmInterpolationEngine {
-            inner: InterpolationEngine::with_stale_threshold(stale_threshold),
-        }
+    pub fn with_stale_threshold(stale_threshold: f64) -> Result<WasmInterpolationEngine, JsValue> {
+        Ok(WasmInterpolationEngine {
+            inner: InterpolationEngine::with_stale_threshold(stale_threshold)
+                .map_err(|error| JsValue::from_str(&error.to_string()))?,
+        })
     }
 
     /// Inserts or updates a target state.
@@ -387,7 +387,7 @@ impl WasmInterpolationEngine {
         last_ping_time: f64,
     ) -> Result<(), JsValue> {
         let state = TargetState {
-            id: Arc::from(id),
+            id: id.to_string(),
             last_position: LatLon::new(lat_rad, lon_rad, height),
             speed_mps,
             track_heading_rad,
@@ -1888,7 +1888,7 @@ mod tests {
 
     #[wasm_bindgen_test]
     fn test_wasm_interpolator_with_threshold() {
-        let mut engine = WasmInterpolationEngine::with_stale_threshold(15.0);
+        let mut engine = WasmInterpolationEngine::with_stale_threshold(15.0).unwrap();
         let update_res = engine.update_target("TGT1", 0.0, 0.0, 100.0, 10.0, 0.0, 0.0, 100.0);
         assert!(update_res.is_ok());
 
@@ -2269,7 +2269,7 @@ mod unit_tests {
 
     #[test]
     fn test_wasm_interpolation_engine_with_stale_threshold() {
-        let engine = WasmInterpolationEngine::with_stale_threshold(10.0);
+        let engine = WasmInterpolationEngine::with_stale_threshold(10.0).unwrap();
         // Just verify it constructs without error
         let _ = engine;
     }

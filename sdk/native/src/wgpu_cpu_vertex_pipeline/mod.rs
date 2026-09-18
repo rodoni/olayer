@@ -31,10 +31,10 @@ impl WgpuCpuVertexPipeline {
         view_proj_matrix: &[f32; 16],
         width: u32,
         height: u32,
-        simulated_speeds: &std::collections::HashMap<Arc<str>, f64>,
+        simulated_speeds: &std::collections::HashMap<String, f64>,
     ) {
         for t in targets {
-            let speed_mps = simulated_speeds.get(t.id.as_ref()).copied().unwrap_or(0.0);
+            let speed_mps = simulated_speeds.get(&t.id).copied().unwrap_or(0.0);
             if let Some(pos) = project_lla_to_screen(
                 t.position.lat,
                 t.position.lon,
@@ -47,7 +47,10 @@ impl WgpuCpuVertexPipeline {
                 height,
             ) {
                 // Draw target dot
-                let color = if selected_target_id.as_ref() == Some(&t.id) {
+                let color = if selected_target_id
+                    .as_ref()
+                    .is_some_and(|selected_id| selected_id.as_ref() == t.id)
+                {
                     egui::Color32::from_rgb(0, 176, 255)
                 } else {
                     egui::Color32::from_rgb(0, 230, 118)
@@ -56,7 +59,7 @@ impl WgpuCpuVertexPipeline {
                 painter.rect_stroke(
                     egui::Rect::from_center_size(pos, egui::vec2(12.0, 12.0)),
                     0.0,
-                    egui::Stroke::new(1.0, color),
+                    egui::Stroke::new(1.0_f32, color),
                 );
 
                 // Draw heading vector (1-min projection vector)
@@ -78,7 +81,7 @@ impl WgpuCpuVertexPipeline {
                 ) {
                     painter.line_segment(
                         [pos, end_pos],
-                        egui::Stroke::new(1.0, egui::Color32::from_rgb(0, 176, 255)),
+                        egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(0, 176, 255)),
                     );
                 }
 

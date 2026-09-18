@@ -4,7 +4,6 @@ use std::fmt;
 #[derive(Debug, Clone, PartialEq)]
 pub enum InterpolatorError {
     InvalidState(String),
-    NegativeTimeDelta(String),
     GeodesyFailure(GeodesyError),
 }
 
@@ -12,7 +11,6 @@ impl fmt::Display for InterpolatorError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidState(msg) => write!(f, "Invalid target state: {msg}"),
-            Self::NegativeTimeDelta(msg) => write!(f, "Negative time delta: {msg}"),
             Self::GeodesyFailure(err) => write!(f, "Geodesy calculation failed: {err}"),
         }
     }

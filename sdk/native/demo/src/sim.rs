@@ -32,7 +32,7 @@ pub fn update_simulated_targets(
         let _ = controller
             .interpolator
             .update_target(olayer_core::interpolator::TargetState {
-                id: t.id.clone(),
+                id: t.id.to_string(),
                 last_position: LatLon::new(t.lat, t.lon, t.alt),
                 speed_mps: t.speed,
                 track_heading_rad: t.heading,

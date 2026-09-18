@@ -16,7 +16,6 @@ use olayer_core::geodesy::{
 use olayer_core::interpolator::{InterpolationEngine, TargetState};
 use olayer_core::terrain::TerrainEngine;
 use std::os::raw::{c_char, c_int};
-use std::sync::Arc;
 
 // --- C-COMPATIBLE DATA STRUCTURES ---
 
@@ -606,9 +605,10 @@ pub extern "C" fn olayer_interpolator_create() -> *mut InterpolationEngine {
 pub extern "C" fn olayer_interpolator_create_with_threshold(
     stale_threshold: f64,
 ) -> *mut InterpolationEngine {
-    Box::into_raw(Box::new(InterpolationEngine::with_stale_threshold(
-        stale_threshold,
-    )))
+    match InterpolationEngine::with_stale_threshold(stale_threshold) {
+        Ok(engine) => Box::into_raw(Box::new(engine)),
+        Err(_) => std::ptr::null_mut(),
+    }
 }
 
 /// Updates or inserts a target state. Returns 0 on success, negative error.
@@ -635,7 +635,7 @@ pub unsafe extern "C" fn olayer_interpolator_update(
 
     let engine_ref = &mut *engine;
     let state = TargetState {
-        id: Arc::from(id_str),
+        id: id_str.to_string(),
         last_position: LatLon::new(lat, lon, height),
         speed_mps,
         track_heading_rad,
@@ -2271,7 +2271,7 @@ mod tests {
 
             // Directly insert a target with an embedded null byte via Rust API
             let bad_state = TargetState {
-                id: Arc::from("BAD\x00TARGET"),
+                id: "BAD\x00TARGET".to_string(),
                 last_position: LatLon::new(0.0, 0.0, 0.0),
                 speed_mps: 0.0,
                 track_heading_rad: 0.0,

@@ -1,7 +1,6 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use olayer_core::geodesy::LatLon;
 use olayer_core::interpolator::{InterpolationEngine, TargetState};
-use std::sync::Arc;
 
 fn benchmark_interpolation(c: &mut Criterion) {
     let mut engine = InterpolationEngine::new();
@@ -12,7 +11,7 @@ fn benchmark_interpolation(c: &mut Criterion) {
         let lat = 0.0 + (i as f64) * 0.001;
         let lon = 0.0 + (i as f64) * 0.001;
         let _ = engine.update_target(TargetState {
-            id: Arc::from(id),
+            id: id.to_string(),
             last_position: LatLon::new(lat, lon, 1000.0 + (i as f64) * 10.0),
             speed_mps: 200.0,
             track_heading_rad: 0.5,
