@@ -509,6 +509,22 @@ fn test_symbol_registry_default() {
 }
 
 #[test]
+fn test_scale_filtered_symbol_resolution() {
+    let mut registry = SymbolRegistry::new();
+    registry.register_provider(Box::new(DeclarativeProvider::from_json(
+        r#"{"library_name":"test","symbols":{"sym":{"bbox":[-1,-1,1,1],"anchor":[0,0],"primitives":[{"type":"Circle","cx":0,"cy":0,"r":1,"fill":null,"stroke":null}]}}}"#,
+    ).unwrap()));
+    let style = StyleRegistry { layers: std::collections::HashMap::from([(
+        "sym".to_string(),
+        vec![RuleStyle { name: "far".to_string(), min_scale: Some(100.0), max_scale: None, stroke: None, fill: Some(FillStyle { color: "#ff0000".to_string(), opacity: 1.0 }), text: None, point: None }],
+    )]) };
+    let near = registry.resolve_symbol_at_scale("sym", &style, 10.0).unwrap();
+    let far = registry.resolve_symbol_at_scale("sym", &style, 200.0).unwrap();
+    assert!(matches!(near.primitives[0], SymbolPrimitive::Circle { fill: None, .. }));
+    assert!(matches!(far.primitives[0], SymbolPrimitive::Circle { fill: Some(_), .. }));
+}
+
+#[test]
 fn test_symbology_error_display() {
     assert_eq!(
         SymbologyError::ProviderNotFound.to_string(),

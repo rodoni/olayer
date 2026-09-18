@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 /// RGBA colour for symbol primitives.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Color {
     pub r: u8,
     pub g: u8,

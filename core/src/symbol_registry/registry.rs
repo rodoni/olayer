@@ -27,6 +27,10 @@ impl SymbolRegistry {
     /// Resolves a symbol code by querying each registered provider in order.
     /// If a provider can resolve the code, any matching SLD style rules are
     /// applied before the symbol is returned.
+    ///
+    /// # Errors
+    /// Returns [`SymbologyError::ProviderNotFound`] when no provider accepts
+    /// `code`, or propagates the selected provider's resolution error.
     #[inline]
     pub fn resolve_symbol(
         &self,
@@ -36,7 +40,30 @@ impl SymbolRegistry {
         for provider in &self.providers {
             if provider.can_resolve(code) {
                 let symbol = provider.resolve(code, style)?;
-                return Ok(apply_sld_style(symbol, style));
+                return Ok(apply_sld_style(symbol, style, 0.0));
+            }
+        }
+        Err(SymbologyError::ProviderNotFound)
+    }
+
+    /// Resolves a symbol and applies only SLD rules active at `scale_denominator`.
+    ///
+    /// # Errors
+    /// Returns [`SymbologyError::InvalidFormat`] for an invalid scale, or
+    /// [`SymbologyError::ProviderNotFound`] when no provider accepts `code`.
+    pub fn resolve_symbol_at_scale(
+        &self,
+        code: &str,
+        style: &StyleRegistry,
+        scale_denominator: f64,
+    ) -> Result<ResolvedSymbol, SymbologyError> {
+        if !scale_denominator.is_finite() || scale_denominator < 0.0 {
+            return Err(SymbologyError::InvalidFormat("invalid scale denominator".to_string()));
+        }
+        for provider in &self.providers {
+            if provider.can_resolve(code) {
+                let symbol = provider.resolve(code, style)?;
+                return Ok(apply_sld_style(symbol, style, scale_denominator));
             }
         }
         Err(SymbologyError::ProviderNotFound)
@@ -59,6 +86,9 @@ impl Default for SymbolRegistry {
 /// * `#RRGGBBAA`
 fn parse_hex_color(hex: &str) -> Option<Color> {
     let hex = hex.trim().strip_prefix('#').unwrap_or(hex);
+    if !hex.is_ascii() {
+        return None;
+    }
 
     let (r, g, b, a) = match hex.len() {
         3 => {
@@ -94,21 +124,19 @@ fn parse_hex_color(hex: &str) -> Option<Color> {
 }
 
 /// Apply matching SLD style rules to a resolved symbol.
-fn apply_sld_style(mut symbol: ResolvedSymbol, style: &StyleRegistry) -> ResolvedSymbol {
-    let rules = style.layers.get(&symbol.symbol_id);
-    if let Some(rules) = rules {
-        for rule in rules {
+fn apply_sld_style(mut symbol: ResolvedSymbol, style: &StyleRegistry, scale: f64) -> ResolvedSymbol {
+        for rule in style.applicable_rules(&symbol.symbol_id, scale) {
             if let Some(ref sld_stroke) = rule.stroke {
                 if let Some(sld_color) = parse_hex_color(&sld_stroke.color) {
                     for primitive in &mut symbol.primitives {
                         match primitive {
                             SymbolPrimitive::Path { ref mut stroke, .. }
                             | SymbolPrimitive::Circle { ref mut stroke, .. } => {
-                                if let Some(ref mut stroke_val) = stroke {
-                                    stroke_val.color = sld_color;
-                                    stroke_val.width = sld_stroke.width;
-                                    stroke_val.dash_array.clone_from(&sld_stroke.dash_array);
-                                }
+                                *stroke = Some(crate::symbol_registry::primitives::Stroke {
+                                    color: sld_color,
+                                    width: sld_stroke.width,
+                                    dash_array: sld_stroke.dash_array.clone(),
+                                });
                             }
                             SymbolPrimitive::Text { .. } => {}
                         }
@@ -122,14 +150,11 @@ fn apply_sld_style(mut symbol: ResolvedSymbol, style: &StyleRegistry) -> Resolve
                         match primitive {
                             SymbolPrimitive::Path { ref mut fill, .. }
                             | SymbolPrimitive::Circle { ref mut fill, .. } => {
-                                if let Some(ref mut fill_val) = fill {
-                                    *fill_val = sld_color;
-                                }
+                                *fill = Some(sld_color);
                             }
                             SymbolPrimitive::Text { .. } => {}
                         }
                     }
-                }
             }
         }
     }
@@ -189,5 +214,6 @@ mod tests {
         assert!(parse_hex_color("#FFFFFFF").is_none());
         // Too long
         assert!(parse_hex_color("#FFFFFFFFFF").is_none());
+        assert!(parse_hex_color("éa").is_none());
     }
 }

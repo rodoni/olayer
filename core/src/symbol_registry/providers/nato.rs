@@ -177,16 +177,16 @@ impl NatoProvider {
         {
             return BattleDimension::Ground;
         }
+        if ascii_contains_insensitive(code, "subsurface")
+            || ascii_contains_insensitive(code, "submarine")
+        {
+            return BattleDimension::Subsurface;
+        }
         if ascii_contains_insensitive(code, "surface")
             || ascii_contains_insensitive(code, "ship")
             || ascii_contains_insensitive(code, "naval")
         {
             return BattleDimension::Surface;
-        }
-        if ascii_contains_insensitive(code, "subsurface")
-            || ascii_contains_insensitive(code, "submarine")
-        {
-            return BattleDimension::Subsurface;
         }
         if ascii_contains_insensitive(code, "space")
             || ascii_contains_insensitive(code, "satellite")
@@ -328,7 +328,20 @@ impl SymbologyProvider for NatoProvider {
 
     #[inline]
     fn can_resolve(&self, code: &str) -> bool {
-        code.starts_with("nato:") || code.starts_with("mil:")
+        let payload = strip_prefix_case_insensitive(code, "nato:")
+            .or_else(|| strip_prefix_case_insensitive(code, "mil:"));
+        let Some(payload) = payload else { return false; };
+        if payload.len() == 15 && payload.bytes().all(|byte| byte.is_ascii_alphanumeric()) {
+            return true;
+        }
+        let mut parts = payload.split(':');
+        let Some(affiliation) = parts.next() else { return false; };
+        let Some(entity) = parts.next() else { return false; };
+        if parts.next().is_some() || affiliation.is_empty() || entity.is_empty() {
+            return false;
+        }
+        matches!(affiliation.to_ascii_lowercase().as_str(), "friend" | "hostile" | "neutral" | "unknown" | "pending" | "other" | "assumedfriend")
+            && matches!(entity.to_ascii_lowercase().as_str(), "fighter" | "bomber" | "armor" | "infantry" | "ship" | "naval" | "submarine" | "subsurface" | "satellite" | "space")
     }
 
     fn resolve(

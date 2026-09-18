@@ -22,69 +22,55 @@ pub enum NavaidType {
 impl NavaidType {
     /// Parses the navaid type from a symbol code.
     fn from_code(code: &str) -> Option<Self> {
-        if ascii_contains_insensitive(code, "vortac") || ascii_contains_insensitive(code, "vor_tac")
+        let token = code
+            .strip_prefix("icao:")
+            .or_else(|| code.strip_prefix("ICAO:"))
+            .unwrap_or_default();
+        if token.eq_ignore_ascii_case("vortac") || token.eq_ignore_ascii_case("vor_tac")
         {
             return Some(NavaidType::VorTac);
         }
-        if ascii_contains_insensitive(code, "vordme") || ascii_contains_insensitive(code, "vor_dme")
+        if token.eq_ignore_ascii_case("vordme") || token.eq_ignore_ascii_case("vor_dme")
         {
             return Some(NavaidType::VorDme);
         }
-        if ascii_contains_insensitive(code, "vor") {
+        if token.eq_ignore_ascii_case("vor") {
             return Some(NavaidType::Vor);
         }
-        if ascii_contains_insensitive(code, "tacan") {
+        if token.eq_ignore_ascii_case("tacan") {
             return Some(NavaidType::Tacan);
         }
-        if ascii_contains_insensitive(code, "dme") {
+        if token.eq_ignore_ascii_case("dme") {
             return Some(NavaidType::Dme);
         }
-        if ascii_contains_insensitive(code, "ndb") {
+        if token.eq_ignore_ascii_case("ndb") {
             return Some(NavaidType::Ndb);
         }
-        if ascii_contains_insensitive(code, "heliport") || ascii_contains_insensitive(code, "heli")
+        if token.eq_ignore_ascii_case("heliport") || token.eq_ignore_ascii_case("heli")
         {
             return Some(NavaidType::Heliport);
         }
-        if ascii_contains_insensitive(code, "airport")
-            || ascii_contains_insensitive(code, "aerodrome")
-            || ascii_contains_insensitive(code, "ad:")
+        if token.eq_ignore_ascii_case("airport")
+            || token.eq_ignore_ascii_case("aerodrome")
+            || token.eq_ignore_ascii_case("ad")
         {
             return Some(NavaidType::Airport);
         }
-        if ascii_contains_insensitive(code, "waypoint") || ascii_contains_insensitive(code, "wpt") {
+        if token.eq_ignore_ascii_case("waypoint") || token.eq_ignore_ascii_case("wpt") {
             return Some(NavaidType::Waypoint);
         }
-        if ascii_contains_insensitive(code, "intersection")
-            || ascii_contains_insensitive(code, "int:")
+        if token.eq_ignore_ascii_case("intersection")
+            || token.eq_ignore_ascii_case("int")
         {
             return Some(NavaidType::Intersection);
         }
-        if ascii_contains_insensitive(code, "runway")
-            || ascii_contains_insensitive(code, "threshold")
+        if token.eq_ignore_ascii_case("runway")
+            || token.eq_ignore_ascii_case("threshold")
         {
             return Some(NavaidType::RunwayThreshold);
         }
         None
     }
-}
-
-/// Case-insensitive substring search without allocating a lowercase copy.
-fn ascii_contains_insensitive(haystack: &str, needle: &str) -> bool {
-    if needle.is_empty() {
-        return true;
-    }
-    if haystack.len() < needle.len() {
-        return false;
-    }
-    let needle_bytes = needle.as_bytes();
-    let haystack_bytes = haystack.as_bytes();
-    haystack_bytes.windows(needle_bytes.len()).any(|window| {
-        window
-            .iter()
-            .zip(needle_bytes.iter())
-            .all(|(h, n)| h.eq_ignore_ascii_case(n))
-    })
 }
 
 /// Procedural ICAO civil aviation symbology provider.
