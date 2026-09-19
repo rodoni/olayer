@@ -50,7 +50,16 @@ pub fn triangulate_polygon_2d(points: &[[f64; 2]]) -> Result<Vec<[usize; 3]>, Vo
     }
 
     if n == 3 {
+        if points.iter().flatten().any(|value| !value.is_finite())
+            || signed_area_2d(points).abs() < 1e-14
+        {
+            return Err(VolumetricError::DegenerateGeometry("triangle is non-finite or collinear".to_string()));
+        }
         return Ok(vec![[0, 1, 2]]);
+    }
+
+    if points.iter().flatten().any(|value| !value.is_finite()) {
+        return Err(VolumetricError::DegenerateGeometry("polygon contains non-finite coordinates".to_string()));
     }
 
     let area = signed_area_2d(points);
@@ -102,7 +111,8 @@ pub fn triangulate_polygon_2d(points: &[[f64; 2]]) -> Result<Vec<[usize; 3]>, Vo
     };
 
     let mut attempts = 0;
-    let max_attempts = n * n * 2;
+    let max_attempts = n.checked_mul(n).and_then(|value| value.checked_mul(2))
+        .ok_or_else(|| VolumetricError::TriangulationFailed("polygon is too large".to_string()))?;
 
     while vertex_indices.len() > 3 {
         let mut ear_found = false;
@@ -123,14 +133,7 @@ pub fn triangulate_polygon_2d(points: &[[f64; 2]]) -> Result<Vec<[usize; 3]>, Vo
 
         attempts += 1;
         if !ear_found || attempts > max_attempts {
-            // Fallback: clip the best angle triangle if non-convex / self-intersecting artifacts occur
-            let i = 0;
-            let count = vertex_indices.len();
-            let prev_idx = vertex_indices[count - 1];
-            let curr_idx = vertex_indices[0];
-            let next_idx = vertex_indices[1];
-            triangles.push([prev_idx, curr_idx, next_idx]);
-            vertex_indices.remove(i);
+            return Err(VolumetricError::TriangulationFailed("no valid ear found".to_string()));
         }
     }
 

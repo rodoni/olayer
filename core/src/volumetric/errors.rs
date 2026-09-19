@@ -1,35 +1,16 @@
-use std::fmt;
+use thiserror::Error;
 
 /// Errors arising during 3D volumetric mesh generation and ribbon extrusion.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Error)]
 pub enum VolumetricError {
+    #[error("Insufficient vertices: expected at least {expected}, found {actual}")]
     InsufficientVertices { expected: usize, actual: usize },
+    #[error("Invalid altitude bounds: floor ({floor_m} m) must be below ceiling ({ceiling_m} m)")]
     InvalidAltitudeBounds { floor_m: f64, ceiling_m: f64 },
+    #[error("Triangulation failed: {0}")]
     TriangulationFailed(String),
+    #[error("Invalid ribbon parameters: {0}")]
     InvalidRibbonParameters(String),
+    #[error("Degenerate polygon geometry: {0}")]
     DegenerateGeometry(String),
 }
-
-impl fmt::Display for VolumetricError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::InsufficientVertices { expected, actual } => {
-                write!(
-                    f,
-                    "Insufficient vertices: expected at least {expected}, found {actual}"
-                )
-            }
-            Self::InvalidAltitudeBounds { floor_m, ceiling_m } => {
-                write!(
-                    f,
-                    "Invalid altitude bounds: floor ({floor_m} m) must be strictly less than ceiling ({ceiling_m} m)"
-                )
-            }
-            Self::TriangulationFailed(msg) => write!(f, "Triangulation failed: {msg}"),
-            Self::InvalidRibbonParameters(msg) => write!(f, "Invalid ribbon parameters: {msg}"),
-            Self::DegenerateGeometry(msg) => write!(f, "Degenerate polygon geometry: {msg}"),
-        }
-    }
-}
-
-impl std::error::Error for VolumetricError {}

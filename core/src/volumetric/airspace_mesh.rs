@@ -16,6 +16,10 @@ use crate::volumetric::types::{VolumetricMesh, VolumetricVertex};
 ///
 /// # Returns
 /// An indexed 3D `VolumetricMesh` with outward-pointing surface normals and height ratios.
+///
+/// # Errors
+/// Returns an error for insufficient vertices, invalid/non-finite coordinates
+/// or altitude bounds, degenerate polygons, or failed triangulation.
 pub fn generate_airspace_volume_mesh(
     polygon: &[LatLon],
     floor_m: f64,
@@ -29,7 +33,7 @@ pub fn generate_airspace_volume_mesh(
         });
     }
 
-    if floor_m >= ceiling_m {
+    if !floor_m.is_finite() || !ceiling_m.is_finite() || floor_m >= ceiling_m {
         return Err(VolumetricError::InvalidAltitudeBounds { floor_m, ceiling_m });
     }
 
@@ -39,8 +43,18 @@ pub fn generate_airspace_volume_mesh(
     let mut sum_lat = 0.0;
     let mut sum_lon = 0.0;
     for pt in polygon {
+        if !pt.lat.is_finite() || !pt.lon.is_finite() || !pt.height.is_finite()
+            || !(-std::f64::consts::FRAC_PI_2..=std::f64::consts::FRAC_PI_2).contains(&pt.lat)
+            || !(-std::f64::consts::PI..=std::f64::consts::PI).contains(&pt.lon)
+        {
+            return Err(VolumetricError::DegenerateGeometry("polygon contains invalid coordinates".to_string()));
+        }
         sum_lat += pt.lat;
-        sum_lon += pt.lon;
+        let reference = polygon[0].lon;
+        let mut lon = pt.lon;
+        while lon - reference > std::f64::consts::PI { lon -= 2.0 * std::f64::consts::PI; }
+        while lon - reference < -std::f64::consts::PI { lon += 2.0 * std::f64::consts::PI; }
+        sum_lon += lon;
     }
     let centroid = LatLon::new(sum_lat / n as f64, sum_lon / n as f64, 0.0);
     let frame = LocalTangentFrame::new(centroid);
@@ -100,6 +114,12 @@ pub fn generate_airspace_volume_mesh(
             nx = 0.0;
             ny = 0.0;
             nz = 1.0;
+        }
+        let outward = p0_floor;
+        if nx * outward[0] + ny * outward[1] + nz * outward[2] < 0.0 {
+            nx = -nx;
+            ny = -ny;
+            nz = -nz;
         }
         let normal_wall = [nx as f32, ny as f32, nz as f32];
 
