@@ -148,6 +148,8 @@ pub unsafe extern "C" fn olayer_terrain_engine_load_tile(
     out_lat_deg: *mut i32,
     out_lon_deg: *mut i32,
 ) -> c_int {
+    // SAFETY: The caller must provide a live engine, a readable `data` buffer
+    // of `length` bytes, and writable output pointers when non-null.
     if engine.is_null() || data.is_null() {
         return -1; // Null pointer error
     }
@@ -484,13 +486,15 @@ pub unsafe extern "C" fn olayer_terrain_engine_get_vertical_profile(
     out_profile: *mut *mut C_ProfilePoint,
     out_count: *mut usize,
 ) -> c_int {
+    // SAFETY: The caller must provide readable route arrays of `route_len`
+    // elements and writable output pointers. Arrays must not overlap outputs.
     if engine.is_null()
         || route_lat.is_null()
         || route_lon.is_null()
         || route_height.is_null()
         || out_profile.is_null()
         || out_count.is_null()
-    {
+    || route_len > 1_000_000 {
         return -1;
     }
 
@@ -1601,10 +1605,13 @@ pub unsafe extern "C" fn olayer_weather_generate_isolines(
     max_floats: usize,
     out_count: *mut usize,
 ) -> c_int {
+    // SAFETY: The caller must provide readable grid/isovalue buffers and a
+    // writable output buffer of `max_floats` values.
     if grid.is_null() || isovalues.is_null() || out_segments.is_null() || out_count.is_null() {
         return -1;
     }
-    let grid_slice = std::slice::from_raw_parts(grid, width * height);
+    let Some(grid_len) = width.checked_mul(height) else { return -2; };
+    let grid_slice = std::slice::from_raw_parts(grid, grid_len);
     let iso_slice = std::slice::from_raw_parts(isovalues, isovalues_count);
     let bounds_rad = (
         min_lat_deg.to_radians(),
@@ -1688,6 +1695,8 @@ pub unsafe extern "C" fn olayer_volumetric_generate_airspace_mesh(
     max_indices: usize,
     out_indices_count: *mut usize,
 ) -> c_int {
+    // SAFETY: The caller must provide readable polygon coordinates and
+    // writable output buffers sized by their capacities.
     if polygon_coords.is_null()
         || out_vertices.is_null()
         || out_vertices_count.is_null()
@@ -1696,7 +1705,7 @@ pub unsafe extern "C" fn olayer_volumetric_generate_airspace_mesh(
     {
         return -1;
     }
-    if polygon_len < 3 {
+    if !(3..=1_000_000).contains(&polygon_len) {
         return -2;
     }
 
@@ -1743,6 +1752,8 @@ pub unsafe extern "C" fn olayer_volumetric_generate_trajectory_ribbon(
     max_indices: usize,
     out_indices_count: *mut usize,
 ) -> c_int {
+    // SAFETY: The caller must provide readable waypoint/scalar buffers and
+    // writable output buffers sized by their capacities.
     if waypoints.is_null()
         || out_vertices.is_null()
         || out_vertices_count.is_null()
@@ -1751,7 +1762,7 @@ pub unsafe extern "C" fn olayer_volumetric_generate_trajectory_ribbon(
     {
         return -1;
     }
-    if waypoints_len < 2 {
+    if !(2..=1_000_000).contains(&waypoints_len) {
         return -2;
     }
 

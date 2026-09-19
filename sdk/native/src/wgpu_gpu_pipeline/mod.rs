@@ -1088,7 +1088,8 @@ mod tests {
         let controller = NativeController::new(0.0, 0.0);
         let vertices = WgpuGpuPipeline::generate_grid_vertices(&controller);
         // 2D grid vertices always have z = 0.0 (flat plane)
-        for chunk in vertices.chunks_exact(3) {
+        let (chunks, _) = vertices.as_chunks::<3>();
+        for chunk in chunks {
             assert_eq!(chunk[2], 0.0, "2D grid vertices must have z = 0.0");
         }
     }
@@ -1099,7 +1100,8 @@ mod tests {
         controller.view_mode = "3D".to_string();
         let vertices = WgpuGpuPipeline::generate_grid_vertices(&controller);
         // 3D grid uses ECEF so at least some z components should be non-zero
-        let has_nonzero_z = vertices.chunks_exact(3).any(|c| c[2] != 0.0);
+        let (chunks, _) = vertices.as_chunks::<3>();
+        let has_nonzero_z = chunks.iter().any(|c| c[2] != 0.0);
         assert!(
             has_nonzero_z,
             "3D grid should have non-zero z components (ECEF)"

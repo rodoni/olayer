@@ -306,7 +306,8 @@ impl GeoserverWmtsSource {
                                     let mut transparent = 0;
                                     let mut opaque = 0;
                                     let mut unique_colors = std::collections::HashSet::new();
-                                    for chunk in raw_pixels.chunks_exact(4) {
+                                     let (chunks, _) = raw_pixels.as_chunks::<4>();
+                                     for chunk in chunks {
                                         if chunk[3] == 0 {
                                             transparent += 1;
                                         } else {
