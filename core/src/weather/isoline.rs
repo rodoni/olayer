@@ -17,6 +17,9 @@ pub struct IsolineSegment {
 /// * `height` - Grid row count (must be >= 2).
 /// * `bounds_rad` - Geographic bounding box `(min_lat_rad, min_lon_rad, max_lat_rad, max_lon_rad)`.
 /// * `isovalues` - Slice of contour threshold values to extract.
+///
+/// # Errors
+/// Returns errors for invalid dimensions, bounds, grid samples, or isovalues.
 pub fn generate_isolines_rad(
     grid: &[f64],
     width: usize,
@@ -24,7 +27,8 @@ pub fn generate_isolines_rad(
     bounds_rad: (f64, f64, f64, f64),
     isovalues: &[f64],
 ) -> Result<Vec<IsolineSegment>, WeatherError> {
-    if width < 2 || height < 2 || grid.len() != width * height {
+    let expected = width.checked_mul(height);
+    if width < 2 || height < 2 || expected != Some(grid.len()) {
         return Err(WeatherError::InvalidGridDimensions {
             width,
             height,
@@ -46,7 +50,14 @@ pub fn generate_isolines_rad(
         }
     }
 
+    if grid.iter().any(|value| !value.is_finite()) {
+        return Err(WeatherError::InvalidIsovalues("grid contains non-finite values".to_string()));
+    }
     let (min_lat, min_lon, max_lat, max_lon) = bounds_rad;
+    if ![min_lat, min_lon, max_lat, max_lon].iter().all(|v| v.is_finite())
+        || min_lat > max_lat || min_lon > max_lon
+        || min_lat < -std::f64::consts::FRAC_PI_2 || max_lat > std::f64::consts::FRAC_PI_2
+    { return Err(WeatherError::InvalidIsovalues("invalid geographic bounds".to_string())); }
     let d_lat = max_lat - min_lat;
     let d_lon = max_lon - min_lon;
 

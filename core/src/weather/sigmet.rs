@@ -74,6 +74,11 @@ impl SigmetFeature {
 
     /// Returns true if the 3D position (latitude, longitude, altitude) is inside the hazard volume.
     pub fn contains_3d(&self, point: &LatLon) -> bool {
+        if !point.lat.is_finite() || !point.lon.is_finite() || !point.height.is_finite()
+            || self.floor_m.is_some_and(|value| !value.is_finite())
+            || self.ceiling_m.is_some_and(|value| !value.is_finite())
+            || matches!((self.floor_m, self.ceiling_m), (Some(floor), Some(ceiling)) if floor > ceiling)
+        { return false; }
         if !self.contains_2d(point) {
             return false;
         }
@@ -137,6 +142,10 @@ impl SigmetDataset {
     }
 
     /// Parses SIGMET features from a standard GeoJSON FeatureCollection string.
+    ///
+    /// # Errors
+    /// Returns [`WeatherError::ParseError`] for malformed GeoJSON, unsupported
+    /// geometry, malformed coordinates, or invalid altitude/timestamp values.
     pub fn from_geojson(geojson_str: &str) -> Result<Self, WeatherError> {
         let parsed: serde_json::Value = serde_json::from_str(geojson_str)
             .map_err(|e| WeatherError::ParseError(format!("Invalid GeoJSON: {e}")))?;
@@ -156,7 +165,7 @@ impl SigmetDataset {
             if let (Some(props), Some(geom)) = (props, geom) {
                 let geom_type = geom.get("type").and_then(|t| t.as_str()).unwrap_or("");
                 if geom_type != "Polygon" {
-                    continue;
+                    return Err(WeatherError::ParseError(format!("unsupported geometry type: {geom_type}")));
                 }
 
                 let id = props
@@ -196,6 +205,11 @@ impl SigmetDataset {
                     .get("upper_limit_m")
                     .or_else(|| props.get("ceiling_m"))
                     .and_then(|v| v.as_f64());
+                let valid_from_epoch_s = props.get("valid_from_epoch_s").or_else(|| props.get("valid_from")).and_then(|v| v.as_i64());
+                let valid_until_epoch_s = props.get("valid_until_epoch_s").or_else(|| props.get("valid_until")).and_then(|v| v.as_i64());
+                if floor_m.is_some_and(|v| !v.is_finite()) || ceiling_m.is_some_and(|v| !v.is_finite())
+                    || matches!((floor_m, ceiling_m), (Some(floor), Some(ceiling)) if floor > ceiling)
+                { return Err(WeatherError::ParseError("invalid altitude bounds".to_string())); }
 
                 let coords_arr = geom
                     .get("coordinates")
@@ -204,16 +218,18 @@ impl SigmetDataset {
                     .and_then(|outer| outer.as_array());
 
                 if let Some(ring) = coords_arr {
-                    let mut polygon = Vec::new();
+                    if geom.get("coordinates").and_then(|c| c.as_array()).is_some_and(|rings| rings.len() > 1) {
+                        return Err(WeatherError::ParseError("polygon holes are unsupported".to_string()));
+                    }
+                    let mut polygon = Vec::with_capacity(ring.len());
                     for pt in ring {
-                        if let Some(pt_arr) = pt.as_array() {
-                            if pt_arr.len() >= 2 {
-                                let lon_deg = pt_arr[0].as_f64().unwrap_or(0.0);
-                                let lat_deg = pt_arr[1].as_f64().unwrap_or(0.0);
-                                let alt_m = pt_arr.get(2).and_then(|a| a.as_f64()).unwrap_or(0.0);
-                                polygon.push(LatLon::from_degrees(lat_deg, lon_deg, alt_m));
-                            }
-                        }
+                        let pt_arr = pt.as_array().ok_or_else(|| WeatherError::ParseError("invalid coordinate point".to_string()))?;
+                        if pt_arr.len() < 2 { return Err(WeatherError::ParseError("coordinate requires longitude and latitude".to_string())); }
+                        let lon_deg = pt_arr[0].as_f64().ok_or_else(|| WeatherError::ParseError("invalid longitude".to_string()))?;
+                        let lat_deg = pt_arr[1].as_f64().ok_or_else(|| WeatherError::ParseError("invalid latitude".to_string()))?;
+                        let alt_m = pt_arr.get(2).and_then(|a| a.as_f64()).unwrap_or(0.0);
+                        if !lon_deg.is_finite() || !lat_deg.is_finite() || !alt_m.is_finite() { return Err(WeatherError::ParseError("non-finite coordinate".to_string())); }
+                        polygon.push(LatLon::from_degrees(lat_deg, lon_deg, alt_m));
                     }
 
                     if polygon.len() >= 3 {
@@ -225,8 +241,8 @@ impl SigmetDataset {
                             polygon,
                             floor_m,
                             ceiling_m,
-                            valid_from_epoch_s: None,
-                            valid_until_epoch_s: None,
+                            valid_from_epoch_s,
+                            valid_until_epoch_s,
                         });
                     }
                 }
@@ -238,7 +254,7 @@ impl SigmetDataset {
 
     /// Serializes dataset to a standard GeoJSON FeatureCollection string.
     pub fn to_geojson(&self) -> Result<String, WeatherError> {
-        let mut features_json = Vec::new();
+        let mut features_json = Vec::with_capacity(self.features.len());
 
         for feat in &self.features {
             let coords: Vec<Vec<f64>> = feat
@@ -256,6 +272,8 @@ impl SigmetDataset {
                     "severity": feat.severity,
                     "floor_m": feat.floor_m,
                     "ceiling_m": feat.ceiling_m
+                    ,"valid_from_epoch_s": feat.valid_from_epoch_s,
+                    "valid_until_epoch_s": feat.valid_until_epoch_s
                 },
                 "geometry": {
                     "type": "Polygon",

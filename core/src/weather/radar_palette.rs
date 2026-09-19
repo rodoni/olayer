@@ -92,13 +92,19 @@ pub fn dbz_to_rgba(dbz: f64, palette: RadarColorPalette) -> [u8; 4] {
 }
 
 /// Converts a 2D scalar grid of dBZ values into a flat RGBA pixel buffer `(width * height * 4)` bytes.
+///
+/// # Errors
+/// Returns [`WeatherError::InvalidGridDimensions`] for zero, overflowing, or
+/// mismatched dimensions.
 pub fn colorize_dbz_grid(
     grid: &[f64],
     width: usize,
     height: usize,
     palette: RadarColorPalette,
 ) -> Result<Vec<u8>, WeatherError> {
-    if grid.len() != width * height {
+    let cells = width.checked_mul(height).ok_or(WeatherError::InvalidGridDimensions { width, height, actual_len: grid.len() })?;
+    let output_len = cells.checked_mul(4).ok_or(WeatherError::InvalidGridDimensions { width, height, actual_len: grid.len() })?;
+    if grid.len() != cells {
         return Err(WeatherError::InvalidGridDimensions {
             width,
             height,
@@ -106,7 +112,7 @@ pub fn colorize_dbz_grid(
         });
     }
 
-    let mut rgba_buf = Vec::with_capacity(width * height * 4);
+    let mut rgba_buf = Vec::with_capacity(output_len);
     for &dbz in grid {
         let pixel = dbz_to_rgba(dbz, palette);
         rgba_buf.extend_from_slice(&pixel);

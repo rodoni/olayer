@@ -25,6 +25,10 @@ pub struct WindBarbGeometry {
 /// * `direction_rad` - Wind direction in radians (direction the wind is blowing *from*, standard meteorological convention, $0 = \text{North}, \pi/2 = \text{East}$).
 /// * `staff_length_meters` - Ground length of the main staff in meters.
 /// * `is_southern_hemisphere` - If true, barbs deflect to the right of the staff; otherwise to the left.
+///
+/// # Errors
+/// Returns [`WeatherError::InvalidWindParameters`] for non-finite coordinates,
+/// direction, speed, or non-positive staff length.
 pub fn generate_wind_barb(
     origin: &LatLon,
     speed_knots: f64,
@@ -32,7 +36,9 @@ pub fn generate_wind_barb(
     staff_length_meters: f64,
     is_southern_hemisphere: bool,
 ) -> Result<WindBarbGeometry, WeatherError> {
-    if speed_knots < 0.0 {
+    if !origin.lat.is_finite() || !origin.lon.is_finite() || !origin.height.is_finite()
+        || !speed_knots.is_finite() || speed_knots < 0.0
+        || !direction_rad.is_finite() || !staff_length_meters.is_finite() || staff_length_meters <= 0.0 {
         return Err(WeatherError::InvalidWindParameters(format!(
             "Wind speed cannot be negative: {speed_knots} kt"
         )));
@@ -52,7 +58,11 @@ pub fn generate_wind_barb(
     }
 
     // Round speed to nearest 5 knots
-    let rounded_speed = ((speed_knots + 2.5) / 5.0).floor() as u32 * 5;
+    let rounded_speed_f = ((speed_knots + 2.5) / 5.0).floor() * 5.0;
+    if !rounded_speed_f.is_finite() || rounded_speed_f > u32::MAX as f64 {
+        return Err(WeatherError::InvalidWindParameters("wind speed is too large".to_string()));
+    }
+    let rounded_speed = rounded_speed_f as u32;
 
     let num_pennants = (rounded_speed / 50) as usize;
     let remainder = rounded_speed % 50;
