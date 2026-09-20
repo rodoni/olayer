@@ -41,6 +41,7 @@ pub fn parse_aixm_51_str(xml_str: &str) -> Result<AeronauticalDataset, Aeronauti
     let mut current_airspace: Option<AeronauticalAirspaceBuilder> = None;
     let mut current_navaid: Option<AeronauticalNavaidBuilder> = None;
     let mut current_route: Option<AeronauticalAirwayBuilder> = None;
+    let mut saw_root = false;
 
     let mut buf = Vec::new();
 
@@ -48,6 +49,14 @@ pub fn parse_aixm_51_str(xml_str: &str) -> Result<AeronauticalDataset, Aeronauti
         match reader.read_event_into(&mut buf) {
             Ok(Event::Start(e)) => {
                 let tag = strip_namespace(e.name().into_inner());
+                if tag_stack.is_empty() {
+                    if tag != "AIXMBasicMessage" {
+                        return Err(AeronauticalError::XmlParseError(
+                            "AIXM document root must be AIXMBasicMessage".into(),
+                        ));
+                    }
+                    saw_root = true;
+                }
                 tag_stack.push(tag.clone());
 
                 match tag.as_str() {
@@ -101,6 +110,11 @@ pub fn parse_aixm_51_str(xml_str: &str) -> Result<AeronauticalDataset, Aeronauti
                             asp.extract_limit_attrs(&e)?;
                         }
                     }
+                    "value" => {
+                        if let Some(ref mut asp) = current_airspace {
+                            asp.extract_value_attrs(&e)?;
+                        }
+                    }
                     "posList" => {
                         if let Some(ref mut asp) = current_airspace {
                             asp.extract_dimension(&e)?;
@@ -117,6 +131,20 @@ pub fn parse_aixm_51_str(xml_str: &str) -> Result<AeronauticalDataset, Aeronauti
                     .unescape()
                     .map_err(|err| AeronauticalError::XmlParseError(err.to_string()))?
                     .to_string();
+                if let Some(current_tag) = tag_stack.last() {
+                    if let Some(ref mut asp) = current_airspace {
+                        asp.handle_text(current_tag, &text)?;
+                    }
+                    if let Some(ref mut nav) = current_navaid {
+                        nav.handle_text(current_tag, &text)?;
+                    }
+                    if let Some(ref mut rte) = current_route {
+                        rte.handle_text(current_tag, &text)?;
+                    }
+                }
+            }
+            Ok(Event::CData(e)) => {
+                let text = String::from_utf8_lossy(e.as_ref());
                 if let Some(current_tag) = tag_stack.last() {
                     if let Some(ref mut asp) = current_airspace {
                         asp.handle_text(current_tag, &text)?;
@@ -170,6 +198,11 @@ pub fn parse_aixm_51_str(xml_str: &str) -> Result<AeronauticalDataset, Aeronauti
         buf.clear();
     }
 
+    if !saw_root {
+        return Err(AeronauticalError::XmlParseError(
+            "AIXM document is missing its root element".into(),
+        ));
+    }
     Ok(dataset)
 }
 
@@ -218,6 +251,21 @@ impl AeronauticalAirspaceBuilder {
         Ok(())
     }
 
+    fn extract_value_attrs(&mut self, e: &BytesStart) -> Result<(), AeronauticalError> {
+        for attr in e.attributes() {
+            let attr = attr.map_err(|error| AeronauticalError::XmlParseError(error.to_string()))?;
+            if strip_namespace(attr.key.into_inner()) == "uom" {
+                let value = String::from_utf8_lossy(&attr.value).to_string();
+                if self.active_limit_is_upper {
+                    self.upper_limit_uom = value;
+                } else {
+                    self.lower_limit_uom = value;
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn extract_dimension(&mut self, e: &BytesStart) -> Result<(), AeronauticalError> {
         for attr in e.attributes() {
             let attr = attr.map_err(|error| AeronauticalError::XmlParseError(error.to_string()))?;
@@ -252,6 +300,21 @@ impl AeronauticalAirspaceBuilder {
                     self.upper_limit_val = v;
                 } else {
                     return Err(AeronauticalError::InvalidAltitude(text.to_owned()));
+                }
+            }
+            "value" => {
+                if self.active_limit_is_upper {
+                    self.has_upper_limit = true;
+                    self.upper_limit_val = text
+                        .trim()
+                        .parse()
+                        .map_err(|_| AeronauticalError::InvalidAltitude(text.to_owned()))?;
+                } else {
+                    self.has_lower_limit = true;
+                    self.lower_limit_val = text
+                        .trim()
+                        .parse()
+                        .map_err(|_| AeronauticalError::InvalidAltitude(text.to_owned()))?;
                 }
             }
             "lowerLimitReference" => self.lower_limit_ref = text.to_string(),
@@ -324,14 +387,16 @@ impl AeronauticalAirspaceBuilder {
             ));
         }
 
-        Ok(Some(AeronauticalAirspace {
+        let airspace = AeronauticalAirspace {
             uid,
             name,
             airspace_type,
             lower_limit,
             upper_limit,
             boundary,
-        }))
+        };
+        airspace.validate()?;
+        Ok(Some(airspace))
     }
 }
 
@@ -394,7 +459,7 @@ impl AeronauticalNavaidBuilder {
         let frequency_mhz = parse_optional_f64(&self.freq_str, "frequency")?;
         let elevation_m = parse_optional_f64(&self.elevation_str, "elevation")?;
 
-        Ok(Some(AeronauticalNavaid {
+        let navaid = AeronauticalNavaid {
             ident,
             name,
             navaid_type,
@@ -403,7 +468,9 @@ impl AeronauticalNavaidBuilder {
             channel: None,
             elevation_m,
             magnetic_variation_deg: None,
-        }))
+        };
+        navaid.validate()?;
+        Ok(Some(navaid))
     }
 }
 
@@ -485,11 +552,13 @@ impl AeronauticalAirwayBuilder {
             });
         }
 
-        Ok(Some(AeronauticalAirway {
+        let airway = AeronauticalAirway {
             ident,
             route_type,
             segments,
-        }))
+        };
+        airway.validate()?;
+        Ok(Some(airway))
     }
 }
 

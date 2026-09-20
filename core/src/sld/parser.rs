@@ -176,7 +176,12 @@ impl SldParser {
         } else if tag == "NamedLayer" {
             if let Some(layer_name) = self.current_layer_name.take() {
                 let rules = std::mem::take(&mut self.current_rules);
-                if self.registry.layers.insert(layer_name.clone(), rules).is_some() {
+                if self
+                    .registry
+                    .layers
+                    .insert(layer_name.clone(), rules)
+                    .is_some()
+                {
                     return Err(SldError::DuplicateLayer(layer_name));
                 }
             } else {
@@ -274,7 +279,11 @@ impl SldParser {
                     let s = text_val.parse::<f32>().map_err(|err| {
                         SldError::InvalidValue(format!("Invalid Point size '{text_val}': {err}"))
                     })?;
-                    if !s.is_finite() || s < 0.0 { return Err(SldError::InvalidValue("Point size must be finite and non-negative".to_string())); }
+                    if !s.is_finite() || s < 0.0 {
+                        return Err(SldError::InvalidValue(
+                            "Point size must be finite and non-negative".to_string(),
+                        ));
+                    }
                     point.size = s;
                 }
             }
@@ -295,7 +304,11 @@ impl SldParser {
                                     "Invalid stroke-width '{text_val}': {err}"
                                 ))
                             })?;
-                            if !width.is_finite() || width < 0.0 { return Err(SldError::InvalidValue("Stroke width must be finite and non-negative".to_string())); }
+                            if !width.is_finite() || width < 0.0 {
+                                return Err(SldError::InvalidValue(
+                                    "Stroke width must be finite and non-negative".to_string(),
+                                ));
+                            }
                             stroke.width = width;
                         }
                         "stroke-dasharray" => {
@@ -321,7 +334,11 @@ impl SldParser {
                                     "Invalid fill-opacity '{text_val}': {err}"
                                 ))
                             })?;
-                            if !opacity.is_finite() || !(0.0..=1.0).contains(&opacity) { return Err(SldError::InvalidValue("Fill opacity must be finite and within [0, 1]".to_string())); }
+                            if !opacity.is_finite() || !(0.0..=1.0).contains(&opacity) {
+                                return Err(SldError::InvalidValue(
+                                    "Fill opacity must be finite and within [0, 1]".to_string(),
+                                ));
+                            }
                             fill.opacity = opacity;
                         }
                         _ => {}
@@ -344,7 +361,11 @@ impl SldParser {
                                     "Invalid font-size '{text_val}': {err}"
                                 ))
                             })?;
-                            if !size.is_finite() || size < 0.0 { return Err(SldError::InvalidValue("Font size must be finite and non-negative".to_string())); }
+                            if !size.is_finite() || size < 0.0 {
+                                return Err(SldError::InvalidValue(
+                                    "Font size must be finite and non-negative".to_string(),
+                                ));
+                            }
                             text.font_size = size;
                         }
                         _ => {}
@@ -391,7 +412,12 @@ impl SldParser {
                                     "Invalid Point stroke-width '{text_val}': {err}"
                                 ))
                             })?;
-                            if !w.is_finite() || w < 0.0 { return Err(SldError::InvalidValue("Point stroke width must be finite and non-negative".to_string())); }
+                            if !w.is_finite() || w < 0.0 {
+                                return Err(SldError::InvalidValue(
+                                    "Point stroke width must be finite and non-negative"
+                                        .to_string(),
+                                ));
+                            }
                             point.stroke_width = Some(w);
                         }
                         _ => {}
@@ -432,8 +458,20 @@ pub fn parse(xml_content: &str) -> Result<StyleRegistry, SldError> {
                     parser.current_param_name = None;
                 }
                 parser.finalise_element(&tag)?;
-                if !parser.path.is_empty() && parser.path.last().unwrap() == &tag {
-                    parser.path.pop();
+                match parser.path.last() {
+                    Some(last) if last == &tag => {
+                        parser.path.pop();
+                    }
+                    Some(last) => {
+                        return Err(SldError::XmlError(format!(
+                            "Malformed XML: expected closing tag for '{last}', got '{tag}'"
+                        )));
+                    }
+                    None => {
+                        return Err(SldError::XmlError(format!(
+                            "Malformed XML: unexpected closing tag '{tag}'"
+                        )));
+                    }
                 }
             }
             Ok(Event::Empty(ref e)) => {

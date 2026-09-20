@@ -67,7 +67,7 @@ fn test_state_validation() {
 }
 
 #[test]
-fn test_heading_boundary_2pi_accepted() {
+fn test_heading_boundary_2pi_rejected() {
     let state = TargetState {
         id: "TGT2".to_string(),
         last_position: LatLon::new(0.0, 0.0, 100.0),
@@ -76,7 +76,20 @@ fn test_heading_boundary_2pi_accepted() {
         vertical_rate_mps: 0.0,
         last_ping_time: 0.0,
     };
-    assert!(state.validate().is_ok());
+    assert!(state.validate().is_err());
+}
+
+#[test]
+fn test_state_rejects_empty_id_and_non_finite_timestamp() {
+    let state = TargetState {
+        id: String::new(),
+        last_position: LatLon::new(0.0, 0.0, 100.0),
+        speed_mps: 0.0,
+        track_heading_rad: 0.0,
+        vertical_rate_mps: 0.0,
+        last_ping_time: f64::NAN,
+    };
+    assert!(state.validate().is_err());
 }
 
 #[test]

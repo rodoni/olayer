@@ -55,6 +55,11 @@ fn test_colorize_dbz_grid() {
 }
 
 #[test]
+fn test_colorize_rejects_zero_dimensions() {
+    assert!(colorize_dbz_grid(&[], 0, 0, RadarColorPalette::Nexrad).is_err());
+}
+
+#[test]
 fn test_wind_barb_calm() {
     let origin = LatLon::from_degrees(51.5, -0.1, 0.0);
     let geom = generate_wind_barb(&origin, 1.5, 0.0, 1000.0, false).unwrap();
@@ -152,6 +157,16 @@ fn test_sigmet_feature_and_dataset() {
 }
 
 #[test]
+fn test_sigmet_geojson_rejects_malformed_features() {
+    let missing_geometry =
+        r#"{"type":"FeatureCollection","features":[{"type":"Feature","properties":{}}]}"#;
+    assert!(SigmetDataset::from_geojson(missing_geometry).is_err());
+
+    let out_of_range = r#"{"type":"FeatureCollection","features":[{"type":"Feature","properties":{},"geometry":{"type":"Polygon","coordinates":[[[181,0],[0,1],[0,0]]]}}]}"#;
+    assert!(SigmetDataset::from_geojson(out_of_range).is_err());
+}
+
+#[test]
 fn test_marching_squares_isolines() {
     // 3x3 scalar grid representing a concentric pressure low / mountain peak:
     // 10  20  10
@@ -175,4 +190,10 @@ fn test_marching_squares_isolines() {
 
     let flat = isolines_to_flat_array_deg(&segments);
     assert_eq!(flat.len(), segments.len() * 5);
+}
+
+#[test]
+fn test_isolines_reject_longitude_out_of_range() {
+    let grid = [0.0, 1.0, 0.0, 1.0];
+    assert!(generate_isolines_rad(&grid, 2, 2, (-0.1, -4.0, 0.1, 0.0), &[0.5],).is_err());
 }

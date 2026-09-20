@@ -88,7 +88,7 @@ impl DeclutterEngine {
         // Sort targets by priority (highest priority 0 first)
         let mut sorted_indices = Vec::with_capacity(n);
         sorted_indices.extend(0..n);
-        sorted_indices.sort_by_key(|&i| targets[i].priority);
+        sorted_indices.sort_by_key(|&i| (targets[i].priority, i));
 
         let mut placements: Vec<Option<LabelPlacement>> = vec![None; n];
         let mut grid = SpatialHashGrid::new(self.config.leader_length_px * 2.0 + 50.0);

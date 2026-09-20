@@ -21,6 +21,11 @@ impl TargetState {
     /// parameters are non-finite or outside their valid ranges.
     #[inline]
     pub fn validate(&self) -> Result<(), InterpolatorError> {
+        if self.id.trim().is_empty() {
+            return Err(InterpolatorError::InvalidState(
+                "Target identifier must not be empty".into(),
+            ));
+        }
         self.last_position
             .validate()
             .map_err(|error| InterpolatorError::InvalidState(error.to_string()))?;
@@ -36,7 +41,12 @@ impl TargetState {
                 self.vertical_rate_mps
             )));
         }
-        if !(0.0..=std::f64::consts::TAU).contains(&self.track_heading_rad) {
+        if !self.last_ping_time.is_finite() {
+            return Err(InterpolatorError::InvalidState(
+                "Sensor timestamp must be finite".into(),
+            ));
+        }
+        if !(0.0..std::f64::consts::TAU).contains(&self.track_heading_rad) {
             return Err(InterpolatorError::InvalidState(format!(
                 "Heading must be in range [0, 2π]: {} rad",
                 self.track_heading_rad

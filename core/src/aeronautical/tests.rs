@@ -288,6 +288,36 @@ fn rejects_geojson_type_geometry_mismatches() {
 }
 
 #[test]
+fn rejects_invalid_geojson_feature_envelopes_and_empty_airways() {
+    let wrong_feature_type = r#"{"type":"FeatureCollection","features":[{"type":"Geometry","properties":{},"geometry":{"type":"Point","coordinates":[0,0]}}]}"#;
+    assert!(parse_geojson_aviation_str(wrong_feature_type).is_err());
+
+    for coordinates in ["[]", "[[0,0]]"] {
+        let input = format!(
+            r#"{{"type":"FeatureCollection","features":[{{"type":"Feature","properties":{{"aero_type":"Airway"}},"geometry":{{"type":"LineString","coordinates":{coordinates}}}}}]}}"#
+        );
+        assert!(parse_geojson_aviation_str(&input).is_err());
+    }
+}
+
+#[test]
+fn rejects_geojson_polygon_holes_and_invalid_runway_values() {
+    let polygon_with_hole = r#"{"type":"FeatureCollection","features":[{"type":"Feature","properties":{"aero_type":"Airspace"},"geometry":{"type":"Polygon","coordinates":[[[-1,50],[-1,51],[0,51],[-1,50]],[[-0.8,50.2],[-0.8,50.4],[-0.6,50.4],[-0.8,50.2]]]}}]}"#;
+    assert!(parse_geojson_aviation_str(polygon_with_hole).is_err());
+
+    let invalid_height = r#"{"type":"FeatureCollection","features":[{"type":"Feature","properties":{"aero_type":"Airport","icao":"TEST","runways":[{"ident":"09/27","true_bearing_deg":90,"magnetic_bearing_deg":87,"length_m":1200,"width_m":30,"threshold_primary":[0,0,"bad"],"threshold_secondary":[1,1],"surface":"Asphalt"}]},"geometry":{"type":"Point","coordinates":[0,0]}}]}"#;
+    assert!(parse_geojson_aviation_str(invalid_height).is_err());
+
+    let negative_length = invalid_height.replace("1200", "-1").replace("\"bad\"", "0");
+    assert!(parse_geojson_aviation_str(&negative_length).is_err());
+}
+
+#[test]
+fn rejects_non_aixm_root() {
+    assert!(parse_aixm_51_str("<Message/>").is_err());
+}
+
+#[test]
 fn geojson_roundtrip_preserves_airway_and_runway_metadata() {
     let point = LatLon::from_degrees(50.0, -1.0, 10.0);
     let other = LatLon::from_degrees(51.0, 0.0, 20.0);

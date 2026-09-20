@@ -42,6 +42,11 @@ pub fn parse_geojson_aviation_str(
     let mut dataset = AeronauticalDataset::new();
 
     for feature in features {
+        if feature.get("type").and_then(Value::as_str) != Some("Feature") {
+            return Err(AeronauticalError::JsonParseError(
+                "each FeatureCollection item must have type 'Feature'".into(),
+            ));
+        }
         let properties = feature.get("properties").and_then(Value::as_object);
         let geometry = feature.get("geometry").and_then(Value::as_object);
 
@@ -145,7 +150,19 @@ fn validate_feature_coordinates(
                 )
             })?
             .iter()
-            .try_for_each(validate_position),
+            .try_fold(0usize, |count, position| {
+                validate_position(position)?;
+                Ok(count + 1)
+            })
+            .and_then(|count| {
+                if count < 2 {
+                    Err(AeronauticalError::InvalidCoordinateString(
+                        "LineString must contain at least two positions".into(),
+                    ))
+                } else {
+                    Ok(())
+                }
+            }),
         "Polygon" => coordinates
             .as_array()
             .ok_or_else(|| {
@@ -154,7 +171,7 @@ fn validate_feature_coordinates(
                 )
             })?
             .iter()
-            .map(|ring| {
+            .try_for_each(|ring| {
                 let ring = ring.as_array().ok_or_else(|| {
                     AeronauticalError::InvalidCoordinateString(
                         "Polygon ring must be an array".into(),
@@ -170,12 +187,8 @@ fn validate_feature_coordinates(
                         "Polygon ring must be closed".into(),
                     ));
                 }
-                Ok(ring)
-            })
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter()
-            .flatten()
-            .try_for_each(validate_position),
+                ring.iter().try_for_each(validate_position)
+            }),
         _ => Err(AeronauticalError::FormatError(format!(
             "unsupported aeronautical geometry: {geometry_type}"
         ))),
@@ -305,6 +318,11 @@ fn parse_airspace_feature(
             .map_or(0, Vec::len),
     );
     if let Some(rings) = coordinates.and_then(Value::as_array) {
+        if rings.len() > 1 {
+            return Err(AeronauticalError::FormatError(
+                "Polygon holes are not supported".into(),
+            ));
+        }
         // First ring is exterior ring
         if let Some(exterior) = rings.first().and_then(Value::as_array) {
             for pt in exterior {
@@ -329,14 +347,16 @@ fn parse_airspace_feature(
         }
     }
 
-    Ok(Some(AeronauticalAirspace {
+    let airspace = AeronauticalAirspace {
         uid,
         name,
         airspace_type,
         lower_limit,
         upper_limit,
         boundary,
-    }))
+    };
+    airspace.validate()?;
+    Ok(Some(airspace))
 }
 
 fn optional_altitude(
@@ -499,7 +519,7 @@ fn parse_navaid_feature(
     let elevation_m = typed_f64(props, &["elevation_m", "elevation"])?;
     let magnetic_variation_deg = typed_f64(props, &["magnetic_variation_deg", "mag_var"])?;
 
-    Ok(AeronauticalNavaid {
+    let navaid = AeronauticalNavaid {
         ident,
         name,
         navaid_type,
@@ -508,7 +528,9 @@ fn parse_navaid_feature(
         channel,
         elevation_m,
         magnetic_variation_deg,
-    })
+    };
+    navaid.validate()?;
+    Ok(navaid)
 }
 
 fn parse_airway_feature(
@@ -590,11 +612,13 @@ fn parse_airway_feature(
         });
     }
 
-    Ok(AeronauticalAirway {
+    let airway = AeronauticalAirway {
         ident,
         route_type,
         segments,
-    })
+    };
+    airway.validate()?;
+    Ok(airway)
 }
 
 fn segment_f64(
@@ -672,14 +696,16 @@ fn parse_airport_feature(
     let elevation_m = typed_f64(props, &["elevation_m"])?.unwrap_or(height_m);
     let runways = parse_runways(props.get("runways"))?;
 
-    Ok(AeronauticalAirport {
+    let airport = AeronauticalAirport {
         icao,
         iata,
         name,
         coords,
         elevation_m,
         runways,
-    })
+    };
+    airport.validate()?;
+    Ok(airport)
 }
 
 fn parse_runways(
@@ -700,8 +726,8 @@ fn parse_runways(
         let surface = object_string(runway, "surface")?;
         let true_bearing_deg = object_f64(runway, "true_bearing_deg")?;
         let magnetic_bearing_deg = object_f64(runway, "magnetic_bearing_deg")?;
-        let length_m = object_f64(runway, "length_m")?;
-        let width_m = object_f64(runway, "width_m")?;
+        let length_m = object_non_negative_f64(runway, "length_m")?;
+        let width_m = object_non_negative_f64(runway, "width_m")?;
         let threshold_primary = parse_exported_position(runway.get("threshold_primary"))?;
         let threshold_secondary = parse_exported_position(runway.get("threshold_secondary"))?;
         runways.push(crate::aeronautical::types::AeronauticalRunway {
@@ -745,6 +771,19 @@ fn object_f64(
     Ok(value)
 }
 
+fn object_non_negative_f64(
+    object: &serde_json::Map<String, Value>,
+    key: &str,
+) -> Result<f64, AeronauticalError> {
+    let value = object_f64(object, key)?;
+    if value < 0.0 {
+        return Err(AeronauticalError::FormatError(format!(
+            "runway {key} must be non-negative"
+        )));
+    }
+    Ok(value)
+}
+
 fn parse_exported_position(value: Option<&Value>) -> Result<LatLon, AeronauticalError> {
     let values = value.and_then(Value::as_array).ok_or_else(|| {
         AeronauticalError::InvalidCoordinateString("runway threshold must be an array".into())
@@ -760,7 +799,12 @@ fn parse_exported_position(value: Option<&Value>) -> Result<LatLon, Aeronautical
     let lat = values[1].as_f64().ok_or_else(|| {
         AeronauticalError::InvalidCoordinateString("runway latitude must be numeric".into())
     })?;
-    let height = values.get(2).and_then(Value::as_f64).unwrap_or(0.0);
+    let height = match values.get(2) {
+        Some(value) => value.as_f64().ok_or_else(|| {
+            AeronauticalError::InvalidCoordinateString("runway height must be numeric".into())
+        })?,
+        None => 0.0,
+    };
     if !lon.is_finite()
         || !lat.is_finite()
         || !height.is_finite()

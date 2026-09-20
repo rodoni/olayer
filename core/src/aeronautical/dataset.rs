@@ -106,6 +106,22 @@ impl AeronauticalDataset {
         self.airspaces.len() + self.navaids.len() + self.airways.len() + self.airports.len()
     }
 
+    /// Validates every feature currently stored in the dataset.
+    pub fn validate(&self) -> Result<(), AeronauticalError> {
+        self.airspaces
+            .iter()
+            .try_for_each(AeronauticalAirspace::validate)?;
+        self.navaids
+            .iter()
+            .try_for_each(AeronauticalNavaid::validate)?;
+        self.airways
+            .iter()
+            .try_for_each(AeronauticalAirway::validate)?;
+        self.airports
+            .iter()
+            .try_for_each(AeronauticalAirport::validate)
+    }
+
     /// Finds a navaid by its identification code (case-insensitive).
     ///
     /// # Errors
@@ -175,9 +191,9 @@ impl AeronauticalDataset {
                 "radius must be finite and non-negative".into(),
             ));
         }
-        if !center.lat.is_finite() || !center.lon.is_finite() {
+        if center.validate().is_err() {
             return Err(AeronauticalError::InvalidCoordinateString(
-                "center coordinates must be finite".into(),
+                "center coordinates are invalid".into(),
             ));
         }
         let solver = HaversineSolver;
@@ -186,11 +202,12 @@ impl AeronauticalDataset {
             .navaids
             .iter()
             .filter(|n| {
-                if let Ok(res) = solver.inverse(center, &n.coords, &ellipsoid) {
-                    res.distance <= radius_meters
-                } else {
-                    false
+                if n.coords.validate().is_ok() {
+                    if let Ok(res) = solver.inverse(center, &n.coords, &ellipsoid) {
+                        return res.distance <= radius_meters;
+                    }
                 }
+                false
             })
             .collect())
     }
@@ -206,6 +223,9 @@ impl AeronauticalDataset {
     /// # Safety
     /// This function does not use unsafe operations.
     pub fn find_airspaces_containing_point(&self, point: &LatLon) -> Vec<&AeronauticalAirspace> {
+        if point.validate().is_err() {
+            return Vec::new();
+        }
         self.airspaces
             .iter()
             .filter(|a| {

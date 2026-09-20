@@ -51,13 +51,25 @@ pub fn generate_isolines_rad(
     }
 
     if grid.iter().any(|value| !value.is_finite()) {
-        return Err(WeatherError::InvalidIsovalues("grid contains non-finite values".to_string()));
+        return Err(WeatherError::InvalidIsovalues(
+            "grid contains non-finite values".to_string(),
+        ));
     }
     let (min_lat, min_lon, max_lat, max_lon) = bounds_rad;
-    if ![min_lat, min_lon, max_lat, max_lon].iter().all(|v| v.is_finite())
-        || min_lat > max_lat || min_lon > max_lon
-        || min_lat < -std::f64::consts::FRAC_PI_2 || max_lat > std::f64::consts::FRAC_PI_2
-    { return Err(WeatherError::InvalidIsovalues("invalid geographic bounds".to_string())); }
+    if ![min_lat, min_lon, max_lat, max_lon]
+        .iter()
+        .all(|v| v.is_finite())
+        || min_lat > max_lat
+        || min_lon > max_lon
+        || min_lat < -std::f64::consts::FRAC_PI_2
+        || max_lat > std::f64::consts::FRAC_PI_2
+        || min_lon < -std::f64::consts::PI
+        || max_lon > std::f64::consts::PI
+    {
+        return Err(WeatherError::InvalidIsovalues(
+            "invalid geographic bounds".to_string(),
+        ));
+    }
     let d_lat = max_lat - min_lat;
     let d_lon = max_lon - min_lon;
 

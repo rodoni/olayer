@@ -102,8 +102,27 @@ pub fn colorize_dbz_grid(
     height: usize,
     palette: RadarColorPalette,
 ) -> Result<Vec<u8>, WeatherError> {
-    let cells = width.checked_mul(height).ok_or(WeatherError::InvalidGridDimensions { width, height, actual_len: grid.len() })?;
-    let output_len = cells.checked_mul(4).ok_or(WeatherError::InvalidGridDimensions { width, height, actual_len: grid.len() })?;
+    if width == 0 || height == 0 {
+        return Err(WeatherError::InvalidGridDimensions {
+            width,
+            height,
+            actual_len: grid.len(),
+        });
+    }
+    let cells = width
+        .checked_mul(height)
+        .ok_or(WeatherError::InvalidGridDimensions {
+            width,
+            height,
+            actual_len: grid.len(),
+        })?;
+    let output_len = cells
+        .checked_mul(4)
+        .ok_or(WeatherError::InvalidGridDimensions {
+            width,
+            height,
+            actual_len: grid.len(),
+        })?;
     if grid.len() != cells {
         return Err(WeatherError::InvalidGridDimensions {
             width,

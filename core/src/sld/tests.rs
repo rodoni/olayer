@@ -161,6 +161,12 @@ fn test_xml_malformed() {
 }
 
 #[test]
+fn test_xml_unexpected_closing_tag_is_rejected() {
+    let res = parse("<StyledLayerDescriptor></NamedLayer>");
+    assert!(matches!(res, Err(SldError::XmlError(_))));
+}
+
+#[test]
 fn test_invalid_numeric_values() {
     let xml = r#"
 <StyledLayerDescriptor>

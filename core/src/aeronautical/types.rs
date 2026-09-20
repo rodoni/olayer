@@ -122,7 +122,9 @@ impl AltitudeLimit {
                 "invalid flight level: {fl}"
             )));
         }
-        let flight_level = fl as u32;
+        let flight_level = fl.to_string().parse::<u32>().map_err(|_| {
+            AeronauticalError::InvalidAltitude(format!("invalid flight level: {fl}"))
+        })?;
         let value_m = fl * 100.0 * 0.3048;
         if !value_m.is_finite() {
             return Err(AeronauticalError::InvalidAltitude(
@@ -274,6 +276,21 @@ impl<'de> Deserialize<'de> for AltitudeLimit {
     }
 }
 
+fn validate_coordinate(coordinate: &LatLon) -> Result<(), AeronauticalError> {
+    coordinate
+        .validate()
+        .map_err(|error| AeronauticalError::InvalidCoordinateString(error.to_string()))
+}
+
+fn validate_bearing(value: f64, field: &str) -> Result<(), AeronauticalError> {
+    if !value.is_finite() || !(0.0..360.0).contains(&value) {
+        return Err(AeronauticalError::FormatError(format!(
+            "{field} must be finite and in [0, 360)"
+        )));
+    }
+    Ok(())
+}
+
 /// 3D Airspace boundary with vertical ceiling/floor and geodetic vertices.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AeronauticalAirspace {
@@ -289,6 +306,35 @@ pub struct AeronauticalAirspace {
     pub upper_limit: AltitudeLimit,
     /// Boundary vertices on WGS84 ellipsoid.
     pub boundary: Vec<LatLon>,
+}
+
+impl AeronauticalAirspace {
+    /// Validates identifiers, vertical limits, and polygon coordinates.
+    pub fn validate(&self) -> Result<(), AeronauticalError> {
+        if self.uid.trim().is_empty() || self.name.trim().is_empty() {
+            return Err(AeronauticalError::MissingRequiredField(
+                "airspace identifier and name".into(),
+            ));
+        }
+        self.lower_limit.validate()?;
+        self.upper_limit.validate()?;
+        if self.lower_limit.reference() == AltitudeReference::Uncapped {
+            return Err(AeronauticalError::InvalidAltitude(
+                "uncapped cannot be an airspace lower limit".into(),
+            ));
+        }
+        if self.upper_limit.reference() == AltitudeReference::Ground {
+            return Err(AeronauticalError::InvalidAltitude(
+                "ground cannot be an airspace upper limit".into(),
+            ));
+        }
+        if self.boundary.len() < 4 || self.boundary.first() != self.boundary.last() {
+            return Err(AeronauticalError::FormatError(
+                "airspace boundary must be a closed ring".into(),
+            ));
+        }
+        self.boundary.iter().try_for_each(validate_coordinate)
+    }
 }
 
 /// Type of ground-based or space-based civil/military radio navigation aid.
@@ -332,6 +378,32 @@ pub struct AeronauticalNavaid {
     pub elevation_m: Option<f64>,
     /// Local magnetic declination / variation in degrees.
     pub magnetic_variation_deg: Option<f64>,
+}
+
+impl AeronauticalNavaid {
+    /// Validates the navaid identity, position, and optional numeric fields.
+    pub fn validate(&self) -> Result<(), AeronauticalError> {
+        if self.ident.trim().is_empty() || self.name.trim().is_empty() {
+            return Err(AeronauticalError::MissingRequiredField(
+                "navaid identifier and name".into(),
+            ));
+        }
+        validate_coordinate(&self.coords)?;
+        for (value, field) in [
+            (self.frequency_mhz, "frequency_mhz"),
+            (self.elevation_m, "elevation_m"),
+            (self.magnetic_variation_deg, "magnetic_variation_deg"),
+        ] {
+            if let Some(value) = value {
+                if !value.is_finite() {
+                    return Err(AeronauticalError::FormatError(format!(
+                        "{field} must be finite"
+                    )));
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Category of Air Traffic Service (ATS) airway route.
@@ -405,6 +477,38 @@ pub struct AirwaySegment {
     pub direction: SegmentDirection,
 }
 
+impl AirwaySegment {
+    /// Validates endpoints, altitude bands, and inbound bearing.
+    pub fn validate(&self) -> Result<(), AeronauticalError> {
+        if self.from_ident.trim().is_empty() || self.to_ident.trim().is_empty() {
+            return Err(AeronauticalError::MissingRequiredField(
+                "airway segment identifiers".into(),
+            ));
+        }
+        validate_coordinate(&self.from_coords)?;
+        validate_coordinate(&self.to_coords)?;
+        if let Some(value) = self.mea_m {
+            if !value.is_finite() || value < 0.0 {
+                return Err(AeronauticalError::InvalidAltitude("invalid MEA".into()));
+            }
+        }
+        if let Some(value) = self.maa_m {
+            if !value.is_finite() || value < 0.0 {
+                return Err(AeronauticalError::InvalidAltitude("invalid MAA".into()));
+            }
+        }
+        if let (Some(mea), Some(maa)) = (self.mea_m, self.maa_m) {
+            if mea > maa {
+                return Err(AeronauticalError::InvalidAltitude("MEA exceeds MAA".into()));
+            }
+        }
+        if let Some(bearing) = self.inbound_bearing_deg {
+            validate_bearing(bearing, "inbound bearing")?;
+        }
+        Ok(())
+    }
+}
+
 /// ATS Airway route composed of sequenced segments.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AeronauticalAirway {
@@ -414,6 +518,23 @@ pub struct AeronauticalAirway {
     pub route_type: AirwayType,
     /// Route segments.
     pub segments: Vec<AirwaySegment>,
+}
+
+impl AeronauticalAirway {
+    /// Validates the airway identity and all of its segments.
+    pub fn validate(&self) -> Result<(), AeronauticalError> {
+        if self.ident.trim().is_empty() {
+            return Err(AeronauticalError::MissingRequiredField(
+                "airway identifier".into(),
+            ));
+        }
+        if self.segments.is_empty() {
+            return Err(AeronauticalError::MissingRequiredField(
+                "airway segments".into(),
+            ));
+        }
+        self.segments.iter().try_for_each(AirwaySegment::validate)
+    }
 }
 
 /// Runway surface alignment and physical dimensions.
@@ -437,6 +558,31 @@ pub struct AeronauticalRunway {
     pub surface: String,
 }
 
+impl AeronauticalRunway {
+    /// Validates runway dimensions, bearings, and thresholds.
+    pub fn validate(&self) -> Result<(), AeronauticalError> {
+        if self.ident.trim().is_empty() || self.surface.trim().is_empty() {
+            return Err(AeronauticalError::MissingRequiredField(
+                "runway identifier and surface".into(),
+            ));
+        }
+        validate_bearing(self.true_bearing_deg, "true bearing")?;
+        validate_bearing(self.magnetic_bearing_deg, "magnetic bearing")?;
+        if !self.length_m.is_finite() || self.length_m <= 0.0 {
+            return Err(AeronauticalError::FormatError(
+                "runway length must be positive and finite".into(),
+            ));
+        }
+        if !self.width_m.is_finite() || self.width_m <= 0.0 {
+            return Err(AeronauticalError::FormatError(
+                "runway width must be positive and finite".into(),
+            ));
+        }
+        validate_coordinate(&self.threshold_primary)?;
+        validate_coordinate(&self.threshold_secondary)
+    }
+}
+
 /// Aerodrome or Heliport facility.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AeronauticalAirport {
@@ -452,4 +598,24 @@ pub struct AeronauticalAirport {
     pub elevation_m: f64,
     /// Operational runways.
     pub runways: Vec<AeronauticalRunway>,
+}
+
+impl AeronauticalAirport {
+    /// Validates airport identity, position, elevation, and runways.
+    pub fn validate(&self) -> Result<(), AeronauticalError> {
+        if self.icao.trim().is_empty() || self.name.trim().is_empty() {
+            return Err(AeronauticalError::MissingRequiredField(
+                "airport ICAO and name".into(),
+            ));
+        }
+        validate_coordinate(&self.coords)?;
+        if !self.elevation_m.is_finite() {
+            return Err(AeronauticalError::FormatError(
+                "airport elevation must be finite".into(),
+            ));
+        }
+        self.runways
+            .iter()
+            .try_for_each(AeronauticalRunway::validate)
+    }
 }

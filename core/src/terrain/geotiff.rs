@@ -219,11 +219,22 @@ impl GeoTiffTile {
         let tiles_across = tile_width.map(|tile| width.div_ceil(tile)).unwrap_or(0);
         for (strip_index, &strip_offset) in strip_offsets.iter().enumerate() {
             if strip_offset >= data.len() {
-                return Err(TerrainError::GeoTiffError("raster strip offset out of bounds".to_string()));
+                return Err(TerrainError::GeoTiffError(
+                    "raster strip offset out of bounds".to_string(),
+                ));
             }
-            let byte_count = strip_byte_counts.get(strip_index).copied().unwrap_or(data.len() - strip_offset);
-            let strip_end = strip_offset.checked_add(byte_count).ok_or_else(|| TerrainError::GeoTiffError("raster strip range overflow".to_string()))?;
-            if strip_end > data.len() { return Err(TerrainError::GeoTiffError("raster strip is truncated".to_string())); }
+            let byte_count = strip_byte_counts
+                .get(strip_index)
+                .copied()
+                .unwrap_or(data.len() - strip_offset);
+            let strip_end = strip_offset.checked_add(byte_count).ok_or_else(|| {
+                TerrainError::GeoTiffError("raster strip range overflow".to_string())
+            })?;
+            if strip_end > data.len() {
+                return Err(TerrainError::GeoTiffError(
+                    "raster strip is truncated".to_string(),
+                ));
+            }
             let compressed_data = &data[strip_offset..strip_end];
             let decoded_data = match compression {
                 1 => compressed_data.to_vec(),
@@ -427,7 +438,11 @@ fn decode_samples(
         (16, 1) => {
             let (chunks, _) = data.as_chunks::<2>();
             for chunk in chunks {
-                let value = if is_le { u16::from_le_bytes([chunk[0], chunk[1]]) } else { u16::from_be_bytes([chunk[0], chunk[1]]) };
+                let value = if is_le {
+                    u16::from_le_bytes([chunk[0], chunk[1]])
+                } else {
+                    u16::from_be_bytes([chunk[0], chunk[1]])
+                };
                 let missing = nodata.is_some_and(|nd| (value as f64 - nd).abs() < 1e-3);
                 values.push(if missing { None } else { Some(value as f32) });
             }
@@ -500,17 +515,25 @@ fn apply_horizontal_predictor(
                     row[current..current + 4].copy_from_slice(&value.to_be_bytes());
                 }
                 8 if is_le => {
-                    let value = u64::from_le_bytes(row[current..current + 8].try_into().unwrap())
-                        .wrapping_add(u64::from_le_bytes(
-                            row[previous..previous + 8].try_into().unwrap(),
-                        ));
+                    let Ok(current_bytes) = row[current..current + 8].try_into() else {
+                        break;
+                    };
+                    let Ok(previous_bytes) = row[previous..previous + 8].try_into() else {
+                        break;
+                    };
+                    let value = u64::from_le_bytes(current_bytes)
+                        .wrapping_add(u64::from_le_bytes(previous_bytes));
                     row[current..current + 8].copy_from_slice(&value.to_le_bytes());
                 }
                 8 => {
-                    let value = u64::from_be_bytes(row[current..current + 8].try_into().unwrap())
-                        .wrapping_add(u64::from_be_bytes(
-                            row[previous..previous + 8].try_into().unwrap(),
-                        ));
+                    let Ok(current_bytes) = row[current..current + 8].try_into() else {
+                        break;
+                    };
+                    let Ok(previous_bytes) = row[previous..previous + 8].try_into() else {
+                        break;
+                    };
+                    let value = u64::from_be_bytes(current_bytes)
+                        .wrapping_add(u64::from_be_bytes(previous_bytes));
                     row[current..current + 8].copy_from_slice(&value.to_be_bytes());
                 }
                 _ => {}

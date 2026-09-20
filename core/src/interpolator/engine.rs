@@ -99,7 +99,10 @@ impl InterpolationEngine {
         let mut results = Vec::with_capacity(self.targets.len());
         let mut skipped = Vec::with_capacity(self.targets.len());
 
-        for (id, state) in &self.targets {
+        let mut ids: Vec<&String> = self.targets.keys().collect();
+        ids.sort_unstable();
+        for id in ids {
+            let state = &self.targets[id];
             if !current_time.is_finite() || !state.last_ping_time.is_finite() {
                 skipped.push(SkippedTarget {
                     id: id.clone(),
@@ -132,6 +135,11 @@ impl InterpolationEngine {
 
             // 1. Horizontal translation
             let dist = state.speed_mps * dt;
+            if !dist.is_finite() {
+                return Err(InterpolatorError::InvalidState(
+                    "horizontal interpolation overflowed".into(),
+                ));
+            }
             let next_pos = if dist > 0.0 {
                 // Try VincentySolver first, fallback to HaversineSolver if it fails
                 match self.vincenty.direct(
@@ -154,7 +162,13 @@ impl InterpolationEngine {
 
             // 2. Vertical rate translation (apply vertical speed to altitude/height)
             let mut final_pos = next_pos;
-            final_pos.height = state.last_position.height + state.vertical_rate_mps * dt;
+            let vertical_delta = state.vertical_rate_mps * dt;
+            final_pos.height = state.last_position.height + vertical_delta;
+            if !vertical_delta.is_finite() || !final_pos.height.is_finite() {
+                return Err(InterpolatorError::InvalidState(
+                    "vertical interpolation overflowed".into(),
+                ));
+            }
 
             results.push(InterpolatedTarget {
                 id: id.clone(),

@@ -74,11 +74,15 @@ impl SigmetFeature {
 
     /// Returns true if the 3D position (latitude, longitude, altitude) is inside the hazard volume.
     pub fn contains_3d(&self, point: &LatLon) -> bool {
-        if !point.lat.is_finite() || !point.lon.is_finite() || !point.height.is_finite()
+        if !point.lat.is_finite()
+            || !point.lon.is_finite()
+            || !point.height.is_finite()
             || self.floor_m.is_some_and(|value| !value.is_finite())
             || self.ceiling_m.is_some_and(|value| !value.is_finite())
             || matches!((self.floor_m, self.ceiling_m), (Some(floor), Some(ceiling)) if floor > ceiling)
-        { return false; }
+        {
+            return false;
+        }
         if !self.contains_2d(point) {
             return false;
         }
@@ -161,11 +165,19 @@ impl SigmetDataset {
         for feat in features {
             let props = feat.get("properties").and_then(|p| p.as_object());
             let geom = feat.get("geometry").and_then(|g| g.as_object());
+            let props = props.ok_or_else(|| {
+                WeatherError::ParseError("SIGMET feature is missing properties".into())
+            })?;
+            let geom = geom.ok_or_else(|| {
+                WeatherError::ParseError("SIGMET feature is missing geometry".into())
+            })?;
 
-            if let (Some(props), Some(geom)) = (props, geom) {
+            {
                 let geom_type = geom.get("type").and_then(|t| t.as_str()).unwrap_or("");
                 if geom_type != "Polygon" {
-                    return Err(WeatherError::ParseError(format!("unsupported geometry type: {geom_type}")));
+                    return Err(WeatherError::ParseError(format!(
+                        "unsupported geometry type: {geom_type}"
+                    )));
                 }
 
                 let id = props
@@ -205,11 +217,22 @@ impl SigmetDataset {
                     .get("upper_limit_m")
                     .or_else(|| props.get("ceiling_m"))
                     .and_then(|v| v.as_f64());
-                let valid_from_epoch_s = props.get("valid_from_epoch_s").or_else(|| props.get("valid_from")).and_then(|v| v.as_i64());
-                let valid_until_epoch_s = props.get("valid_until_epoch_s").or_else(|| props.get("valid_until")).and_then(|v| v.as_i64());
-                if floor_m.is_some_and(|v| !v.is_finite()) || ceiling_m.is_some_and(|v| !v.is_finite())
+                let valid_from_epoch_s = props
+                    .get("valid_from_epoch_s")
+                    .or_else(|| props.get("valid_from"))
+                    .and_then(|v| v.as_i64());
+                let valid_until_epoch_s = props
+                    .get("valid_until_epoch_s")
+                    .or_else(|| props.get("valid_until"))
+                    .and_then(|v| v.as_i64());
+                if floor_m.is_some_and(|v| !v.is_finite())
+                    || ceiling_m.is_some_and(|v| !v.is_finite())
                     || matches!((floor_m, ceiling_m), (Some(floor), Some(ceiling)) if floor > ceiling)
-                { return Err(WeatherError::ParseError("invalid altitude bounds".to_string())); }
+                {
+                    return Err(WeatherError::ParseError(
+                        "invalid altitude bounds".to_string(),
+                    ));
+                }
 
                 let coords_arr = geom
                     .get("coordinates")
@@ -217,34 +240,65 @@ impl SigmetDataset {
                     .and_then(|rings| rings.first())
                     .and_then(|outer| outer.as_array());
 
-                if let Some(ring) = coords_arr {
-                    if geom.get("coordinates").and_then(|c| c.as_array()).is_some_and(|rings| rings.len() > 1) {
-                        return Err(WeatherError::ParseError("polygon holes are unsupported".to_string()));
+                let ring = coords_arr.ok_or_else(|| {
+                    WeatherError::ParseError("SIGMET polygon is missing coordinates".into())
+                })?;
+                if ring.len() < 3 {
+                    return Err(WeatherError::ParseError(
+                        "SIGMET polygon requires at least three positions".into(),
+                    ));
+                }
+                {
+                    if geom
+                        .get("coordinates")
+                        .and_then(|c| c.as_array())
+                        .is_some_and(|rings| rings.len() > 1)
+                    {
+                        return Err(WeatherError::ParseError(
+                            "polygon holes are unsupported".to_string(),
+                        ));
                     }
                     let mut polygon = Vec::with_capacity(ring.len());
                     for pt in ring {
-                        let pt_arr = pt.as_array().ok_or_else(|| WeatherError::ParseError("invalid coordinate point".to_string()))?;
-                        if pt_arr.len() < 2 { return Err(WeatherError::ParseError("coordinate requires longitude and latitude".to_string())); }
-                        let lon_deg = pt_arr[0].as_f64().ok_or_else(|| WeatherError::ParseError("invalid longitude".to_string()))?;
-                        let lat_deg = pt_arr[1].as_f64().ok_or_else(|| WeatherError::ParseError("invalid latitude".to_string()))?;
+                        let pt_arr = pt.as_array().ok_or_else(|| {
+                            WeatherError::ParseError("invalid coordinate point".to_string())
+                        })?;
+                        if pt_arr.len() < 2 {
+                            return Err(WeatherError::ParseError(
+                                "coordinate requires longitude and latitude".to_string(),
+                            ));
+                        }
+                        let lon_deg = pt_arr[0].as_f64().ok_or_else(|| {
+                            WeatherError::ParseError("invalid longitude".to_string())
+                        })?;
+                        let lat_deg = pt_arr[1].as_f64().ok_or_else(|| {
+                            WeatherError::ParseError("invalid latitude".to_string())
+                        })?;
                         let alt_m = pt_arr.get(2).and_then(|a| a.as_f64()).unwrap_or(0.0);
-                        if !lon_deg.is_finite() || !lat_deg.is_finite() || !alt_m.is_finite() { return Err(WeatherError::ParseError("non-finite coordinate".to_string())); }
+                        if !lon_deg.is_finite()
+                            || !lat_deg.is_finite()
+                            || !alt_m.is_finite()
+                            || !(-180.0..=180.0).contains(&lon_deg)
+                            || !(-90.0..=90.0).contains(&lat_deg)
+                        {
+                            return Err(WeatherError::ParseError(
+                                "invalid coordinate range".to_string(),
+                            ));
+                        }
                         polygon.push(LatLon::from_degrees(lat_deg, lon_deg, alt_m));
                     }
 
-                    if polygon.len() >= 3 {
-                        dataset.add_feature(SigmetFeature {
-                            id,
-                            name,
-                            hazard_type,
-                            severity,
-                            polygon,
-                            floor_m,
-                            ceiling_m,
-                            valid_from_epoch_s,
-                            valid_until_epoch_s,
-                        });
-                    }
+                    dataset.add_feature(SigmetFeature {
+                        id,
+                        name,
+                        hazard_type,
+                        severity,
+                        polygon,
+                        floor_m,
+                        ceiling_m,
+                        valid_from_epoch_s,
+                        valid_until_epoch_s,
+                    });
                 }
             }
         }

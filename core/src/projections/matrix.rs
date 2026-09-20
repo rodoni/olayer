@@ -1,4 +1,7 @@
-#![allow(clippy::return_self_not_must_use)]
+#![expect(
+    clippy::return_self_not_must_use,
+    reason = "Matrix builder methods intentionally return modified copies"
+)]
 
 use std::ops::Mul;
 
@@ -31,9 +34,20 @@ impl Matrix4 {
 
     /// Generates an orthographic projection matrix.
     #[inline]
-    pub fn ortho(left: f32, right: f32, bottom: f32, top: f32, near: f32, far: f32) -> Result<Self, super::ProjectionError> {
-        if ![left, right, bottom, top, near, far].iter().all(|value| value.is_finite())
-            || right <= left || top <= bottom || far <= near
+    pub fn ortho(
+        left: f32,
+        right: f32,
+        bottom: f32,
+        top: f32,
+        near: f32,
+        far: f32,
+    ) -> Result<Self, super::ProjectionError> {
+        if ![left, right, bottom, top, near, far]
+            .iter()
+            .all(|value| value.is_finite())
+            || right <= left
+            || top <= bottom
+            || far <= near
         {
             return Err(super::ProjectionError::InvalidParameters);
         }
@@ -104,10 +118,19 @@ impl Matrix4 {
 
     /// Generates a perspective projection matrix.
     #[inline]
-    pub fn perspective(fovy_rad: f32, aspect: f32, near: f32, far: f32) -> Result<Self, super::ProjectionError> {
-        if ![fovy_rad, aspect, near, far].iter().all(|value| value.is_finite())
+    pub fn perspective(
+        fovy_rad: f32,
+        aspect: f32,
+        near: f32,
+        far: f32,
+    ) -> Result<Self, super::ProjectionError> {
+        if ![fovy_rad, aspect, near, far]
+            .iter()
+            .all(|value| value.is_finite())
             || !(0.0 < fovy_rad && fovy_rad < std::f32::consts::PI)
-            || aspect <= 0.0 || near <= 0.0 || far <= near
+            || aspect <= 0.0
+            || near <= 0.0
+            || far <= near
         {
             return Err(super::ProjectionError::InvalidParameters);
         }

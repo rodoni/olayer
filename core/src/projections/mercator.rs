@@ -1,4 +1,7 @@
-#![allow(clippy::unreadable_literal)]
+#![expect(
+    clippy::unreadable_literal,
+    reason = "Published projection constant preserves precision"
+)]
 
 use super::{Projection, ProjectionError};
 use crate::geodesy::coords::LatLon;
