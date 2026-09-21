@@ -44,8 +44,13 @@ pub fn generate_trajectory_ribbon_mesh(
                 n
             )));
         }
-        if scalars.iter().any(|value| !value.is_finite() || !(0.0..=1.0).contains(value)) {
-            return Err(VolumetricError::InvalidRibbonParameters("scalar values must be finite and within [0, 1]".to_string()));
+        if scalars
+            .iter()
+            .any(|value| !value.is_finite() || !(0.0..=1.0).contains(value))
+        {
+            return Err(VolumetricError::InvalidRibbonParameters(
+                "scalar values must be finite and within [0, 1]".to_string(),
+            ));
         }
     }
 
@@ -57,12 +62,22 @@ pub fn generate_trajectory_ribbon_mesh(
     let mut max_alt = f64::NEG_INFINITY;
 
     for pt in waypoints {
-        if !pt.lat.is_finite() || !pt.lon.is_finite() || !pt.height.is_finite()
+        if !pt.lat.is_finite()
+            || !pt.lon.is_finite()
+            || !pt.height.is_finite()
             || !(-std::f64::consts::FRAC_PI_2..=std::f64::consts::FRAC_PI_2).contains(&pt.lat)
             || !(-std::f64::consts::PI..=std::f64::consts::PI).contains(&pt.lon)
-        { return Err(VolumetricError::InvalidRibbonParameters("waypoint coordinates must be finite and in range".to_string())); }
+        {
+            return Err(VolumetricError::InvalidRibbonParameters(
+                "waypoint coordinates must be finite and in range".to_string(),
+            ));
+        }
         let ecef = lla_to_ecef(pt, &ell);
-        if !ecef.x.is_finite() || !ecef.y.is_finite() || !ecef.z.is_finite() { return Err(VolumetricError::InvalidRibbonParameters("waypoint conversion is non-finite".to_string())); }
+        if !ecef.x.is_finite() || !ecef.y.is_finite() || !ecef.z.is_finite() {
+            return Err(VolumetricError::InvalidRibbonParameters(
+                "waypoint conversion is non-finite".to_string(),
+            ));
+        }
         ecef_points.push([ecef.x, ecef.y, ecef.z]);
         if pt.height < min_alt {
             min_alt = pt.height;
@@ -110,7 +125,11 @@ pub fn generate_trajectory_ribbon_mesh(
                 + (p_curr[2] - p_prev[2]).powi(2))
             .sqrt();
             cumulative_dist += d;
-            if d <= 1e-9 { return Err(VolumetricError::DegenerateGeometry("consecutive waypoints must differ".to_string())); }
+            if d <= 1e-9 {
+                return Err(VolumetricError::DegenerateGeometry(
+                    "consecutive waypoints must differ".to_string(),
+                ));
+            }
         }
 
         // Local Up normal (away from Earth center)
@@ -149,10 +168,17 @@ pub fn generate_trajectory_ribbon_mesh(
 
         // Lateral Right vector: T x Up
         let cross = cross3(tangent, up);
-        let right = if (cross[0] * cross[0] + cross[1] * cross[1] + cross[2] * cross[2]).sqrt() <= 1e-12 {
-            let east = [-up[1], up[0], 0.0];
-            if east[0] * east[0] + east[1] * east[1] > 1e-12 { normalize3(east) } else { normalize3([0.0, 1.0, 0.0]) }
-        } else { normalize3(cross) };
+        let right =
+            if (cross[0] * cross[0] + cross[1] * cross[1] + cross[2] * cross[2]).sqrt() <= 1e-12 {
+                let east = [-up[1], up[0], 0.0];
+                if east[0] * east[0] + east[1] * east[1] > 1e-12 {
+                    normalize3(east)
+                } else {
+                    normalize3([0.0, 1.0, 0.0])
+                }
+            } else {
+                normalize3(cross)
+            };
 
         // Surface normal for the ribbon: Right x Tangent
         let ribbon_norm = normalize3(cross3(right, tangent));

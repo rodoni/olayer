@@ -1,4 +1,7 @@
-#![expect(clippy::unreadable_literal, reason = "Published geodetic constants preserve precision")]
+#![expect(
+    clippy::unreadable_literal,
+    reason = "Published geodetic constants preserve precision"
+)]
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Ellipsoid {

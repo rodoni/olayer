@@ -47,7 +47,9 @@ impl DtedTile {
         let origin_lon = parsed_lon.floor() as i32;
         let origin_lat = parsed_lat.floor() as i32;
         if parsed_lon.fract() != 0.0 || parsed_lat.fract() != 0.0 {
-            return Err(TerrainError::InvalidHeader("DTED origins must be whole degrees".to_string()));
+            return Err(TerrainError::InvalidHeader(
+                "DTED origins must be whole degrees".to_string(),
+            ));
         }
 
         // Parse grid dimensions
@@ -64,7 +66,9 @@ impl DtedTile {
         let lon_spacing_arcsec = parse_ascii_u32(&data[24..28])
             .map_err(|e| TerrainError::InvalidHeader(format!("Invalid longitude spacing: {e}")))?;
         if num_rows == 0 || num_cols == 0 || lat_spacing_arcsec == 0 || lon_spacing_arcsec == 0 {
-            return Err(TerrainError::InvalidHeader("DTED dimensions and spacing must be non-zero".to_string()));
+            return Err(TerrainError::InvalidHeader(
+                "DTED dimensions and spacing must be non-zero".to_string(),
+            ));
         }
 
         // Each data column: 1 sentinel + 3 lon idx + 3 lat idx + num_rows * 2 bytes + 4 checksum
@@ -197,7 +201,11 @@ fn parse_uhl_lon(bytes: &[u8]) -> Result<f64, String> {
         return Err("Invalid number format".to_string());
     };
 
-    match dir { b'W' | b'w' => Ok(-val), b'E' | b'e' => Ok(val), _ => Err("Invalid longitude direction".to_string()) }
+    match dir {
+        b'W' | b'w' => Ok(-val),
+        b'E' | b'e' => Ok(val),
+        _ => Err("Invalid longitude direction".to_string()),
+    }
 }
 
 /// Parses a DTED UHL latitude field from raw bytes.
@@ -224,7 +232,11 @@ fn parse_uhl_lat(bytes: &[u8]) -> Result<f64, String> {
         return Err("Invalid number format".to_string());
     };
 
-    match dir { b'S' | b's' => Ok(-val), b'N' | b'n' => Ok(val), _ => Err("Invalid latitude direction".to_string()) }
+    match dir {
+        b'S' | b's' => Ok(-val),
+        b'N' | b'n' => Ok(val),
+        _ => Err("Invalid latitude direction".to_string()),
+    }
 }
 
 /// Trims leading and trailing ASCII whitespace from a byte slice.

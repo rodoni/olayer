@@ -392,6 +392,15 @@ fn test_projection_rejects_invalid_inputs_and_parameters() {
         ellipsoid,
     )
     .is_err());
+    assert!(LambertConformalConic::new(
+        30.0_f64.to_radians(),
+        45.0_f64.to_radians(),
+        0.0,
+        2.0 * std::f64::consts::PI,
+        ellipsoid
+    )
+    .is_err());
+    assert!(Stereographic::new(std::f64::consts::PI, 0.0, ellipsoid).is_err());
 
     let stereo = Stereographic::new(0.0, 0.0, ellipsoid).unwrap();
     assert!(stereo.project(&LatLon::new(f64::NAN, 0.0, 0.0)).is_err());
@@ -400,7 +409,19 @@ fn test_projection_rejects_invalid_inputs_and_parameters() {
     let mercator = WebMercator::new(ellipsoid).unwrap();
     assert!(mercator.project(&LatLon::new(0.0, f64::NAN, 0.0)).is_err());
     assert!(mercator.unproject(0.0, f64::NAN).is_err());
-    assert!(mercator.project(&LatLon::from_degrees(90.0, 0.0, 0.0)).is_ok());
+    assert!(mercator
+        .project(&LatLon::from_degrees(90.0, 0.0, 0.0))
+        .is_ok());
+
+    let lcc = LambertConformalConic::new(
+        33.0_f64.to_radians(),
+        45.0_f64.to_radians(),
+        0.0,
+        0.0,
+        ellipsoid,
+    )
+    .unwrap();
+    assert!(lcc.project(&LatLon::from_degrees(90.0, 0.0, 0.0)).is_err());
 }
 
 #[test]
@@ -413,9 +434,7 @@ fn test_lcc_southern_apex_and_matrix_validation() {
         Ellipsoid::wgs84(),
     )
     .unwrap();
-    let (x, y) = lcc
-        .project(&LatLon::from_degrees(-89.0, 0.0, 0.0))
-        .unwrap();
+    let (x, y) = lcc.project(&LatLon::from_degrees(-89.0, 0.0, 0.0)).unwrap();
     let apex_side = lcc.unproject(x, y).unwrap();
     assert!(apex_side.lat < 0.0);
 

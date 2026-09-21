@@ -35,7 +35,9 @@ pub fn resolve_altitude(
     unknown_policy: AltitudeUnknownPolicy,
 ) -> Result<f64, TerrainError> {
     if !input_height.is_finite() {
-        return Err(TerrainError::AltitudeError("input height must be finite".to_string()));
+        return Err(TerrainError::AltitudeError(
+            "input height must be finite".to_string(),
+        ));
     }
 
     let required_height = match mode {
@@ -46,9 +48,17 @@ pub fn resolve_altitude(
 
     let base = match required_height {
         Some(value) if value.is_finite() => value,
-        Some(_) => return Err(TerrainError::AltitudeError("terrain height must be finite".to_string())),
+        Some(_) => {
+            return Err(TerrainError::AltitudeError(
+                "terrain height must be finite".to_string(),
+            ))
+        }
         None => match unknown_policy {
-            AltitudeUnknownPolicy::Reject => return Err(TerrainError::AltitudeError("terrain elevation is unavailable".to_string())),
+            AltitudeUnknownPolicy::Reject => {
+                return Err(TerrainError::AltitudeError(
+                    "terrain elevation is unavailable".to_string(),
+                ))
+            }
             AltitudeUnknownPolicy::UseAbsolute => return Ok(input_height),
             AltitudeUnknownPolicy::UseZero => 0.0,
         },
@@ -59,7 +69,13 @@ pub fn resolve_altitude(
         AltitudeMode::RelativeToGround | AltitudeMode::RelativeToMesh => base + input_height,
         AltitudeMode::Absolute => input_height,
     };
-    if result.is_finite() { Ok(result) } else { Err(TerrainError::AltitudeError("resolved height is not finite".to_string())) }
+    if result.is_finite() {
+        Ok(result)
+    } else {
+        Err(TerrainError::AltitudeError(
+            "resolved height is not finite".to_string(),
+        ))
+    }
 }
 
 #[cfg(test)]

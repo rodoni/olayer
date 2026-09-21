@@ -4,7 +4,8 @@ use olayer_core::projections::{LambertConformalConic, Projection, Stereographic,
 
 fn benchmark_projections(c: &mut Criterion) {
     let ellipsoid = Ellipsoid::wgs84();
-    let stereo = Stereographic::new(-23.55_f64.to_radians(), -46.63_f64.to_radians(), ellipsoid).unwrap();
+    let stereo =
+        Stereographic::new(-23.55_f64.to_radians(), -46.63_f64.to_radians(), ellipsoid).unwrap();
     let lcc = LambertConformalConic::new(
         33.0_f64.to_radians(),
         45.0_f64.to_radians(),

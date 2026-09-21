@@ -34,19 +34,23 @@ pub fn compute_route_deviation(
     let earth_radius = ell.a;
 
     // Segment bearing theta12 and distance
-    let seg_res = solver.inverse(segment_start, segment_end, &ell).unwrap_or_else(|_| {
-        HaversineSolver
-            .inverse(segment_start, segment_end, &ell)
-            .unwrap_or_else(|_| crate::geodesy::solvers::GeodeticResult::new(0.0, 0.0, 0.0))
-    });
+    let seg_res = solver
+        .inverse(segment_start, segment_end, &ell)
+        .unwrap_or_else(|_| {
+            HaversineSolver
+                .inverse(segment_start, segment_end, &ell)
+                .unwrap_or_else(|_| crate::geodesy::solvers::GeodeticResult::new(0.0, 0.0, 0.0))
+        });
     let theta12 = seg_res.initial_bearing;
 
     // Bearing and distance from start to position pos
-    let pos_res = solver.inverse(segment_start, pos, &ell).unwrap_or_else(|_| {
-        HaversineSolver
-            .inverse(segment_start, pos, &ell)
-            .unwrap_or_else(|_| crate::geodesy::solvers::GeodeticResult::new(0.0, 0.0, 0.0))
-    });
+    let pos_res = solver
+        .inverse(segment_start, pos, &ell)
+        .unwrap_or_else(|_| {
+            HaversineSolver
+                .inverse(segment_start, pos, &ell)
+                .unwrap_or_else(|_| crate::geodesy::solvers::GeodeticResult::new(0.0, 0.0, 0.0))
+        });
     let d13 = pos_res.distance;
     let theta13 = pos_res.initial_bearing;
 

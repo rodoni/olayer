@@ -104,6 +104,12 @@ fn test_wind_barb_southern_hemisphere() {
 }
 
 #[test]
+fn test_wind_barb_rejects_invalid_origin_coordinates() {
+    let invalid_origin = LatLon::new(std::f64::consts::PI, 0.0, 0.0);
+    assert!(generate_wind_barb(&invalid_origin, 10.0, 0.0, 1000.0, false).is_err());
+}
+
+#[test]
 fn test_sigmet_feature_and_dataset() {
     let mut dataset = SigmetDataset::new();
 

@@ -1,4 +1,7 @@
-#![expect(clippy::many_single_char_names, reason = "Variables follow standard geodetic notation")]
+#![expect(
+    clippy::many_single_char_names,
+    reason = "Variables follow standard geodetic notation"
+)]
 
 use crate::geodesy::coords::LatLon;
 use crate::geodesy::ellipsoid::Ellipsoid;

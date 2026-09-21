@@ -58,7 +58,9 @@ impl SymbolRegistry {
         scale_denominator: f64,
     ) -> Result<ResolvedSymbol, SymbologyError> {
         if !scale_denominator.is_finite() || scale_denominator < 0.0 {
-            return Err(SymbologyError::InvalidFormat("invalid scale denominator".to_string()));
+            return Err(SymbologyError::InvalidFormat(
+                "invalid scale denominator".to_string(),
+            ));
         }
         for provider in &self.providers {
             if provider.can_resolve(code) {
@@ -124,37 +126,41 @@ fn parse_hex_color(hex: &str) -> Option<Color> {
 }
 
 /// Apply matching SLD style rules to a resolved symbol.
-fn apply_sld_style(mut symbol: ResolvedSymbol, style: &StyleRegistry, scale: f64) -> ResolvedSymbol {
-        for rule in style.applicable_rules(&symbol.symbol_id, scale) {
-            if let Some(ref sld_stroke) = rule.stroke {
-                if let Some(sld_color) = parse_hex_color(&sld_stroke.color) {
-                    for primitive in &mut symbol.primitives {
-                        match primitive {
-                            SymbolPrimitive::Path { ref mut stroke, .. }
-                            | SymbolPrimitive::Circle { ref mut stroke, .. } => {
-                                *stroke = Some(crate::symbol_registry::primitives::Stroke {
-                                    color: sld_color,
-                                    width: sld_stroke.width,
-                                    dash_array: sld_stroke.dash_array.clone(),
-                                });
-                            }
-                            SymbolPrimitive::Text { .. } => {}
+fn apply_sld_style(
+    mut symbol: ResolvedSymbol,
+    style: &StyleRegistry,
+    scale: f64,
+) -> ResolvedSymbol {
+    for rule in style.applicable_rules(&symbol.symbol_id, scale) {
+        if let Some(ref sld_stroke) = rule.stroke {
+            if let Some(sld_color) = parse_hex_color(&sld_stroke.color) {
+                for primitive in &mut symbol.primitives {
+                    match primitive {
+                        SymbolPrimitive::Path { ref mut stroke, .. }
+                        | SymbolPrimitive::Circle { ref mut stroke, .. } => {
+                            *stroke = Some(crate::symbol_registry::primitives::Stroke {
+                                color: sld_color,
+                                width: sld_stroke.width,
+                                dash_array: sld_stroke.dash_array.clone(),
+                            });
                         }
+                        SymbolPrimitive::Text { .. } => {}
                     }
                 }
             }
-            if let Some(ref sld_fill) = rule.fill {
-                if let Some(mut sld_color) = parse_hex_color(&sld_fill.color) {
-                    sld_color.a = (sld_fill.opacity * 255.0) as u8;
-                    for primitive in &mut symbol.primitives {
-                        match primitive {
-                            SymbolPrimitive::Path { ref mut fill, .. }
-                            | SymbolPrimitive::Circle { ref mut fill, .. } => {
-                                *fill = Some(sld_color);
-                            }
-                            SymbolPrimitive::Text { .. } => {}
+        }
+        if let Some(ref sld_fill) = rule.fill {
+            if let Some(mut sld_color) = parse_hex_color(&sld_fill.color) {
+                sld_color.a = (sld_fill.opacity * 255.0) as u8;
+                for primitive in &mut symbol.primitives {
+                    match primitive {
+                        SymbolPrimitive::Path { ref mut fill, .. }
+                        | SymbolPrimitive::Circle { ref mut fill, .. } => {
+                            *fill = Some(sld_color);
                         }
+                        SymbolPrimitive::Text { .. } => {}
                     }
+                }
             }
         }
     }

@@ -26,12 +26,10 @@ impl NavaidType {
             .strip_prefix("icao:")
             .or_else(|| code.strip_prefix("ICAO:"))
             .unwrap_or_default();
-        if token.eq_ignore_ascii_case("vortac") || token.eq_ignore_ascii_case("vor_tac")
-        {
+        if token.eq_ignore_ascii_case("vortac") || token.eq_ignore_ascii_case("vor_tac") {
             return Some(NavaidType::VorTac);
         }
-        if token.eq_ignore_ascii_case("vordme") || token.eq_ignore_ascii_case("vor_dme")
-        {
+        if token.eq_ignore_ascii_case("vordme") || token.eq_ignore_ascii_case("vor_dme") {
             return Some(NavaidType::VorDme);
         }
         if token.eq_ignore_ascii_case("vor") {
@@ -46,8 +44,7 @@ impl NavaidType {
         if token.eq_ignore_ascii_case("ndb") {
             return Some(NavaidType::Ndb);
         }
-        if token.eq_ignore_ascii_case("heliport") || token.eq_ignore_ascii_case("heli")
-        {
+        if token.eq_ignore_ascii_case("heliport") || token.eq_ignore_ascii_case("heli") {
             return Some(NavaidType::Heliport);
         }
         if token.eq_ignore_ascii_case("airport")
@@ -59,14 +56,10 @@ impl NavaidType {
         if token.eq_ignore_ascii_case("waypoint") || token.eq_ignore_ascii_case("wpt") {
             return Some(NavaidType::Waypoint);
         }
-        if token.eq_ignore_ascii_case("intersection")
-            || token.eq_ignore_ascii_case("int")
-        {
+        if token.eq_ignore_ascii_case("intersection") || token.eq_ignore_ascii_case("int") {
             return Some(NavaidType::Intersection);
         }
-        if token.eq_ignore_ascii_case("runway")
-            || token.eq_ignore_ascii_case("threshold")
-        {
+        if token.eq_ignore_ascii_case("runway") || token.eq_ignore_ascii_case("threshold") {
             return Some(NavaidType::RunwayThreshold);
         }
         None

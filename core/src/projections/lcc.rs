@@ -32,9 +32,21 @@ impl LambertConformalConic {
         origin_lon_rad: f64,
         ellipsoid: Ellipsoid,
     ) -> Result<Self, ProjectionError> {
-        if [std_parallel_1_rad, std_parallel_2_rad, origin_lat_rad, origin_lon_rad]
-            .iter()
-            .any(|value| !value.is_finite())
+        if [
+            std_parallel_1_rad,
+            std_parallel_2_rad,
+            origin_lat_rad,
+            origin_lon_rad,
+        ]
+        .iter()
+        .any(|value| !value.is_finite())
+            || !(-std::f64::consts::FRAC_PI_2..=std::f64::consts::FRAC_PI_2)
+                .contains(&std_parallel_1_rad)
+            || !(-std::f64::consts::FRAC_PI_2..=std::f64::consts::FRAC_PI_2)
+                .contains(&std_parallel_2_rad)
+            || !(-std::f64::consts::FRAC_PI_2..=std::f64::consts::FRAC_PI_2)
+                .contains(&origin_lat_rad)
+            || !(-std::f64::consts::PI..=std::f64::consts::PI).contains(&origin_lon_rad)
         {
             return Err(ProjectionError::InvalidInput);
         }
@@ -113,10 +125,12 @@ impl Projection for LambertConformalConic {
 
         // Guard against latitudes near the poles where the projection formula
         // becomes numerically unstable.
-        let clamped_lat = lat.clamp(-CLAMP_LIMIT, CLAMP_LIMIT);
-        let sin_clamped = clamped_lat.sin();
+        if lat.abs() > CLAMP_LIMIT {
+            return Err(ProjectionError::InvalidInput);
+        }
+        let sin_clamped = lat.sin();
 
-        let t = (std::f64::consts::FRAC_PI_4 - clamped_lat / 2.0).tan()
+        let t = (std::f64::consts::FRAC_PI_4 - lat / 2.0).tan()
             * ((1.0 + self.e * sin_clamped) / (1.0 - self.e * sin_clamped)).powf(self.e / 2.0);
 
         let rho = self.ellipsoid.a * self.f_c * t.powf(self.n);
@@ -147,7 +161,11 @@ impl Projection for LambertConformalConic {
 
         let t = if rho.abs() < 1e-10 {
             return Ok(LatLon::new(
-                if self.n < 0.0 { -std::f64::consts::FRAC_PI_2 } else { std::f64::consts::FRAC_PI_2 },
+                if self.n < 0.0 {
+                    -std::f64::consts::FRAC_PI_2
+                } else {
+                    std::f64::consts::FRAC_PI_2
+                },
                 lon_normalized,
                 0.0,
             ));

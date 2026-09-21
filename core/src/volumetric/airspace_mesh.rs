@@ -43,17 +43,25 @@ pub fn generate_airspace_volume_mesh(
     let mut sum_lat = 0.0;
     let mut sum_lon = 0.0;
     for pt in polygon {
-        if !pt.lat.is_finite() || !pt.lon.is_finite() || !pt.height.is_finite()
+        if !pt.lat.is_finite()
+            || !pt.lon.is_finite()
+            || !pt.height.is_finite()
             || !(-std::f64::consts::FRAC_PI_2..=std::f64::consts::FRAC_PI_2).contains(&pt.lat)
             || !(-std::f64::consts::PI..=std::f64::consts::PI).contains(&pt.lon)
         {
-            return Err(VolumetricError::DegenerateGeometry("polygon contains invalid coordinates".to_string()));
+            return Err(VolumetricError::DegenerateGeometry(
+                "polygon contains invalid coordinates".to_string(),
+            ));
         }
         sum_lat += pt.lat;
         let reference = polygon[0].lon;
         let mut lon = pt.lon;
-        while lon - reference > std::f64::consts::PI { lon -= 2.0 * std::f64::consts::PI; }
-        while lon - reference < -std::f64::consts::PI { lon += 2.0 * std::f64::consts::PI; }
+        while lon - reference > std::f64::consts::PI {
+            lon -= 2.0 * std::f64::consts::PI;
+        }
+        while lon - reference < -std::f64::consts::PI {
+            lon += 2.0 * std::f64::consts::PI;
+        }
         sum_lon += lon;
     }
     let centroid = LatLon::new(sum_lat / n as f64, sum_lon / n as f64, 0.0);

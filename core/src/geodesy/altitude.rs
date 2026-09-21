@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use crate::geodesy::errors::GeodesyError;
+use serde::{Deserialize, Serialize};
 
 /// Vertical reference used by a geodetic height.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

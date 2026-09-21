@@ -2,8 +2,8 @@ use crate::sld::StyleRegistry;
 use crate::symbol_registry::errors::SymbologyError;
 use crate::symbol_registry::primitives::{ResolvedSymbol, SymbolPrimitive};
 use crate::symbol_registry::providers::SymbologyProvider;
-use serde::{Deserialize, Serialize};
 use ahash::AHashMap;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -59,31 +59,66 @@ impl DeclarativeProvider {
 }
 
 fn validate_symbol(code: &str, symbol: &DeclarativeSymbolDto) -> Result<(), SymbologyError> {
-    if code.trim().is_empty() || !symbol.bbox.0.is_finite() || !symbol.bbox.1.is_finite()
-        || !symbol.bbox.2.is_finite() || !symbol.bbox.3.is_finite()
-        || symbol.bbox.2 < symbol.bbox.0 || symbol.bbox.3 < symbol.bbox.1
-        || !symbol.anchor.0.is_finite() || !symbol.anchor.1.is_finite()
-        || symbol.anchor.0 < symbol.bbox.0 || symbol.anchor.0 > symbol.bbox.2
-        || symbol.anchor.1 < symbol.bbox.1 || symbol.anchor.1 > symbol.bbox.3
+    if code.trim().is_empty()
+        || !symbol.bbox.0.is_finite()
+        || !symbol.bbox.1.is_finite()
+        || !symbol.bbox.2.is_finite()
+        || !symbol.bbox.3.is_finite()
+        || symbol.bbox.2 < symbol.bbox.0
+        || symbol.bbox.3 < symbol.bbox.1
+        || !symbol.anchor.0.is_finite()
+        || !symbol.anchor.1.is_finite()
+        || symbol.anchor.0 < symbol.bbox.0
+        || symbol.anchor.0 > symbol.bbox.2
+        || symbol.anchor.1 < symbol.bbox.1
+        || symbol.anchor.1 > symbol.bbox.3
     {
-        return Err(SymbologyError::InvalidFormat(format!("invalid geometry for symbol '{code}'")));
+        return Err(SymbologyError::InvalidFormat(format!(
+            "invalid geometry for symbol '{code}'"
+        )));
     }
     for primitive in &symbol.primitives {
         match primitive {
-            SymbolPrimitive::Path { commands, stroke, .. } => {
+            SymbolPrimitive::Path {
+                commands, stroke, ..
+            } => {
                 if commands.trim().is_empty() || stroke.as_ref().is_some_and(|s| !valid_stroke(s)) {
-                    return Err(SymbologyError::InvalidFormat(format!("invalid path for symbol '{code}'")));
+                    return Err(SymbologyError::InvalidFormat(format!(
+                        "invalid path for symbol '{code}'"
+                    )));
                 }
             }
-            SymbolPrimitive::Circle { cx, cy, r, stroke, .. } => {
-                if !cx.is_finite() || !cy.is_finite() || !r.is_finite() || *r < 0.0
+            SymbolPrimitive::Circle {
+                cx, cy, r, stroke, ..
+            } => {
+                if !cx.is_finite()
+                    || !cy.is_finite()
+                    || !r.is_finite()
+                    || *r < 0.0
                     || stroke.as_ref().is_some_and(|s| !valid_stroke(s))
-                { return Err(SymbologyError::InvalidFormat(format!("invalid circle for symbol '{code}'"))); }
+                {
+                    return Err(SymbologyError::InvalidFormat(format!(
+                        "invalid circle for symbol '{code}'"
+                    )));
+                }
             }
-            SymbolPrimitive::Text { offset_x, offset_y, font_size, content, .. } => {
-                if !offset_x.is_finite() || !offset_y.is_finite() || !font_size.is_finite()
-                    || *font_size < 0.0 || content.is_empty()
-                { return Err(SymbologyError::InvalidFormat(format!("invalid text for symbol '{code}'"))); }
+            SymbolPrimitive::Text {
+                offset_x,
+                offset_y,
+                font_size,
+                content,
+                ..
+            } => {
+                if !offset_x.is_finite()
+                    || !offset_y.is_finite()
+                    || !font_size.is_finite()
+                    || *font_size < 0.0
+                    || content.is_empty()
+                {
+                    return Err(SymbologyError::InvalidFormat(format!(
+                        "invalid text for symbol '{code}'"
+                    )));
+                }
             }
         }
     }
@@ -91,10 +126,12 @@ fn validate_symbol(code: &str, symbol: &DeclarativeSymbolDto) -> Result<(), Symb
 }
 
 fn valid_stroke(stroke: &crate::symbol_registry::primitives::Stroke) -> bool {
-    stroke.width.is_finite() && stroke.width >= 0.0
-        && stroke.dash_array.as_ref().is_none_or(|dashes| {
-            dashes.iter().all(|dash| dash.is_finite() && *dash >= 0.0)
-        })
+    stroke.width.is_finite()
+        && stroke.width >= 0.0
+        && stroke
+            .dash_array
+            .as_ref()
+            .is_none_or(|dashes| dashes.iter().all(|dash| dash.is_finite() && *dash >= 0.0))
 }
 
 impl SymbologyProvider for DeclarativeProvider {

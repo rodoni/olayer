@@ -3,6 +3,11 @@ use flate2::read::{DeflateDecoder, ZlibDecoder};
 use serde::{Deserialize, Serialize};
 use std::io::Read;
 
+const MAX_RASTER_PIXELS: usize = 16_777_216;
+const MAX_IFD_ENTRIES: usize = 1_000_000;
+const MAX_RASTER_STRIPS: usize = 1_000_000;
+const MAX_DECODED_STRIP_BYTES: usize = 256 * 1024 * 1024;
+
 /// Decoded Cloud-Optimized GeoTIFF or standard GeoTIFF elevation raster.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GeoTiffTile {
@@ -59,7 +64,15 @@ impl GeoTiffTile {
         }
 
         // Parse IFD entries
-        let num_entries = read_u16(&data[first_ifd_offset..first_ifd_offset + 2], is_le) as usize;
+        let entry_count_end = first_ifd_offset.checked_add(2).ok_or_else(|| {
+            TerrainError::GeoTiffError("IFD entry count offset overflow".to_string())
+        })?;
+        let num_entries = read_u16(&data[first_ifd_offset..entry_count_end], is_le) as usize;
+        if num_entries > MAX_IFD_ENTRIES {
+            return Err(TerrainError::GeoTiffError(
+                "too many GeoTIFF directory entries".to_string(),
+            ));
+        }
         let mut width: usize = 0;
         let mut height: usize = 0;
         let mut bits_per_sample: usize = 32;
@@ -73,11 +86,22 @@ impl GeoTiffTile {
         let mut tiepoints: Vec<[f64; 6]> = Vec::new();
         let mut nodata_val: Option<f64> = None;
 
-        let entry_base = first_ifd_offset + 2;
+        let entry_base = entry_count_end;
         for i in 0..num_entries {
-            let offset = entry_base + i * 12;
-            if offset + 12 > data.len() {
-                break;
+            let offset = entry_base
+                .checked_add(i.checked_mul(12).ok_or_else(|| {
+                    TerrainError::GeoTiffError("IFD entry offset overflow".to_string())
+                })?)
+                .ok_or_else(|| {
+                    TerrainError::GeoTiffError("IFD entry offset overflow".to_string())
+                })?;
+            let entry_end = offset.checked_add(12).ok_or_else(|| {
+                TerrainError::GeoTiffError("IFD entry range overflow".to_string())
+            })?;
+            if entry_end > data.len() {
+                return Err(TerrainError::GeoTiffError(
+                    "truncated GeoTIFF directory entry".to_string(),
+                ));
             }
 
             let tag = read_u16(&data[offset..offset + 2], is_le);
@@ -175,6 +199,11 @@ impl GeoTiffTile {
                 "No raster data strip/tile offsets found".to_string(),
             ));
         }
+        if strip_offsets.len() > MAX_RASTER_STRIPS {
+            return Err(TerrainError::GeoTiffError(
+                "too many GeoTIFF raster strips".to_string(),
+            ));
+        }
 
         // Calculate geographic bounding box in radians
         let bounds_rad = if let (Some(scale), Some(tp)) = (pixel_scale, tiepoints.first()) {
@@ -215,6 +244,11 @@ impl GeoTiffTile {
         let raster_len = width
             .checked_mul(height)
             .ok_or_else(|| TerrainError::GeoTiffError("raster dimensions overflow".to_string()))?;
+        if raster_len > MAX_RASTER_PIXELS {
+            return Err(TerrainError::GeoTiffError(
+                "GeoTIFF raster exceeds supported pixel limit".to_string(),
+            ));
+        }
         let mut elevations = vec![None; raster_len];
         let tiles_across = tile_width.map(|tile| width.div_ceil(tile)).unwrap_or(0);
         for (strip_index, &strip_offset) in strip_offsets.iter().enumerate() {
@@ -362,19 +396,29 @@ impl GeoTiffTile {
 
 fn decode_deflate(data: &[u8]) -> Result<Vec<u8>, TerrainError> {
     let mut decoded = Vec::with_capacity(data.len());
-    if ZlibDecoder::new(data).read_to_end(&mut decoded).is_ok() {
+    if read_limited(ZlibDecoder::new(data), &mut decoded).is_ok() {
         return Ok(decoded);
     }
 
     decoded.clear();
-    DeflateDecoder::new(data)
-        .read_to_end(&mut decoded)
-        .map_err(|error| {
-            TerrainError::GeoTiffError(format!(
-                "Failed to decompress Deflate raster strip: {error}"
-            ))
-        })?;
+    read_limited(DeflateDecoder::new(data), &mut decoded).map_err(|error| {
+        TerrainError::GeoTiffError(format!(
+            "Failed to decompress Deflate raster strip: {error}"
+        ))
+    })?;
     Ok(decoded)
+}
+
+fn read_limited<R: Read>(reader: R, output: &mut Vec<u8>) -> std::io::Result<()> {
+    let limit = MAX_DECODED_STRIP_BYTES as u64;
+    reader.take(limit + 1).read_to_end(output)?;
+    if output.len() > MAX_DECODED_STRIP_BYTES {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "GeoTIFF decompressed strip exceeds supported size",
+        ));
+    }
+    Ok(())
 }
 
 fn decode_samples(
@@ -567,6 +611,14 @@ fn read_field_val_u32(
     val_offset: usize,
     is_le: bool,
 ) -> Result<u32, TerrainError> {
+    let value_end = val_offset
+        .checked_add(4)
+        .ok_or_else(|| TerrainError::GeoTiffError("field value offset overflow".to_string()))?;
+    if value_end > data.len() {
+        return Err(TerrainError::GeoTiffError(
+            "field value out of bounds".to_string(),
+        ));
+    }
     match field_type {
         3 => {
             // SHORT (u16) stored directly in first 2 bytes of value field
@@ -587,6 +639,11 @@ fn read_offset_list(
     val_offset: usize,
     is_le: bool,
 ) -> Result<Vec<usize>, TerrainError> {
+    if count > MAX_RASTER_STRIPS {
+        return Err(TerrainError::GeoTiffError(
+            "GeoTIFF offset list is too large".to_string(),
+        ));
+    }
     let mut list = Vec::with_capacity(count);
     if count == 1 {
         let val = read_field_val_u32(data, field_type, count, val_offset, is_le)? as usize;
@@ -594,7 +651,15 @@ fn read_offset_list(
         return Ok(list);
     }
 
-    let ptr = read_u32(&data[val_offset..val_offset + 4], is_le) as usize;
+    let ptr_end = val_offset
+        .checked_add(4)
+        .ok_or_else(|| TerrainError::GeoTiffError("offset list pointer overflow".to_string()))?;
+    if ptr_end > data.len() {
+        return Err(TerrainError::GeoTiffError(
+            "offset list pointer out of bounds".to_string(),
+        ));
+    }
+    let ptr = read_u32(&data[val_offset..ptr_end], is_le) as usize;
     if ptr >= data.len() {
         return Ok(list);
     }
@@ -602,16 +667,20 @@ fn read_offset_list(
     match field_type {
         3 => {
             for i in 0..count {
-                let off = ptr + i * 2;
-                if off + 2 <= data.len() {
+                let Some(off) = ptr.checked_add(i.saturating_mul(2)) else {
+                    break;
+                };
+                if off.checked_add(2).is_some_and(|end| end <= data.len()) {
                     list.push(read_u16(&data[off..off + 2], is_le) as usize);
                 }
             }
         }
         4 => {
             for i in 0..count {
-                let off = ptr + i * 4;
-                if off + 4 <= data.len() {
+                let Some(off) = ptr.checked_add(i.saturating_mul(4)) else {
+                    break;
+                };
+                if off.checked_add(4).is_some_and(|end| end <= data.len()) {
                     list.push(read_u32(&data[off..off + 4], is_le) as usize);
                 }
             }
@@ -628,6 +697,11 @@ fn read_double_list(
     val_offset: usize,
     is_le: bool,
 ) -> Result<Vec<f64>, TerrainError> {
+    if count > MAX_IFD_ENTRIES {
+        return Err(TerrainError::GeoTiffError(
+            "GeoTIFF double list is too large".to_string(),
+        ));
+    }
     let mut list = Vec::with_capacity(count);
     let ptr_end = val_offset
         .checked_add(4)
@@ -644,7 +718,13 @@ fn read_double_list(
     }
 
     for i in 0..count {
-        let off = ptr + i * 8;
+        let off = ptr
+            .checked_add(i.checked_mul(8).ok_or_else(|| {
+                TerrainError::GeoTiffError("double list element offset overflow".to_string())
+            })?)
+            .ok_or_else(|| {
+                TerrainError::GeoTiffError("double list element offset overflow".to_string())
+            })?;
         let val = if is_le {
             f64::from_le_bytes([
                 data[off],
@@ -692,7 +772,15 @@ fn read_ascii_string(
             .map_err(|e| TerrainError::GeoTiffError(e.to_string()))?;
         Ok(s.to_string())
     } else {
-        let ptr = read_u32(&data[val_offset..val_offset + 4], is_le) as usize;
+        let ptr_end = val_offset
+            .checked_add(4)
+            .ok_or_else(|| TerrainError::GeoTiffError("ASCII pointer overflow".to_string()))?;
+        if ptr_end > data.len() {
+            return Err(TerrainError::GeoTiffError(
+                "ASCII pointer out of bounds".to_string(),
+            ));
+        }
+        let ptr = read_u32(&data[val_offset..ptr_end], is_le) as usize;
         if let Some(end) = ptr.checked_add(count).filter(|end| *end <= data.len()) {
             let s = std::str::from_utf8(&data[ptr..end])
                 .map_err(|e| TerrainError::GeoTiffError(e.to_string()))?;

@@ -73,7 +73,9 @@ pub fn generate_isolines_rad(
     let d_lat = max_lat - min_lat;
     let d_lon = max_lon - min_lon;
 
-    let mut segments = Vec::new();
+    let cell_count = (width - 1).saturating_mul(height - 1);
+    let estimated_segments = cell_count.saturating_mul(isovalues.len()).min(1_000_000);
+    let mut segments = Vec::with_capacity(estimated_segments);
 
     // Helper to map continuous grid cell coordinate (c_f, r_f) to geodetic LatLon
     let cell_to_latlon = |c_f: f64, r_f: f64| -> LatLon {

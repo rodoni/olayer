@@ -101,7 +101,7 @@ fn test_camera_error_display() {
 
 #[test]
 fn test_camera_rejects_non_finite_projection_values() {
-        let projection = WebMercator::new(Ellipsoid::wgs84()).unwrap();
+    let projection = WebMercator::new(Ellipsoid::wgs84()).unwrap();
     let camera = CameraState::new(
         LatLon::new(0.0, 0.0, 0.0),
         f64::MIN_POSITIVE,

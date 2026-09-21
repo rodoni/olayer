@@ -36,9 +36,7 @@ pub fn generate_wind_barb(
     staff_length_meters: f64,
     is_southern_hemisphere: bool,
 ) -> Result<WindBarbGeometry, WeatherError> {
-    if !origin.lat.is_finite()
-        || !origin.lon.is_finite()
-        || !origin.height.is_finite()
+    if origin.validate().is_err()
         || !speed_knots.is_finite()
         || speed_knots < 0.0
         || !direction_rad.is_finite()
@@ -98,8 +96,8 @@ pub fn generate_wind_barb(
     let half_barb_length = barb_length * 0.5;
     let slot_spacing = staff_length_meters * 0.12;
 
-    let mut barbs = Vec::new();
-    let mut pennants = Vec::new();
+    let mut barbs = Vec::with_capacity(num_full_barbs + usize::from(num_half_barbs > 0));
+    let mut pennants = Vec::with_capacity(num_pennants);
 
     let mut current_slot = 0.0;
 

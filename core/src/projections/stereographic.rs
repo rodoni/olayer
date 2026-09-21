@@ -20,8 +20,18 @@ pub struct Stereographic {
 impl Stereographic {
     /// Creates a new Ellipsoidal Stereographic projection.
     #[inline]
-    pub fn new(center_lat_rad: f64, center_lon_rad: f64, ellipsoid: Ellipsoid) -> Result<Self, ProjectionError> {
-        if !center_lat_rad.is_finite() || !center_lon_rad.is_finite() || ellipsoid.a <= 0.0 {
+    pub fn new(
+        center_lat_rad: f64,
+        center_lon_rad: f64,
+        ellipsoid: Ellipsoid,
+    ) -> Result<Self, ProjectionError> {
+        if !center_lat_rad.is_finite()
+            || !center_lon_rad.is_finite()
+            || !(-std::f64::consts::FRAC_PI_2..=std::f64::consts::FRAC_PI_2)
+                .contains(&center_lat_rad)
+            || !(-std::f64::consts::PI..=std::f64::consts::PI).contains(&center_lon_rad)
+            || ellipsoid.a <= 0.0
+        {
             return Err(ProjectionError::InvalidInput);
         }
         let a = ellipsoid.a;

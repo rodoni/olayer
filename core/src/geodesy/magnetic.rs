@@ -168,6 +168,11 @@ impl MagneticCoefficients {
                     "Degree n must be at least 1 in line '{line}'"
                 )));
             }
+            if n > MAX_SUPPORTED_MAGNETIC_DEGREE {
+                return Err(GeodesyError::MagneticModelError(format!(
+                    "Degree n exceeds supported maximum ({MAX_SUPPORTED_MAGNETIC_DEGREE}) in line '{line}'"
+                )));
+            }
             if !g.is_finite() || !h.is_finite() || !g_dot.is_finite() || !h_dot.is_finite() {
                 return Err(GeodesyError::MagneticModelError(format!(
                     "Magnetic coefficients must be finite in line '{line}'"
@@ -963,9 +968,24 @@ pub(crate) const WMM2025_COEFFS: [MagneticCoeffEntry; 90] = [
 ///
 /// Supports built-in WMM-2025 as well as dynamic loading of future models
 /// (e.g. WMM-2030, WMM-2035, custom regional models) from standard `WMM.COF` files or strings.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct MagneticModel {
     coeffs: MagneticCoefficients,
+}
+
+#[derive(Deserialize)]
+struct MagneticModelWire {
+    coeffs: MagneticCoefficients,
+}
+
+impl<'de> Deserialize<'de> for MagneticModel {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let wire = MagneticModelWire::deserialize(deserializer)?;
+        Self::new(wire.coeffs).map_err(serde::de::Error::custom)
+    }
 }
 
 impl Default for MagneticModel {

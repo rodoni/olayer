@@ -81,9 +81,21 @@ pub fn decode_rgba_buffer(
     let pixel_count = width
         .checked_mul(height)
         .ok_or_else(|| TerrainError::RgbDecodeError("image dimensions overflow".to_string()))?;
-    if let RgbElevationEncoding::Custom { offset, r_scale, g_scale, b_scale } = encoding {
-        if !offset.is_finite() || !r_scale.is_finite() || !g_scale.is_finite() || !b_scale.is_finite() {
-            return Err(TerrainError::RgbDecodeError("custom RGB coefficients must be finite".to_string()));
+    if let RgbElevationEncoding::Custom {
+        offset,
+        r_scale,
+        g_scale,
+        b_scale,
+    } = encoding
+    {
+        if !offset.is_finite()
+            || !r_scale.is_finite()
+            || !g_scale.is_finite()
+            || !b_scale.is_finite()
+        {
+            return Err(TerrainError::RgbDecodeError(
+                "custom RGB coefficients must be finite".to_string(),
+            ));
         }
     }
     let expected_len = pixel_count
@@ -107,7 +119,11 @@ pub fn decode_rgba_buffer(
         let b = chunk[2];
         let elev = decode_rgb_elevation(r, g, b, encoding);
         let value = elev as f32;
-        if !value.is_finite() { return Err(TerrainError::RgbDecodeError("decoded elevation is not finite".to_string())); }
+        if !value.is_finite() {
+            return Err(TerrainError::RgbDecodeError(
+                "decoded elevation is not finite".to_string(),
+            ));
+        }
         elevations.push(value);
     }
 
@@ -149,7 +165,11 @@ pub fn decode_rgb_buffer(
         let b = chunk[2];
         let elev = decode_rgb_elevation(r, g, b, encoding);
         let value = elev as f32;
-        if !value.is_finite() { return Err(TerrainError::RgbDecodeError("decoded elevation is not finite".to_string())); }
+        if !value.is_finite() {
+            return Err(TerrainError::RgbDecodeError(
+                "decoded elevation is not finite".to_string(),
+            ));
+        }
         elevations.push(value);
     }
 

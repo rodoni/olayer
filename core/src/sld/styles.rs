@@ -18,7 +18,9 @@ impl StyleRegistry {
     /// Returns the rules for a given layer whose scale range contains `scale_denominator`.
     #[inline]
     pub fn get_applicable_rules(&self, layer_name: &str, scale_denominator: f64) -> Vec<RuleStyle> {
-        self.applicable_rules(layer_name, scale_denominator).cloned().collect()
+        self.applicable_rules(layer_name, scale_denominator)
+            .cloned()
+            .collect()
     }
 
     /// Iterates over applicable rules without cloning style data.

@@ -1,8 +1,6 @@
 use crate::declutter::engine::DeclutterEngine;
 use crate::declutter::spatial_grid::{line_segments_intersect, SpatialHashGrid};
-use crate::declutter::types::{
-    DeclutterConfig, LabelTarget, OctantDirection, Rect2D, TargetId,
-};
+use crate::declutter::types::{DeclutterConfig, LabelTarget, OctantDirection, Rect2D, TargetId};
 use serde_json::json;
 
 #[test]

@@ -244,11 +244,14 @@ impl TerrainEngine {
         lat_rad: f64,
         lon_rad: f64,
     ) -> Result<ElevationSample, TerrainError> {
-        if !lat_rad.is_finite() || !lon_rad.is_finite()
+        if !lat_rad.is_finite()
+            || !lon_rad.is_finite()
             || !(-std::f64::consts::FRAC_PI_2..=std::f64::consts::FRAC_PI_2).contains(&lat_rad)
             || !(-std::f64::consts::PI..=std::f64::consts::PI).contains(&lon_rad)
         {
-            return Err(TerrainError::InvalidInput("latitude/longitude must be finite and in range".to_string()));
+            return Err(TerrainError::InvalidInput(
+                "latitude/longitude must be finite and in range".to_string(),
+            ));
         }
         let lat_deg = lat_rad.to_degrees();
         let lon_deg = lon_rad.to_degrees();

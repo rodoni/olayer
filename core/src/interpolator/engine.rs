@@ -7,6 +7,7 @@ use ahash::AHashMap;
 
 pub struct InterpolationEngine {
     targets: AHashMap<String, TargetState>,
+    sorted_target_ids: Vec<String>,
     stale_threshold: f64,
     // Cached solver/ellipsoid instances to avoid reconstructing them every frame.
     vincenty: VincentySolver,
@@ -21,6 +22,7 @@ impl InterpolationEngine {
     pub fn new() -> Self {
         Self {
             targets: AHashMap::new(),
+            sorted_target_ids: Vec::new(),
             stale_threshold: 30.0,
             vincenty: VincentySolver,
             haversine: HaversineSolver,
@@ -42,6 +44,7 @@ impl InterpolationEngine {
         }
         Ok(Self {
             targets: AHashMap::new(),
+            sorted_target_ids: Vec::new(),
             stale_threshold,
             vincenty: VincentySolver,
             haversine: HaversineSolver,
@@ -58,14 +61,31 @@ impl InterpolationEngine {
     #[inline]
     pub fn update_target(&mut self, state: TargetState) -> Result<(), InterpolatorError> {
         state.validate()?;
-        self.targets.insert(state.id.clone(), state);
+        let id = state.id.clone();
+        if !self.targets.contains_key(&id) {
+            let insertion = self
+                .sorted_target_ids
+                .binary_search(&id)
+                .unwrap_or_else(|index| index);
+            self.sorted_target_ids.insert(insertion, id.clone());
+        }
+        self.targets.insert(id, state);
         Ok(())
     }
 
     /// Removes a target by its identifier. Returns `true` if the target was present.
     #[inline]
     pub fn remove_target(&mut self, id: &str) -> bool {
-        self.targets.remove(id).is_some()
+        let removed = self.targets.remove(id).is_some();
+        if removed {
+            if let Ok(index) = self
+                .sorted_target_ids
+                .binary_search_by(|candidate| candidate.as_str().cmp(id))
+            {
+                self.sorted_target_ids.remove(index);
+            }
+        }
+        removed
     }
 
     /// Interpolates the positions of all active targets to the given `current_time`.
@@ -99,9 +119,7 @@ impl InterpolationEngine {
         let mut results = Vec::with_capacity(self.targets.len());
         let mut skipped = Vec::with_capacity(self.targets.len());
 
-        let mut ids: Vec<&String> = self.targets.keys().collect();
-        ids.sort_unstable();
-        for id in ids {
+        for id in &self.sorted_target_ids {
             let state = &self.targets[id];
             if !current_time.is_finite() || !state.last_ping_time.is_finite() {
                 skipped.push(SkippedTarget {

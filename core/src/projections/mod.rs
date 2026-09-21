@@ -52,6 +52,17 @@ pub trait Projection {
             .map_err(|_| ProjectionError::InvalidCameraState)?;
         let (cx, cy) = self.project(&camera.center)?;
 
+        let max_f32 = f32::MAX as f64;
+        if !cx.is_finite()
+            || !cy.is_finite()
+            || cx.abs() > max_f32
+            || cy.abs() > max_f32
+            || !camera.rotation.is_finite()
+            || camera.rotation.abs() > max_f32
+        {
+            return Err(ProjectionError::InvalidInput);
+        }
+
         let view_trans = matrix::Matrix4::translation(-cx as f32, -cy as f32, 0.0);
         let view_rot = matrix::Matrix4::rotation_z(-camera.rotation as f32);
         let view = view_rot.multiply(&view_trans);

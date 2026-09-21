@@ -19,15 +19,44 @@ pub enum SigmetHazardType {
 
 impl SigmetHazardType {
     pub fn from_str_name(name: &str) -> Self {
-        match name.trim().to_uppercase().as_str() {
-            "TS" | "THUNDERSTORM" | "CONVECTIVE" | "EMBD_TS" => Self::Thunderstorm,
-            "TURB" | "TURBULENCE" | "SEV_TURB" | "CAT" => Self::Turbulence,
-            "ICE" | "ICING" | "SEV_ICE" => Self::Icing,
-            "VA" | "VOLCANIC_ASH" | "ASH" => Self::VolcanicAsh,
-            "TC" | "TROPICAL_CYCLONE" | "HURRICANE" | "TYPHOON" => Self::TropicalCyclone,
-            "MTW" | "MOUNTAIN_WAVE" => Self::MountainWave,
-            "DS" | "DUSTSTORM" | "SANDSTORM" => Self::Duststorm,
-            _ => Self::Other,
+        let name = name.trim();
+        if ["TS", "THUNDERSTORM", "CONVECTIVE", "EMBD_TS"]
+            .iter()
+            .any(|alias| name.eq_ignore_ascii_case(alias))
+        {
+            Self::Thunderstorm
+        } else if ["TURB", "TURBULENCE", "SEV_TURB", "CAT"]
+            .iter()
+            .any(|alias| name.eq_ignore_ascii_case(alias))
+        {
+            Self::Turbulence
+        } else if ["ICE", "ICING", "SEV_ICE"]
+            .iter()
+            .any(|alias| name.eq_ignore_ascii_case(alias))
+        {
+            Self::Icing
+        } else if ["VA", "VOLCANIC_ASH", "ASH"]
+            .iter()
+            .any(|alias| name.eq_ignore_ascii_case(alias))
+        {
+            Self::VolcanicAsh
+        } else if ["TC", "TROPICAL_CYCLONE", "HURRICANE", "TYPHOON"]
+            .iter()
+            .any(|alias| name.eq_ignore_ascii_case(alias))
+        {
+            Self::TropicalCyclone
+        } else if ["MTW", "MOUNTAIN_WAVE"]
+            .iter()
+            .any(|alias| name.eq_ignore_ascii_case(alias))
+        {
+            Self::MountainWave
+        } else if ["DS", "DUSTSTORM", "SANDSTORM"]
+            .iter()
+            .any(|alias| name.eq_ignore_ascii_case(alias))
+        {
+            Self::Duststorm
+        } else {
+            Self::Other
         }
     }
 }
@@ -42,9 +71,11 @@ pub enum SigmetSeverity {
 
 impl SigmetSeverity {
     pub fn from_str_name(name: &str) -> Self {
-        match name.trim().to_uppercase().as_str() {
-            "SEV" | "SEVERE" => Self::Severe,
-            _ => Self::Moderate,
+        let name = name.trim();
+        if name.eq_ignore_ascii_case("SEV") || name.eq_ignore_ascii_case("SEVERE") {
+            Self::Severe
+        } else {
+            Self::Moderate
         }
     }
 }
@@ -69,7 +100,7 @@ impl SigmetFeature {
         if self.polygon.len() < 3 {
             return false;
         }
-        GeodesicPolygon::new(self.polygon.clone()).contains_point(point)
+        GeodesicPolygon::contains_point_vertices(&self.polygon, point)
     }
 
     /// Returns true if the 3D position (latitude, longitude, altitude) is inside the hazard volume.
