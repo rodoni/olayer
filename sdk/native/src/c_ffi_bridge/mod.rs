@@ -494,7 +494,8 @@ pub unsafe extern "C" fn olayer_terrain_engine_get_vertical_profile(
         || route_height.is_null()
         || out_profile.is_null()
         || out_count.is_null()
-    || route_len > 1_000_000 {
+        || route_len > 1_000_000
+    {
         return -1;
     }
 
@@ -1610,7 +1611,9 @@ pub unsafe extern "C" fn olayer_weather_generate_isolines(
     if grid.is_null() || isovalues.is_null() || out_segments.is_null() || out_count.is_null() {
         return -1;
     }
-    let Some(grid_len) = width.checked_mul(height) else { return -2; };
+    let Some(grid_len) = width.checked_mul(height) else {
+        return -2;
+    };
     let grid_slice = std::slice::from_raw_parts(grid, grid_len);
     let iso_slice = std::slice::from_raw_parts(isovalues, isovalues_count);
     let bounds_rad = (

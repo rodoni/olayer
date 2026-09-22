@@ -181,10 +181,15 @@ pub fn project_lla_to_screen(
         let ty = xy.1 - cx_cy.1;
         let rx = tx * (-camera.rotation).cos() - ty * (-camera.rotation).sin();
         let ry = tx * (-camera.rotation).sin() + ty * (-camera.rotation).cos();
-        if !camera.zoom.is_finite() || camera.zoom <= 0.0
-            || !camera.aspect_ratio.is_finite() || camera.aspect_ratio <= 0.0
-            || !camera.viewport_base_meters.is_finite() || camera.viewport_base_meters <= 0.0
-        { return None; }
+        if !camera.zoom.is_finite()
+            || camera.zoom <= 0.0
+            || !camera.aspect_ratio.is_finite()
+            || camera.aspect_ratio <= 0.0
+            || !camera.viewport_base_meters.is_finite()
+            || camera.viewport_base_meters <= 0.0
+        {
+            return None;
+        }
         let w_meters = (camera.viewport_base_meters / camera.zoom) as f32;
         let aspect = camera.aspect_ratio as f32;
         let h_meters = w_meters / aspect;

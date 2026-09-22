@@ -370,9 +370,9 @@ fn main() {
                                             }
                                         } else {
                                             ui.colored_label(egui::Color32::from_rgb(0, 230, 118), "✓ Registered in MapDataStack");
-                                            
+
                                             ui.separator();
-                                            
+
                                             // Tile settings
                                             ui.horizontal(|ui| {
                                                 ui.checkbox(&mut auto_zoom, "Auto Zoom");
@@ -397,7 +397,7 @@ fn main() {
                                             ui.checkbox(&mut auto_fetch_tiles, "Auto-Request visible tiles");
 
                                             let source = geoserver_source.as_ref().unwrap();
-                                            
+
                                             if auto_fetch_tiles {
                                                 for key in &visible_keys {
                                                     let parts: Vec<&str> = key.split('/').collect();
@@ -434,7 +434,7 @@ fn main() {
 
                                             if is_loaded {
                                                 ui.colored_label(egui::Color32::from_rgb(0, 230, 118), "Status: Loaded in Memory");
-                                                
+
                                                 // Load into egui texture if not already done
                                                 let texture = egui_tile_textures.entry(tile_key.clone()).or_insert_with(|| {
                                                     let pixels = source.get_tile_pixels(tx, ty, tile_zoom).unwrap();
@@ -444,7 +444,7 @@ fn main() {
                                                         Default::default()
                                                     )
                                                 });
-                                                
+
                                                 // Draw the tile preview
                                                 ui.separator();
                                                 ui.label("Preview (256x256):");
@@ -550,7 +550,7 @@ fn main() {
                             size_in_pixels: [config.width, config.height],
                             pixels_per_point: full_output.pixels_per_point,
                         };
-                        
+
                         let cmd_buffers = egui_renderer.update_buffers(
                             &device,
                             &queue,

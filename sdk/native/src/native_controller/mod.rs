@@ -23,11 +23,14 @@ pub struct NativeController {
 
 impl NativeController {
     pub fn new(center_lat: f64, center_lon: f64) -> Self {
-        let projection = Box::new(Stereographic::new(
-            center_lat,
-            center_lon,
-            olayer_core::geodesy::ellipsoid::Ellipsoid::wgs84(),
-        ).expect("finite camera center and WGS84 produce a valid stereographic projection"));
+        let projection = Box::new(
+            Stereographic::new(
+                center_lat,
+                center_lon,
+                olayer_core::geodesy::ellipsoid::Ellipsoid::wgs84(),
+            )
+            .expect("finite camera center and WGS84 produce a valid stereographic projection"),
+        );
 
         let camera = CameraState::with_attitude(
             LatLon::new(center_lat, center_lon, 0.0),

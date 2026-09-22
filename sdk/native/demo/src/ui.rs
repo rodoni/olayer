@@ -73,7 +73,10 @@ pub fn draw_flight_profile(
                 egui::pos2(get_x(0.0), ac_y),
                 egui::pos2(get_x(max_dist), ac_y),
             ],
-            egui::Stroke::new(2.0_f32, egui::Color32::from_rgba_unmultiplied(0, 176, 255, 128)),
+            egui::Stroke::new(
+                2.0_f32,
+                egui::Color32::from_rgba_unmultiplied(0, 176, 255, 128),
+            ),
         );
 
         // Draw aircraft dot (represented at 30km distance)

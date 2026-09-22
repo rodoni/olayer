@@ -575,7 +575,9 @@ impl WasmProjection {
                 );
                 Box::new(stereo.expect("validated stereographic parameters"))
             }
-            WasmProjectionType::WebMercator => Box::new(WebMercator::new(Ellipsoid::wgs84()).expect("WGS84 is valid")),
+            WasmProjectionType::WebMercator => {
+                Box::new(WebMercator::new(Ellipsoid::wgs84()).expect("WGS84 is valid"))
+            }
         }
     }
 
