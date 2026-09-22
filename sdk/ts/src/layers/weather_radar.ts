@@ -22,7 +22,7 @@ export interface RadarGridData {
  */
 export class WeatherRadarLayer extends Layer {
   public palette: RadarPaletteType;
-  public opacity: number;
+  public override opacity: number;
 
   private currentGrid: RadarGridData | null = null;
   private colorizedRgba: Uint8Array | null = null;
@@ -144,11 +144,11 @@ export class WeatherRadarLayer extends Layer {
     }
   }
 
-  public renderStatic(_gl: WebGL2RenderingContext, _viewProjMatrix: Float32Array): void {
+  public override renderStatic(_gl: WebGL2RenderingContext, _viewProjMatrix: Float32Array): void {
     // WebGL texture quad rendering hook
   }
 
-  public renderDynamic(_ctx: CanvasRenderingContext2D, _currentTime: number): void {
+  public override renderDynamic(_ctx: CanvasRenderingContext2D, _currentTime: number): void {
     if (!this.visible || !this.currentGrid || !this.offscreenCanvas) return;
     // Dynamic overlay rendering
   }

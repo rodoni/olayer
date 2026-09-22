@@ -1,5 +1,13 @@
 import { WasmProjection, lla_to_ecef } from "olayer-wasm";
 
+function readNumber(values: ArrayLike<number>, index: number): number {
+  const value = values[index];
+  if (value === undefined) {
+    throw new RangeError(`Projection output is missing numeric value at index ${index}`);
+  }
+  return value;
+}
+
 export class WebGLRenderer {
   private gl: WebGL2RenderingContext;
   private program: WebGLProgram | null = null;
@@ -97,7 +105,7 @@ export class WebGLRenderer {
 
           const p0 = lla_to_ecef(lat0Rad, lonRad, 0.0);
           const p1 = lla_to_ecef(lat1Rad, lonRad, 0.0);
-          coords.push(p0[0], p0[1], p0[2], p1[0], p1[1], p1[2]);
+          coords.push(readNumber(p0, 0), readNumber(p0, 1), readNumber(p0, 2), readNumber(p1, 0), readNumber(p1, 1), readNumber(p1, 2));
         }
       }
 
@@ -113,7 +121,7 @@ export class WebGLRenderer {
 
           const p0 = lla_to_ecef(latRad, lon0Rad, 0.0);
           const p1 = lla_to_ecef(latRad, lon1Rad, 0.0);
-          coords.push(p0[0], p0[1], p0[2], p1[0], p1[1], p1[2]);
+          coords.push(readNumber(p0, 0), readNumber(p0, 1), readNumber(p0, 2), readNumber(p1, 0), readNumber(p1, 1), readNumber(p1, 2));
         }
       }
     } else {
@@ -134,7 +142,7 @@ export class WebGLRenderer {
           try {
             const p0 = projection.project(lat0Rad, lonRad, 0.0);
             const p1 = projection.project(lat1Rad, lonRad, 0.0);
-            coords.push(p0[0], p0[1], 0.0, p1[0], p1[1], 0.0);
+            coords.push(readNumber(p0, 0), readNumber(p0, 1), 0.0, readNumber(p1, 0), readNumber(p1, 1), 0.0);
           } catch {
             // ignore out of bounds projection singularities
           }
@@ -154,7 +162,7 @@ export class WebGLRenderer {
           try {
             const p0 = projection.project(latRad, lon0Rad, 0.0);
             const p1 = projection.project(latRad, lon1Rad, 0.0);
-            coords.push(p0[0], p0[1], 0.0, p1[0], p1[1], 0.0);
+            coords.push(readNumber(p0, 0), readNumber(p0, 1), 0.0, readNumber(p1, 0), readNumber(p1, 1), 0.0);
           } catch {
             // ignore out of bounds projection singularities
           }

@@ -1,5 +1,5 @@
 import { WasmTerrainEngine, WasmTileKey } from "olayer-wasm";
-import { MapDataSource, TileCacheStats, TileRequestOptions } from "./datasource";
+import { MapDataSource, ProviderLogger, SILENT_PROVIDER_LOGGER, TileCacheStats, TileRequestOptions } from "./datasource";
 import { retryTileRequest, throwIfAborted } from "./tile_cache";
 
 /**
@@ -17,12 +17,14 @@ export class TerrainTileSource implements MapDataSource {
   private generation = 0;
   private urlResolver: string | ((lat: number, lon: number) => string);
   private maxRetries: number;
+  private readonly logger: ProviderLogger;
 
   constructor(
     terrainEngine: WasmTerrainEngine,
     urlResolver: string | ((lat: number, lon: number) => string) = "",
     maxTiles: number = 9,
     maxRetries: number = 2,
+    logger: ProviderLogger = SILENT_PROVIDER_LOGGER,
   ) {
     this.terrainEngine = terrainEngine;
     this.urlResolver = urlResolver;
@@ -31,6 +33,7 @@ export class TerrainTileSource implements MapDataSource {
       throw new Error("Terrain tile maxRetries must be a non-negative integer");
     }
     this.maxRetries = maxRetries;
+    this.logger = logger;
   }
 
   /**
@@ -91,7 +94,7 @@ export class TerrainTileSource implements MapDataSource {
 
     try {
       const response = await retryTileRequest(
-        () => fetch(url, { signal: options.signal }),
+        () => fetch(url, options.signal ? { signal: options.signal } : {}),
         options.maxRetries ?? this.maxRetries,
         options.signal,
       );
@@ -124,7 +127,7 @@ export class TerrainTileSource implements MapDataSource {
       // Store in JS cache
       this.terrainCache.set(requestKey, bytes);
     } catch (error) {
-      console.error(`Failed to load DTED tile for [${lat}, ${lon}] from ${url}:`, error);
+      this.logger.error("Failed to load DTED tile", { lat, lon, url, error });
       throw error;
     }
   }
@@ -211,6 +214,7 @@ export class TerrainTileSource implements MapDataSource {
 export { TerrainTileSource as DataManager };
 
 export type { MapDataSource, TileCacheStats, TileRequestOptions } from "./datasource";
+export type { ProviderLogger } from "./datasource";
 export { RasterTileSource } from "./raster";
 export { VectorTileSource } from "./vector";
 export type { VectorFeature, VectorGeometryType, VectorCoordinates, VectorTileSourceOptions } from "./vector";

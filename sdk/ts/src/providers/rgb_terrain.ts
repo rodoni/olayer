@@ -83,7 +83,7 @@ export class RgbTerrainSource implements MapDataSource {
     }
 
     const response = await retryTileRequest(
-      () => fetch(url, { signal: options.signal }),
+      () => fetch(url, options.signal ? { signal: options.signal } : {}),
       options.maxRetries ?? this.maxRetries,
       options.signal
     );

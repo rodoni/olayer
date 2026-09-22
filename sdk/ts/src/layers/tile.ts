@@ -1,4 +1,5 @@
 import { Layer } from "./layer";
+import type { OlayerController } from "../controller";
 import { RasterTileSource } from "../providers/raster";
 import { WasmProjection, lla_to_ecef } from "olayer-wasm";
 
@@ -159,7 +160,7 @@ export class TileLayer extends Layer {
    * Calculates the bounding box of tiles currently visible in the camera viewport.
    */
   private getVisibleTileBounds(
-    controller: any,
+    controller: OlayerController,
     z: number
   ): { minX: number; maxX: number; minY: number; maxY: number } {
     const camera = controller.getCameraState();
@@ -194,8 +195,10 @@ export class TileLayer extends Layer {
     let cx = 0, cy = 0;
     try {
       const xy = projection.project(centerLat, centerLon, 0.0);
-      cx = xy[0];
-      cy = xy[1];
+      const [projectedX, projectedY] = xy;
+      if (projectedX === undefined || projectedY === undefined) return defaultBounds;
+      cx = projectedX;
+      cy = projectedY;
     } catch {
       return defaultBounds;
     }
@@ -207,7 +210,7 @@ export class TileLayer extends Layer {
     const metersPerPixelX = w / canvasWidth;
     const metersPerPixelY = h / canvasHeight;
 
-    const corners = [
+    const corners: readonly (readonly [number, number])[] = [
       [-canvasWidth / 2, -canvasHeight / 2],
       [canvasWidth / 2, -canvasHeight / 2],
       [-canvasWidth / 2, canvasHeight / 2],
@@ -280,7 +283,7 @@ export class TileLayer extends Layer {
 
     this.initWebGL(gl);
 
-    const controller = (window as any).olayerController;
+    const controller = window.olayerController;
     if (!controller) return;
 
     const camera = controller.getCameraState();
@@ -291,7 +294,7 @@ export class TileLayer extends Layer {
     camera.free();
 
     // Detecta mudança na projeção ativa, sua versão (centro alterado) ou modo de visualização para invalidar o cache
-    const projVersion = projection ? (projection as any).version() : 0;
+    const projVersion = projection.version();
     if (
       this.lastProjection !== projection ||
       this.lastProjectionVersion !== projVersion ||
@@ -305,12 +308,14 @@ export class TileLayer extends Layer {
 
     const z = this.getTileZoom(zoom);
     const bounds = this.getVisibleTileBounds(controller, z);
+    controller.logger.debug("Tile bounds calculated", { zoom: z, ...bounds });
 
     // Limpeza seletiva do cache para evitar vazamento de recursos sem destruir tiles visíveis
     if (this.tileGeometries.size > 300) {
       const keysToDelete: string[] = [];
       for (const [key, geom] of this.tileGeometries.entries()) {
         const [tzStr, txStr, tyStr] = key.split("/");
+        if (tzStr === undefined || txStr === undefined || tyStr === undefined) continue;
         const tz = parseInt(tzStr, 10);
         const tx = parseInt(txStr, 10);
         const ty = parseInt(tyStr, 10);
@@ -332,10 +337,6 @@ export class TileLayer extends Layer {
       }
     }
 
-    if ((this as any)._lastLoggedBounds !== JSON.stringify(bounds)) {
-      (this as any)._lastLoggedBounds = JSON.stringify(bounds);
-      console.log(`[TileLayer] Zoom: ${z}, bounds: minX=${bounds.minX}, maxX=${bounds.maxX}, minY=${bounds.minY}, maxY=${bounds.maxY}`);
-    }
 
     // Recompila os buffers de geometria se a câmera ou zoom se alterou fisicamente
     const tilesToDraw: { x: number; y: number; texture: WebGLTexture }[] = [];
@@ -377,7 +378,7 @@ export class TileLayer extends Layer {
       let tileGeom = this.tileGeometries.get(key);
 
       if (!tileGeom) {
-        console.log(`[TileLayer] Generating geometry for tile key: ${key}`);
+        controller.logger.debug("Generating tile geometry", { key });
         const vertices = new Float32Array(vertexCount * attribsPerVertex);
         
         // Calcula os vértices projetados do tile subdividido
@@ -399,13 +400,17 @@ export class TileLayer extends Layer {
             try {
               if (viewMode === "3D") {
                 const ecef = lla_to_ecef(latRad, lonRad, 0.0);
-                px = ecef[0];
-                py = ecef[1];
-                pz = ecef[2];
+                 const [x, y, zValue] = ecef;
+                 if (x === undefined || y === undefined || zValue === undefined) continue;
+                 px = x;
+                 py = y;
+                 pz = zValue;
               } else {
                 const flatPos = projection.project(latRad, lonRad, 0.0);
-                px = flatPos[0];
-                py = flatPos[1];
+                 const [x, y] = flatPos;
+                 if (x === undefined || y === undefined) continue;
+                 px = x;
+                 py = y;
                 pz = 0.0;
               }
             } catch {

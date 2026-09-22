@@ -148,17 +148,18 @@ export class TextureAtlasManager {
    */
   public registerWasmSymbol(
     id: string,
-    registry: any,
-    style: any
+    registry: WasmSymbolRegistry,
+    style: WasmStyleRegistry
   ): SymbolUV {
     if (this.uvs.has(id)) {
       return this.uvs.get(id)!;
     }
 
-    const resolved = registry.resolve_symbol(id, style);
-    if (!resolved) {
+    const resolvedValue: unknown = registry.resolve_symbol(id, style);
+    if (!isResolvedSymbol(resolvedValue)) {
       throw new Error(`Failed to resolve symbol: ${id}`);
     }
+    const resolved = resolvedValue;
 
     const bbox = resolved.bbox;
     const width = Math.ceil(bbox[2] - bbox[0]) + 4;
@@ -179,9 +180,9 @@ export class TextureAtlasManager {
             const action = trimmed[0];
             const nums = (trimmed.slice(1).match(/-?\d+(?:\.\d+)?/g) || []).map(Number);
             if (action === "M" || action === "m") {
-              ctx.moveTo(nums[0], nums[1]);
+              ctx.moveTo(readNumber(nums, 0), readNumber(nums, 1));
             } else if (action === "L" || action === "l") {
-              ctx.lineTo(nums[0], nums[1]);
+              ctx.lineTo(readNumber(nums, 0), readNumber(nums, 1));
             } else if (action === "Z" || action === "z") {
               ctx.closePath();
             }
@@ -301,3 +302,31 @@ export class TextureAtlasManager {
   }
 }
 export default TextureAtlasManager;
+import type { WasmStyleRegistry, WasmSymbolRegistry } from "olayer-wasm";
+
+interface SymbolBoundingBox {
+  readonly 0: number;
+  readonly 1: number;
+  readonly 2: number;
+  readonly 3: number;
+}
+
+interface SymbolColor { readonly r: number; readonly g: number; readonly b: number; readonly a: number; }
+interface SymbolPrimitivePath { readonly type: "Path"; readonly commands: string; readonly fill?: SymbolColor; readonly stroke?: { readonly color: SymbolColor; readonly width: number; readonly dash_array?: readonly number[] }; }
+interface SymbolPrimitiveCircle { readonly type: "Circle"; readonly cx: number; readonly cy: number; readonly r: number; readonly fill?: SymbolColor; readonly stroke?: { readonly color: SymbolColor; readonly width: number; readonly dash_array?: readonly number[] }; }
+interface SymbolPrimitiveText { readonly type: "Text"; readonly color: SymbolColor; readonly font_size: number; readonly content: string; readonly offset_x: number; readonly offset_y: number; }
+type SymbolPrimitive = SymbolPrimitivePath | SymbolPrimitiveCircle | SymbolPrimitiveText;
+interface ResolvedSymbol { readonly bbox: SymbolBoundingBox; readonly anchor: readonly [number, number]; readonly primitives: readonly SymbolPrimitive[]; }
+
+function readNumber(values: ArrayLike<number>, index: number): number {
+  const value = values[index];
+  if (value === undefined) {
+    throw new RangeError(`Symbol path is missing numeric value at index ${index}`);
+  }
+  return value;
+}
+
+function isResolvedSymbol(value: unknown): value is ResolvedSymbol {
+  if (typeof value !== "object" || value === null) return false;
+  return "bbox" in value && "anchor" in value && "primitives" in value && Array.isArray(value.primitives);
+}

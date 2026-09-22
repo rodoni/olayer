@@ -122,6 +122,9 @@ export class SnailTrailTracker {
       const count = filtered.length;
       for (let i = 0; i < count; i++) {
         const dot = filtered[i];
+        if (dot === undefined) {
+          continue;
+        }
         const age = Math.max(0, currentTimeSec - dot.timestampSec);
         const ageFactor = Math.max(0, Math.min(1, 1 - age / maxAge));
         const scanFactor = (i + 1) / count;
@@ -181,7 +184,7 @@ export class TacticalToolsManager {
       epochYear
     );
 
-    return {
+    const measurement = {
       fromCoords: { lat: wasmRes.from_lat_deg, lon: wasmRes.from_lon_deg },
       toCoords: { lat: wasmRes.to_lat_deg, lon: wasmRes.to_lon_deg },
       distanceNauticalMiles: wasmRes.distance_nm,
@@ -190,11 +193,10 @@ export class TacticalToolsManager {
       magneticBearingDeg: wasmRes.magnetic_bearing_deg,
       reciprocalTrueBearingDeg: wasmRes.reciprocal_true_bearing_deg,
       reciprocalMagneticBearingDeg: wasmRes.reciprocal_magnetic_bearing_deg,
-      estimatedTimeEnrouteSec:
-        wasmRes.estimated_time_enroute_sec >= 0
-          ? wasmRes.estimated_time_enroute_sec
-          : undefined,
-    };
+    } satisfies Omit<RblMeasurement, "estimatedTimeEnrouteSec">;
+    return wasmRes.estimated_time_enroute_sec >= 0
+      ? { ...measurement, estimatedTimeEnrouteSec: wasmRes.estimated_time_enroute_sec }
+      : measurement;
   }
 
   /**
@@ -222,6 +224,14 @@ export class TacticalToolsManager {
       const distanceNauticalMiles = flat[i + 1];
       const lat = flat[i + 2];
       const lon = flat[i + 3];
+      if (
+        timeMinutes === undefined ||
+        distanceNauticalMiles === undefined ||
+        lat === undefined ||
+        lon === undefined
+      ) {
+        continue;
+      }
       ticks.push({
         timeMinutes,
         distanceNauticalMiles,
@@ -258,7 +268,11 @@ export class TacticalToolsManager {
 
     const polyline: LatLonCoords[] = [];
     for (let i = 0; i < flat.length; i += 2) {
-      polyline.push({ lat: flat[i], lon: flat[i + 1] });
+      const lat = flat[i];
+      const lon = flat[i + 1];
+      if (lat !== undefined && lon !== undefined) {
+        polyline.push({ lat, lon });
+      }
     }
     return polyline;
   }
@@ -280,7 +294,11 @@ export class TacticalToolsManager {
 
     const conePolygon: LatLonCoords[] = [];
     for (let i = 0; i < flat.length; i += 2) {
-      conePolygon.push({ lat: flat[i], lon: flat[i + 1] });
+      const lat = flat[i];
+      const lon = flat[i + 1];
+      if (lat !== undefined && lon !== undefined) {
+        conePolygon.push({ lat, lon });
+      }
     }
 
     // Extended centerline back-azimuth calculation
@@ -329,7 +347,11 @@ export class TacticalToolsManager {
       for (let i = 0; i < pointsPerCircle; i++) {
         const idx = startIdx + i * 2;
         if (idx + 1 < flat.length) {
-          ring.push({ lat: flat[idx], lon: flat[idx + 1] });
+          const lat = flat[idx];
+          const lon = flat[idx + 1];
+          if (lat !== undefined && lon !== undefined) {
+            ring.push({ lat, lon });
+          }
         }
       }
       rings.push(ring);

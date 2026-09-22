@@ -24,6 +24,16 @@ export interface MapDataSource {
   getCacheStats?(): TileCacheStats;
 }
 
+/** Structured telemetry sink used by providers for recoverable load failures. */
+export interface ProviderLogger {
+  error(message: string, context: Readonly<Record<string, unknown>>): void;
+}
+
+/** Default logger which preserves library silence unless an application opts in. */
+export const SILENT_PROVIDER_LOGGER: ProviderLogger = {
+  error: () => undefined,
+};
+
 export interface TileRequestOptions {
   signal?: AbortSignal;
   maxRetries?: number;

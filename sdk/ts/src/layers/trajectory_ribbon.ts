@@ -29,9 +29,9 @@ export class TrajectoryRibbonLayer extends Layer {
   public defaultRibbonWidthMeters: number;
   public colorLow: string;
   public colorHigh: string;
-  public opacity: number;
+  public override opacity: number;
   public altitudeMode: AltitudeMode;
-  private altitudeResolver?: AltitudeResolver;
+  private altitudeResolver: AltitudeResolver | undefined;
 
   private ribbons: Map<string, TrajectoryRibbonRecord> = new Map();
 
@@ -99,10 +99,14 @@ export class TrajectoryRibbonLayer extends Layer {
     if (this.altitudeMode === "absolute" || !this.altitudeResolver) return [...waypointsDeg];
     const resolved = [...waypointsDeg];
     for (let index = 0; index + 2 < resolved.length; index += 3) {
+      const latitude = resolved[index];
+      const longitude = resolved[index + 1];
+      const altitude = resolved[index + 2];
+      if (latitude === undefined || longitude === undefined || altitude === undefined) continue;
       resolved[index + 2] = this.altitudeResolver(
-        resolved[index] * Math.PI / 180,
-        resolved[index + 1] * Math.PI / 180,
-        resolved[index + 2],
+        latitude * Math.PI / 180,
+        longitude * Math.PI / 180,
+        altitude,
         this.altitudeMode,
       );
     }
@@ -144,11 +148,11 @@ export class TrajectoryRibbonLayer extends Layer {
     return this.ribbons;
   }
 
-  public renderStatic(_gl: WebGL2RenderingContext, _viewProjMatrix: Float32Array): void {
+  public override renderStatic(_gl: WebGL2RenderingContext, _viewProjMatrix: Float32Array): void {
     // WebGL2 Ribbon shader drawing hook
   }
 
-  public renderDynamic(_ctx: CanvasRenderingContext2D, _currentTime: number): void {
+  public override renderDynamic(_ctx: CanvasRenderingContext2D, _currentTime: number): void {
     // Dynamic overlay hook
   }
 

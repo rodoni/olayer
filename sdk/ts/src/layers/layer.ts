@@ -1,3 +1,11 @@
+import type { OlayerController } from "../controller";
+
+declare global {
+  interface Window {
+    olayerController?: OlayerController;
+  }
+}
+
 /**
  * Base abstract class for all visualization layers in the Olayer framework.
  */
@@ -61,6 +69,7 @@ export class LayerManager {
     }
 
     const [layer] = this.layers.splice(currentIndex, 1);
+    if (!layer) throw new Error(`Layer with id "${id}" not found.`);
     this.layers.splice(newIndex, 0, layer);
   }
 

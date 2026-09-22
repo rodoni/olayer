@@ -1,6 +1,13 @@
 import { Layer } from "./layer";
 import { WasmSigmetDataset } from "olayer-wasm";
 
+export type SigmetFeature = Readonly<Record<string, unknown>>;
+
+function featureArray(value: unknown): readonly SigmetFeature[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is SigmetFeature => typeof item === "object" && item !== null);
+}
+
 export interface SigmetLayerOptions {
   strokeColor?: string;
   fillColor?: string;
@@ -72,10 +79,10 @@ export class SigmetLayer extends Layer {
   /**
    * Finds all active hazard warnings containing the specified coordinate (lat/lon in degrees, optional altitude in meters).
    */
-  public findHazardsAt(latDeg: number, lonDeg: number, altM?: number): any[] {
+  public findHazardsAt(latDeg: number, lonDeg: number, altM?: number): readonly SigmetFeature[] {
     if (!this.dataset) return [];
     try {
-      return this.dataset.find_hazards_at_point(latDeg, lonDeg, altM) as any[];
+      return featureArray(this.dataset.find_hazards_at_point(latDeg, lonDeg, altM));
     } catch {
       return [];
     }

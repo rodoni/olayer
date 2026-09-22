@@ -37,7 +37,7 @@ describe("RasterTileSource", () => {
     // Mock Image constructor
     const originalImage = global.Image;
     global.Image = vi.fn(function() {
-      const img: any = {};
+      const img = {} as HTMLImageElement;
       Object.defineProperty(img, "crossOrigin", { set: () => {} });
       Object.defineProperty(img, "onload", {
         set: (fn: () => void) => { setTimeout(fn, 0); }
@@ -45,7 +45,7 @@ describe("RasterTileSource", () => {
       Object.defineProperty(img, "onerror", { set: () => {} });
       Object.defineProperty(img, "src", { set: () => {} });
       return img;
-    }) as any;
+    }) as unknown as typeof Image;
 
     await source.loadTile(0, 0, 0);
     expect(source.getCacheSize()).toBe(1);
@@ -67,7 +67,7 @@ describe("RasterTileSource", () => {
 
     const originalImage = global.Image;
     global.Image = vi.fn(function() {
-      const img: any = {};
+      const img = {} as HTMLImageElement;
       Object.defineProperty(img, "crossOrigin", { set: () => {} });
       Object.defineProperty(img, "onload", {
         set: (fn: () => void) => { setTimeout(fn, 0); }
@@ -75,7 +75,7 @@ describe("RasterTileSource", () => {
       Object.defineProperty(img, "onerror", { set: () => {} });
       Object.defineProperty(img, "src", { set: () => {} });
       return img;
-    }) as any;
+    }) as unknown as typeof Image;
 
     await source.loadTile(1, 1, 1);
     source.unloadTile(1, 1, 1);
@@ -98,7 +98,7 @@ describe("RasterTileSource", () => {
 
     const originalImage = global.Image;
     global.Image = vi.fn(function() {
-      const img: any = {};
+      const img = {} as HTMLImageElement;
       Object.defineProperty(img, "crossOrigin", { set: () => {} });
       Object.defineProperty(img, "onload", {
         set: (fn: () => void) => { setTimeout(fn, 0); }
@@ -106,7 +106,7 @@ describe("RasterTileSource", () => {
       Object.defineProperty(img, "onerror", { set: () => {} });
       Object.defineProperty(img, "src", { set: () => {} });
       return img;
-    }) as any;
+    }) as unknown as typeof Image;
 
     await source.loadTile(0, 0, 0);
     await source.loadTile(1, 1, 1);
@@ -131,7 +131,7 @@ describe("RasterTileSource", () => {
 
     const originalImage = global.Image;
     global.Image = vi.fn(function() {
-      const img: any = {};
+      const img = {} as HTMLImageElement;
       Object.defineProperty(img, "crossOrigin", { set: () => {} });
       Object.defineProperty(img, "onload", {
         set: (fn: () => void) => { setTimeout(fn, 0); }
@@ -139,7 +139,7 @@ describe("RasterTileSource", () => {
       Object.defineProperty(img, "onerror", { set: () => {} });
       Object.defineProperty(img, "src", { set: () => {} });
       return img;
-    }) as any;
+    }) as unknown as typeof Image;
 
     await source.loadTile(0, 0, 0);
     source.clearCache();

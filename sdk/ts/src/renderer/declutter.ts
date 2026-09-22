@@ -1,14 +1,28 @@
 import { solve_label_placements_flat } from "olayer-wasm";
 
-export enum OctantDirection {
-  North = 0,
-  NorthEast = 1,
-  East = 2,
-  SouthEast = 3,
-  South = 4,
-  SouthWest = 5,
-  West = 6,
-  NorthWest = 7,
+export const OctantDirection = {
+  North: 0,
+  NorthEast: 1,
+  East: 2,
+  SouthEast: 3,
+  South: 4,
+  SouthWest: 5,
+  West: 6,
+  NorthWest: 7,
+} as const;
+
+export type OctantDirection = (typeof OctantDirection)[keyof typeof OctantDirection];
+
+function isOctantDirection(value: number): value is OctantDirection {
+  return Number.isInteger(value) && value >= OctantDirection.North && value <= OctantDirection.NorthWest;
+}
+
+function readOutputValue(output: Float32Array, index: number): number {
+  const value = output[index];
+  if (value === undefined) {
+    throw new RangeError(`WASM placement output is missing value at index ${index}`);
+  }
+  return value;
 }
 
 export interface DeclutterTargetInput {
@@ -71,8 +85,7 @@ export class LabelAntiClutterEngine {
 
     // Pack into flat float32 array: [x, y, heading_or_neg1, width, height, priority] (6 floats per target)
     const flatInput = new Float32Array(n * 6);
-    for (let i = 0; i < n; i++) {
-      const t = targets[i];
+    for (const [i, t] of targets.entries()) {
       flatInput[i * 6] = t.x;
       flatInput[i * 6 + 1] = t.y;
       flatInput[i * 6 + 2] = t.headingRad !== undefined ? t.headingRad : -1.0;
@@ -83,22 +96,26 @@ export class LabelAntiClutterEngine {
 
     const flatOutput = solve_label_placements_flat(flatInput, leaderLen, margin);
 
-    const placements: SolvedLabelPlacement[] = new Array(n);
-    for (let i = 0; i < n; i++) {
+    const placements: SolvedLabelPlacement[] = [];
+    for (const [i, target] of targets.entries()) {
       const offset = i * 10;
-      placements[i] = {
-        id: targets[i].id,
+      const octant = readOutputValue(flatOutput, offset + 8);
+      if (!isOctantDirection(octant)) {
+        throw new RangeError(`WASM placement output contains invalid octant ${octant}`);
+      }
+      placements.push({
+        id: target.id,
         rect: {
-          x: flatOutput[offset],
-          y: flatOutput[offset + 1],
-          width: flatOutput[offset + 2],
-          height: flatOutput[offset + 3],
+          x: readOutputValue(flatOutput, offset),
+          y: readOutputValue(flatOutput, offset + 1),
+          width: readOutputValue(flatOutput, offset + 2),
+          height: readOutputValue(flatOutput, offset + 3),
         },
-        leaderStart: [flatOutput[offset + 4], flatOutput[offset + 5]],
-        leaderEnd: [flatOutput[offset + 6], flatOutput[offset + 7]],
-        octant: flatOutput[offset + 8] as OctantDirection,
-        cost: flatOutput[offset + 9],
-      };
+        leaderStart: [readOutputValue(flatOutput, offset + 4), readOutputValue(flatOutput, offset + 5)],
+        leaderEnd: [readOutputValue(flatOutput, offset + 6), readOutputValue(flatOutput, offset + 7)],
+        octant,
+        cost: readOutputValue(flatOutput, offset + 9),
+      });
     }
 
     return placements;

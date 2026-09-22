@@ -88,10 +88,10 @@ export class AeronauticalLayer extends Layer {
   /**
    * Queries navaids within a given radius from coordinates (lat/lon in radians).
    */
-  public findNavaidsNear(latRad: number, lonRad: number, radiusMeters: number): any[] {
+  public findNavaidsNear(latRad: number, lonRad: number, radiusMeters: number): readonly AeronauticalFeature[] {
     if (!this.dataset) return [];
     try {
-      return this.dataset.find_navaids_within_radius(latRad, lonRad, radiusMeters) as any[];
+      return featureArray(this.dataset.find_navaids_within_radius(latRad, lonRad, radiusMeters));
     } catch {
       return [];
     }
@@ -100,10 +100,10 @@ export class AeronauticalLayer extends Layer {
   /**
    * Queries airspaces containing the given coordinate (lat/lon in radians).
    */
-  public findAirspacesContaining(latRad: number, lonRad: number): any[] {
+  public findAirspacesContaining(latRad: number, lonRad: number): readonly AeronauticalFeature[] {
     if (!this.dataset) return [];
     try {
-      return this.dataset.find_airspaces_containing_point(latRad, lonRad) as any[];
+      return featureArray(this.dataset.find_airspaces_containing_point(latRad, lonRad));
     } catch {
       return [];
     }
@@ -134,4 +134,10 @@ export class AeronauticalLayer extends Layer {
     }
     this.geoJsonString = null;
   }
+}
+export type AeronauticalFeature = Readonly<Record<string, unknown>>;
+
+function featureArray(value: unknown): readonly AeronauticalFeature[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is AeronauticalFeature => typeof item === "object" && item !== null);
 }

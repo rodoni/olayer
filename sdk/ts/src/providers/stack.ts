@@ -1,5 +1,13 @@
 import { MapDataSource, TileCacheStats } from "./datasource";
 
+interface CacheSizeSource extends MapDataSource {
+  getCacheSize(): number;
+}
+
+function hasCacheSize(source: MapDataSource): source is CacheSizeSource {
+  return "getCacheSize" in source && typeof source.getCacheSize === "function";
+}
+
 /**
  * Orchestrator for the Map Data Stack.
  * Registers multiple data sources (such as TerrainTileSource, RasterTileSource, VectorTileSource)
@@ -45,12 +53,7 @@ export class MapDataStack {
   public getCacheSize(): number {
     let size = 0;
     for (const source of this.sources.values()) {
-      if ("getCacheSize" in source && typeof (source as any).getCacheSize === "function") {
-        size += (source as any).getCacheSize();
-      } else if ("getCacheSize" in source) {
-        // Fallback for custom objects
-        size += (source as any).tileCache?.size || 0;
-      }
+      if (hasCacheSize(source)) size += source.getCacheSize();
     }
     return size;
   }

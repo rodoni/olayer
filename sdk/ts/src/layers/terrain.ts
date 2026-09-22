@@ -1,4 +1,5 @@
 import { Layer } from "./layer";
+import type { OlayerController } from "../controller";
 import { lla_to_ecef, WasmProjection } from "olayer-wasm";
 
 interface TerrainMesh {
@@ -269,10 +270,10 @@ export class TerrainLayer extends Layer {
     this.mesh = null;
   }
 
-  private getMeshKey(controller: any): string {
+  private getMeshKey(controller: OlayerController): string {
     const camera = controller.getCameraState();
-    const projection = controller.projection as WasmProjection;
-    const version = typeof (projection as any).version === "function" ? (projection as any).version() : 0;
+    const projection = controller.projection;
+    const version = projection.version();
     const key = [
       controller.getViewMode(),
       controller.getCenterLat().toFixed(5),
@@ -285,7 +286,7 @@ export class TerrainLayer extends Layer {
     return key;
   }
 
-  private rebuildMesh(gl: WebGL2RenderingContext, controller: any): void {
+  private rebuildMesh(gl: WebGL2RenderingContext, controller: OlayerController): void {
     const camera = controller.getCameraState();
     const centerLat = controller.getCenterLat();
     const centerLon = controller.getCenterLon();
@@ -296,7 +297,7 @@ export class TerrainLayer extends Layer {
     const indices: number[] = [];
     const elevations: number[][] = [];
     const viewMode = controller.getViewMode();
-    const projection = controller.projection as WasmProjection;
+    const projection = controller.projection;
     const tile = this.imageryTile(controller);
 
     for (let row = 0; row <= this.gridSize; row++) {
@@ -319,10 +320,14 @@ export class TerrainLayer extends Layer {
           position = Array.from(lla_to_ecef(lat, lon, height));
         } else {
           const projected = projection.project(lat, lon, 0);
-          position = [projected[0], projected[1], height];
+          const [x, y] = projected;
+          if (x === undefined || y === undefined) continue;
+          position = [x, y, height];
         }
         // Vertex layout: position(3), elevation(1), slope(1), normal(3), uv(2) -> 10 floats = 40 bytes
-        vertices.push(position[0], position[1], position[2], elevation, 0, 0, 0, 1, ...this.imageryUv(lat, lon, tile));
+         const [positionX, positionY, positionZ] = position;
+         if (positionX === undefined || positionY === undefined || positionZ === undefined) continue;
+         vertices.push(positionX, positionY, positionZ, elevation, 0, 0, 0, 1, ...this.imageryUv(lat, lon, tile));
       }
       elevations.push(elevationRow);
     }
@@ -331,10 +336,15 @@ export class TerrainLayer extends Layer {
     const dy = dx;
     for (let row = 0; row <= this.gridSize; row++) {
       for (let column = 0; column <= this.gridSize; column++) {
-        const left = elevations[row][Math.max(0, column - 1)];
-        const right = elevations[row][Math.min(this.gridSize, column + 1)];
-        const north = elevations[Math.max(0, row - 1)][column];
-        const south = elevations[Math.min(this.gridSize, row + 1)][column];
+        const currentRow = elevations[row];
+        const previousRow = elevations[Math.max(0, row - 1)];
+        const nextRow = elevations[Math.min(this.gridSize, row + 1)];
+        if (!currentRow || !previousRow || !nextRow) continue;
+        const left = currentRow[Math.max(0, column - 1)];
+        const right = currentRow[Math.min(this.gridSize, column + 1)];
+        const north = previousRow[column];
+        const south = nextRow[column];
+        if (left === undefined || right === undefined || north === undefined || south === undefined) continue;
         const dzdx = (right - left) / (column === 0 || column === this.gridSize ? dx : 2 * dx);
         const dzdy = (south - north) / (row === 0 || row === this.gridSize ? dy : 2 * dy);
         const slope = Math.atan(Math.hypot(dzdx, dzdy)) * 180 / Math.PI;
@@ -393,7 +403,7 @@ export class TerrainLayer extends Layer {
     this.mesh = { vao, vertexBuffer, indexBuffer, indexCount: indices.length };
   }
 
-  private imageryTile(controller: any): { z: number; x: number; y: number } {
+  private imageryTile(controller: OlayerController): { z: number; x: number; y: number } {
     const camera = controller.getCameraState();
     const spanMeters = camera.viewport_base_meters / camera.zoom;
     const latSpan = Math.min(Math.PI / 3, spanMeters / 111_000.0 / 2 * Math.PI / 180);
@@ -419,7 +429,7 @@ export class TerrainLayer extends Layer {
     return [u, v];
   }
 
-  private ensureImagery(gl: WebGL2RenderingContext, controller: any): void {
+  private ensureImagery(gl: WebGL2RenderingContext, controller: OlayerController): void {
     if (!this.imageryTemplate || !this.imageryEnabled || !this.imageryTexture) return;
     const tile = this.imageryTile(controller);
     const key = `${tile.z}/${tile.x}/${tile.y}`;
@@ -442,7 +452,7 @@ export class TerrainLayer extends Layer {
 
   public renderStatic(gl: WebGL2RenderingContext, viewProjMatrix: Float32Array): void {
     if (!this.visible || this.opacity <= 0.01) return;
-    const controller = (window as any).olayerController;
+    const controller = window.olayerController;
     if (!controller) return;
     if (controller.getViewMode() === "2D") return;
 
@@ -577,7 +587,7 @@ export class TerrainContourLayer extends Layer {
     this.opacityLocation = gl.getUniformLocation(this.program, "u_opacity");
   }
 
-  private meshKey(controller: any): string {
+  private meshKey(controller: OlayerController): string {
     const camera = controller.getCameraState();
     const key = [
       controller.getViewMode(),
@@ -591,16 +601,18 @@ export class TerrainContourLayer extends Layer {
     return key;
   }
 
-  private projectPoint(controller: any, lat: number, lon: number, elevation: number): number[] {
+  private projectPoint(controller: OlayerController, lat: number, lon: number, elevation: number): number[] {
     const height = elevation * this.verticalExaggeration + 1;
     if (controller.getViewMode() === "3D") {
       return Array.from(lla_to_ecef(lat, lon, height));
     }
-    const projected = (controller.projection as WasmProjection).project(lat, lon, 0);
-    return [projected[0], projected[1], height];
+    const projected = controller.projection.project(lat, lon, 0);
+    const [x, y] = projected;
+    if (x === undefined || y === undefined) return [0, 0, height];
+    return [x, y, height];
   }
 
-  private rebuild(gl: WebGL2RenderingContext, controller: any): void {
+  private rebuild(gl: WebGL2RenderingContext, controller: OlayerController): void {
     const camera = controller.getCameraState();
     const centerLat = controller.getCenterLat();
     const centerLon = controller.getCenterLon();
@@ -623,7 +635,9 @@ export class TerrainContourLayer extends Layer {
           // Keep uncovered samples at sea level.
         }
         const position = this.projectPoint(controller, lat, lon, elevation);
-        sampleRow.push({ x: position[0], y: position[1], z: position[2], elevation });
+        const [x, y, z] = position;
+        if (x === undefined || y === undefined || z === undefined) continue;
+        sampleRow.push({ x, y, z, elevation });
         minimum = Math.min(minimum, elevation);
         maximum = Math.max(maximum, elevation);
       }
@@ -635,15 +649,21 @@ export class TerrainContourLayer extends Layer {
     const firstLevel = Math.ceil(minimum / this.interval) * this.interval;
     for (let row = 0; row < this.gridSize; row++) {
       for (let column = 0; column < this.gridSize; column++) {
-        const corners = [
-          samples[row][column], samples[row][column + 1],
-          samples[row + 1][column + 1], samples[row + 1][column]
-        ];
+        const currentSampleRow = samples[row];
+        const nextSampleRow = samples[row + 1];
+        if (!currentSampleRow || !nextSampleRow) continue;
+        const topLeft = currentSampleRow[column];
+        const topRight = currentSampleRow[column + 1];
+        const bottomRight = nextSampleRow[column + 1];
+        const bottomLeft = nextSampleRow[column];
+        if (!topLeft || !topRight || !bottomRight || !bottomLeft) continue;
+        const contourCorners: readonly ContourPoint[] = [topLeft, topRight, bottomRight, bottomLeft];
         for (let level = firstLevel; level <= maximum; level += this.interval) {
           const intersections: ContourPoint[] = [];
-          for (const [a, b] of [[0, 1], [1, 2], [2, 3], [3, 0]]) {
-            const start = corners[a];
-            const end = corners[b];
+          for (const [a, b] of [[0, 1], [1, 2], [2, 3], [3, 0]] as const) {
+            const start = contourCorners[a];
+            const end = contourCorners[b];
+            if (!start || !end) continue;
             if ((start.elevation < level) === (end.elevation < level) || start.elevation === end.elevation) continue;
             const fraction = (level - start.elevation) / (end.elevation - start.elevation);
             intersections.push({
@@ -654,7 +674,11 @@ export class TerrainContourLayer extends Layer {
             });
           }
           if (intersections.length === 2) {
-            vertices.push(intersections[0].x, intersections[0].y, intersections[0].z, intersections[1].x, intersections[1].y, intersections[1].z);
+            const first = intersections[0];
+            const second = intersections[1];
+            if (first && second) {
+              vertices.push(first.x, first.y, first.z, second.x, second.y, second.z);
+            }
           }
         }
       }
@@ -670,7 +694,7 @@ export class TerrainContourLayer extends Layer {
 
   public renderStatic(gl: WebGL2RenderingContext, viewProjMatrix: Float32Array): void {
     if (!this.visible || this.opacity <= 0.01) return;
-    const controller = (window as any).olayerController;
+    const controller = window.olayerController;
     if (!controller) return;
     if (controller.getViewMode() === "2D") return;
     this.initWebGL(gl);

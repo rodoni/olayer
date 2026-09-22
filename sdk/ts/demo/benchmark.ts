@@ -3,6 +3,7 @@ import init, {
   OlayerController,
   CPURenderer,
 } from "../src";
+import type { InterpolatedTarget } from "../src";
 
 // Coordinate center for São Paulo TMA (same as main demo)
 const SP_LAT_RAD = -23.62 * (Math.PI / 180);
@@ -40,6 +41,33 @@ function log(msg: string) {
     const timestamp = new Date().toLocaleTimeString();
     consoleLogEl.innerText = `[${timestamp}] ${msg}\n` + consoleLogEl.innerText;
   }
+}
+
+interface DemoLogger {
+  info(message: string): void;
+  error(message: string, error?: unknown): void;
+}
+
+const demoLogger: DemoLogger = {
+  info: log,
+  error: (message, error) => log(`${message} ${error instanceof Error ? error.message : String(error ?? "unknown error")}`),
+};
+
+function isInterpolatedTarget(value: unknown): value is InterpolatedTarget {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as Record<string, unknown>;
+  const position = candidate.position;
+  if (typeof position !== "object" || position === null) return false;
+  const coordinates = position as Record<string, unknown>;
+  return typeof candidate.id === "string" &&
+    typeof coordinates.lat === "number" &&
+    typeof coordinates.lon === "number" &&
+    typeof coordinates.height === "number" &&
+    typeof candidate.heading_rad === "number";
+}
+
+function isInterpolatedTargetArray(value: unknown): value is InterpolatedTarget[] {
+  return Array.isArray(value) && value.every(isInterpolatedTarget);
 }
 
 // Initialize application
@@ -188,7 +216,7 @@ function setupUI() {
     }
 
     if (controller && activeProjection) {
-      (controller as any).projection = activeProjection;
+      Object.defineProperty(controller, "projection", { value: activeProjection, writable: false });
     }
     
     log(`Projection updated.`);
@@ -291,12 +319,10 @@ function renderLoop(timestamp: number) {
 
   // 2. Dynamic Target Interpolation (WASM Bridge timing)
   const interpStart = performance.now();
-  let interpolatedTargets: any[] = [];
+  let interpolatedTargets: InterpolatedTarget[] = [];
   try {
-    const jsVal = controller.interpolator.interpolate_all(nowSec);
-    if (jsVal) {
-      interpolatedTargets = jsVal as any[];
-    }
+    const jsVal: unknown = controller.interpolator.interpolate_all(nowSec);
+    if (isInterpolatedTargetArray(jsVal)) interpolatedTargets = jsVal;
   } catch (err) {
     // Silently ignore interpolation errors in boundary frames
   }
@@ -408,7 +434,6 @@ function renderLoop(timestamp: number) {
 }
 
 // Start benchmark
-start().catch(err => {
-  console.error("Failed to start stress benchmark:", err);
-  log(`Initialization error: ${err}`);
+start().catch((err: unknown) => {
+  demoLogger.error("Failed to start stress benchmark:", err);
 });

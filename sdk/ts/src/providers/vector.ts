@@ -35,11 +35,25 @@ export interface VectorTileSourceOptions {
 }
 
 interface GeoJsonFeature {
+  type?: string;
   geometry?: {
     type?: string;
     coordinates?: unknown;
   } | null;
   properties?: Record<string, unknown> | null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isGeoJsonFeature(value: unknown): value is GeoJsonFeature {
+  if (!isRecord(value)) return false;
+  const geometry = value["geometry"];
+  const properties = value["properties"];
+  return (value["type"] === undefined || value["type"] === "Feature")
+    && (geometry === null || geometry === undefined || isRecord(geometry))
+    && (properties === null || properties === undefined || isRecord(properties));
 }
 
 const WEB_MERCATOR_RADIUS = 6378137.0;
@@ -77,9 +91,13 @@ function transformCoordinateTree(
 }
 
 function normalizeGeoJsonFeature(
-  feature: GeoJsonFeature,
+  rawFeature: unknown,
   transform: (position: Position) => Position
 ): VectorFeature | null {
+  if (!isGeoJsonFeature(rawFeature)) {
+    throw new Error("Invalid GeoJSON feature");
+  }
+  const feature = rawFeature;
   const geometry = feature.geometry;
   if (!geometry || !geometry.type || geometry.coordinates === undefined) return null;
 
@@ -112,12 +130,12 @@ function parseGeoJson(
   transform: (position: Position) => Position
 ): VectorFeature[] {
   const text = new TextDecoder().decode(buffer);
-  const parsed = JSON.parse(text) as { features?: GeoJsonFeature[] };
-  if (!Array.isArray(parsed.features)) {
+  const parsed: unknown = JSON.parse(text);
+  if (!isRecord(parsed) || (parsed["type"] !== undefined && parsed["type"] !== "FeatureCollection") || !Array.isArray(parsed["features"]) || !parsed["features"].every(isGeoJsonFeature)) {
     throw new Error("GeoJSON response must be a FeatureCollection");
   }
 
-  return parsed.features
+  return parsed["features"]
     .map((feature) => normalizeGeoJsonFeature(feature, transform))
     .filter((feature): feature is VectorFeature => feature !== null);
 }
@@ -137,7 +155,7 @@ function parseMvt(buffer: ArrayBuffer, x: number, y: number, z: number, layerNam
 
   for (const layer of layers) {
     for (let index = 0; index < layer.length; index++) {
-      const geoJson = layer.feature(index).toGeoJSON(x, y, z) as GeoJsonFeature;
+      const geoJson: unknown = layer.feature(index).toGeoJSON(x, y, z);
       const feature = normalizeGeoJsonFeature(geoJson, degreesToLatLon);
       if (feature) features.push(feature);
     }
@@ -156,7 +174,7 @@ export class VectorTileSource implements MapDataSource {
   private urlResolver: string | ((x: number, y: number, z: number) => string);
   private maxTiles: number;
   private geoJsonCrs: "EPSG:900913" | "EPSG:4326";
-  private mvtLayer?: string;
+  private mvtLayer: string | undefined;
   private maxRetries: number;
 
   constructor(
@@ -199,7 +217,7 @@ export class VectorTileSource implements MapDataSource {
     const request = (async () => {
       try {
       const response = await retryTileRequest(
-        () => fetch(url, { signal: options.signal }),
+         () => fetch(url, options.signal ? { signal: options.signal } : {}),
         options.maxRetries ?? this.maxRetries,
         options.signal,
       );

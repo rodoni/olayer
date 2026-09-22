@@ -4,6 +4,7 @@ import { readFileSync } from "fs";
 import { resolve } from "path";
 import { CPURenderer } from "./cpu";
 import { LabelAntiClutterEngine, OctantDirection } from "./declutter";
+import type { WasmProjection } from "olayer-wasm";
 
 const wasmPath = resolve(__dirname, "../../wasm/pkg/olayer_wasm_bg.wasm");
 
@@ -37,10 +38,10 @@ function createMockCtx(): CanvasRenderingContext2D {
   } as unknown as CanvasRenderingContext2D;
 }
 
-function createMockProjection(): any {
+function createMockProjection(): WasmProjection {
   return {
     project: vi.fn((lat: number, lon: number, _height: number) => [lat * 1000, lon * 1000]),
-  };
+  } as unknown as WasmProjection;
 }
 
 describe("CPURenderer & LabelAntiClutterEngine (GIS-PROP-008)", () => {

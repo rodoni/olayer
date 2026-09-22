@@ -1,4 +1,5 @@
 import { Layer } from "./layer";
+import type { OlayerController } from "../controller";
 import { VectorTileSource, VectorFeature } from "../providers/vector";
 import { WasmProjection, lla_to_ecef } from "olayer-wasm";
 
@@ -113,7 +114,7 @@ export class VectorTileLayer extends Layer {
   }
 
   private getVisibleTileBounds(
-    controller: any,
+    controller: OlayerController,
     z: number
   ): { minX: number; maxX: number; minY: number; maxY: number } {
     const camera = controller.getCameraState();
@@ -148,8 +149,10 @@ export class VectorTileLayer extends Layer {
     let cx = 0, cy = 0;
     try {
       const xy = projection.project(centerLat, centerLon, 0.0);
-      cx = xy[0];
-      cy = xy[1];
+      const [projectedX, projectedY] = xy;
+      if (projectedX === undefined || projectedY === undefined) return defaultBounds;
+      cx = projectedX;
+      cy = projectedY;
     } catch {
       return defaultBounds;
     }
@@ -161,7 +164,7 @@ export class VectorTileLayer extends Layer {
     const metersPerPixelX = w / canvasWidth;
     const metersPerPixelY = h / canvasHeight;
 
-    const corners = [
+    const corners: readonly (readonly [number, number])[] = [
       [-canvasWidth / 2, -canvasHeight / 2],
       [canvasWidth / 2, -canvasHeight / 2],
       [-canvasWidth / 2, canvasHeight / 2],
@@ -220,7 +223,7 @@ export class VectorTileLayer extends Layer {
 
     this.initWebGL(gl);
 
-    const controller = (window as any).olayerController;
+    const controller = window.olayerController;
     if (!controller) return;
 
     const camera = controller.getCameraState();
@@ -260,8 +263,9 @@ export class VectorTileLayer extends Layer {
       const paths = geometryPaths(feature);
 
       // Points are drawn as small squares/markers around their coordinates.
-      if ((feature.type === "Point" || feature.type === "MultiPoint") && paths[0]?.length > 0) {
-        for (const [lat, lon] of paths[0]) {
+      const pointPath = paths[0];
+      if ((feature.type === "Point" || feature.type === "MultiPoint") && pointPath && pointPath.length > 0) {
+        for (const [lat, lon] of pointPath) {
         
         // Define a largura do quadrado em metros (ex: 1500 metros)
         const boxSizeMeters = 1500;
@@ -270,7 +274,7 @@ export class VectorTileLayer extends Layer {
         const dLon = boxSizeMeters / (R * Math.cos(lat));
 
         const boxCoords: number[] = [];
-        const corners = [
+        const corners: readonly (readonly [number, number])[] = [
           [lat - dLat, lon - dLon],
           [lat - dLat, lon + dLon],
           [lat + dLat, lon + dLon],
@@ -282,10 +286,14 @@ export class VectorTileLayer extends Layer {
           try {
             if (viewMode === "3D") {
               const ecef = lla_to_ecef(pt[0], pt[1], 0.0);
-              boxCoords.push(ecef[0], ecef[1], ecef[2]);
+              const [x, y, zValue] = ecef;
+              if (x === undefined || y === undefined || zValue === undefined) continue;
+              boxCoords.push(x, y, zValue);
             } else {
               const flat = projection.project(pt[0], pt[1], 0.0);
-              boxCoords.push(flat[0], flat[1], 0.0);
+              const [x, y] = flat;
+              if (x === undefined || y === undefined) continue;
+              boxCoords.push(x, y, 0.0);
             }
           } catch {}
         }
@@ -309,10 +317,14 @@ export class VectorTileLayer extends Layer {
         try {
           if (viewMode === "3D") {
             const ecef = lla_to_ecef(lat, lon, 0.0);
-            coords.push(ecef[0], ecef[1], ecef[2]);
+            const [x, y, zValue] = ecef;
+            if (x === undefined || y === undefined || zValue === undefined) continue;
+            coords.push(x, y, zValue);
           } else {
             const flat = projection.project(lat, lon, 0.0);
-            coords.push(flat[0], flat[1], 0.0);
+            const [x, y] = flat;
+            if (x === undefined || y === undefined) continue;
+            coords.push(x, y, 0.0);
           }
         } catch {
           // ignora falhas de limite de projeção
@@ -325,11 +337,11 @@ export class VectorTileLayer extends Layer {
         gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(coords), gl.DYNAMIC_DRAW);
 
         // Define estilo visual diferenciado com base no tipo da feição (Airway vs Boundary vs Fallback)
-        if (feature.properties.type === "airway") {
+        if (feature.properties["type"] === "airway") {
         // Azul claro para rotas/aerovias operacionais
         gl.uniform4f(this.uColorLoc, 0.0, 0.69, 1.0, 0.4 * this.opacity);
           gl.drawArrays(gl.LINE_STRIP, 0, coords.length / 3);
-        } else if (feature.properties.type === "boundary") {
+        } else if (feature.properties["type"] === "boundary") {
         // Laranja/âmbar para limites de espaço aéreo (CTA/TMA)
         gl.uniform4f(this.uColorLoc, 1.0, 0.5, 0.0, 0.25 * this.opacity);
           gl.drawArrays(gl.LINE_STRIP, 0, coords.length / 3);

@@ -29,10 +29,10 @@ export interface AirspaceMeshRecord {
 export class VolumetricAirspaceLayer extends Layer {
   public baseColor: string;
   public edgeColor: string;
-  public opacity: number;
+  public override opacity: number;
   public fresnelIntensity: number;
   public altitudeMode: AltitudeMode;
-  private altitudeResolver?: AltitudeResolver;
+  private altitudeResolver: AltitudeResolver | undefined;
 
   private airspaces: Map<string, AirspaceMeshRecord> = new Map();
 
@@ -56,7 +56,7 @@ export class VolumetricAirspaceLayer extends Layer {
    */
   public addAirspace(id: string, polygonDeg: number[], floorM: number, ceilingM: number): void {
     const [baseLatDeg, baseLonDeg] = polygonDeg;
-    if (this.altitudeMode !== "absolute" && this.altitudeResolver && Number.isFinite(baseLatDeg) && Number.isFinite(baseLonDeg)) {
+    if (baseLatDeg !== undefined && baseLonDeg !== undefined && this.altitudeMode !== "absolute" && this.altitudeResolver && Number.isFinite(baseLatDeg) && Number.isFinite(baseLonDeg)) {
       const latRad = baseLatDeg * Math.PI / 180;
       const lonRad = baseLonDeg * Math.PI / 180;
       floorM = this.altitudeResolver(latRad, lonRad, floorM, this.altitudeMode);
@@ -131,11 +131,11 @@ export class VolumetricAirspaceLayer extends Layer {
     return this.airspaces;
   }
 
-  public renderStatic(_gl: WebGL2RenderingContext, _viewProjMatrix: Float32Array): void {
+  public override renderStatic(_gl: WebGL2RenderingContext, _viewProjMatrix: Float32Array): void {
     // WebGL2 Volumetric shader drawing hook
   }
 
-  public renderDynamic(_ctx: CanvasRenderingContext2D, _currentTime: number): void {
+  public override renderDynamic(_ctx: CanvasRenderingContext2D, _currentTime: number): void {
     // Dynamic overlay hook
   }
 

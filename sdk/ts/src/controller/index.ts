@@ -13,6 +13,11 @@ import type { AltitudeMode, AltitudeUnknownPolicy } from "../types/altitude";
 
 export type ViewMode = "2D" | "2.5D" | "3D";
 
+export interface OlayerLogger {
+  debug(message: string, context?: Readonly<Record<string, unknown>>): void;
+  error(message: string, error?: unknown): void;
+}
+
 export interface OlayerMetrics {
   type: "frame";
   durationMs: number;
@@ -32,6 +37,7 @@ export interface OlayerConfig {
   onMetrics?: (metrics: OlayerMetrics) => void;
   altitudeMode?: AltitudeMode;
   altitudeUnknownPolicy?: AltitudeUnknownPolicy;
+  logger?: OlayerLogger;
 }
 
 export class OlayerController {
@@ -82,7 +88,8 @@ export class OlayerController {
   private lastFrameTime = 0;
   private animationFrameId: number | null = null;
   private currentFps = 0;
-  private readonly onMetrics?: (metrics: OlayerMetrics) => void;
+  private readonly onMetrics: ((metrics: OlayerMetrics) => void) | undefined;
+  public readonly logger: OlayerLogger;
   private destroyed = false;
   private readonly listenerCleanups: Array<() => void> = [];
 
@@ -90,6 +97,7 @@ export class OlayerController {
     this.glCanvas = config.glCanvas;
     this.canvas2D = config.canvas2D;
     this.onMetrics = config.onMetrics;
+    this.logger = config.logger ?? { debug: () => undefined, error: () => undefined };
 
     // Get contexts
     const gl = this.glCanvas.getContext("webgl2");
@@ -401,7 +409,7 @@ export class OlayerController {
       vpMatrix = new Float32Array(flatMatrix);
       this.currentViewProjMatrix = vpMatrix;
     } catch (err) {
-      console.error("Failed to calculate View-Projection matrix:", err);
+      this.logger.error("Failed to calculate View-Projection matrix", err);
       camera.free();
       return;
     }
@@ -432,11 +440,6 @@ export class OlayerController {
    * Configures mouse interactions for map dragging (pan/orbit) and wheel zooming.
    */
   private setupInteractions(): void {
-    const getProjectedCoordinates = (latRad: number, lonRad: number) => {
-      const xy = this.projection.project(latRad, lonRad, this.centerHeight);
-      return { x: xy[0], y: xy[1] };
-    };
-
     // Prevent context menu on canvas to allow smooth right-click dragging
     const contextMenuListener = (e: MouseEvent) => e.preventDefault();
     this.canvas2D.addEventListener("contextmenu", contextMenuListener);
@@ -506,7 +509,12 @@ export class OlayerController {
       }
 
       // Project current center to planar meters
-      const { x: cx, y: cy } = getProjectedCoordinates(this.centerLat, this.centerLon);
+      const projectedCenter = this.projection.project(this.centerLat, this.centerLon, this.centerHeight);
+      const cx = projectedCenter[0];
+      const cy = projectedCenter[1];
+      if (cx === undefined || cy === undefined) {
+        return;
+      }
 
       // Compute scale: map viewport dimensions
       const aspect = this.glCanvas.width / this.glCanvas.height;
@@ -535,7 +543,7 @@ export class OlayerController {
         this.projection.update_center(lla.lat, lla.lon);
         lla.free();
       } catch (err) {
-        console.error("Pan unproject failed:", err);
+        this.logger.error("Pan unproject failed", err);
       }
     };
     this.canvas2D.addEventListener("mousemove", mouseMoveListener);

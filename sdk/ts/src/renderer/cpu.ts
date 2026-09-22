@@ -2,6 +2,14 @@ import { WasmProjection, lla_to_ecef } from "olayer-wasm";
 import { SymbolUV } from "./atlas";
 import { LabelAntiClutterEngine, DeclutterTargetInput, SolvedLabelPlacement } from "./declutter";
 
+function readNumber(values: ArrayLike<number>, index: number): number {
+  const value = values[index];
+  if (value === undefined) {
+    throw new RangeError(`Projection output is missing numeric value at index ${index}`);
+  }
+  return value;
+}
+
 export interface InterpolatedTarget {
   id: string;
   position: {
@@ -54,18 +62,18 @@ export class CPURenderer {
         const ecef = lla_to_ecef(latRad, lonRad, height);
         const centerEcef = lla_to_ecef(centerLat, centerLon, 0.0);
 
-        const relX = ecef[0] - centerEcef[0];
-        const relY = ecef[1] - centerEcef[1];
-        const relZ = ecef[2] - centerEcef[2];
+        const relX = readNumber(ecef, 0) - readNumber(centerEcef, 0);
+        const relY = readNumber(ecef, 1) - readNumber(centerEcef, 1);
+        const relZ = readNumber(ecef, 2) - readNumber(centerEcef, 2);
 
         const m = viewProjMatrix;
-        const wNdc = m[3] * relX + m[7] * relY + m[11] * relZ + m[15];
+        const wNdc = readNumber(m, 3) * relX + readNumber(m, 7) * relY + readNumber(m, 11) * relZ + readNumber(m, 15);
         if (wNdc <= 0.0) {
           return null;
         }
 
-        const xNdc = m[0] * relX + m[4] * relY + m[8] * relZ + m[12];
-        const yNdc = m[1] * relX + m[5] * relY + m[9] * relZ + m[13];
+        const xNdc = readNumber(m, 0) * relX + readNumber(m, 4) * relY + readNumber(m, 8) * relZ + readNumber(m, 12);
+        const yNdc = readNumber(m, 1) * relX + readNumber(m, 5) * relY + readNumber(m, 9) * relZ + readNumber(m, 13);
 
         const screenX = (xNdc / wNdc + 1) * 0.5 * canvasWidth;
         const screenY = (1 - yNdc / wNdc) * 0.5 * canvasHeight;
@@ -77,18 +85,18 @@ export class CPURenderer {
     } else if (viewMode === "2.5D" && viewProjMatrix) {
       try {
         const xy = projection.project(latRad, lonRad, 0.0);
-        const X = xy[0];
-        const Y = xy[1];
+        const X = readNumber(xy, 0);
+        const Y = readNumber(xy, 1);
         const Z = height;
 
         const m = viewProjMatrix;
-        const wNdc = m[3] * X + m[7] * Y + m[11] * Z + m[15];
+        const wNdc = readNumber(m, 3) * X + readNumber(m, 7) * Y + readNumber(m, 11) * Z + readNumber(m, 15);
         if (wNdc <= 0.0) {
           return null;
         }
 
-        const xNdc = m[0] * X + m[4] * Y + m[8] * Z + m[12];
-        const yNdc = m[1] * X + m[5] * Y + m[9] * Z + m[13];
+        const xNdc = readNumber(m, 0) * X + readNumber(m, 4) * Y + readNumber(m, 8) * Z + readNumber(m, 12);
+        const yNdc = readNumber(m, 1) * X + readNumber(m, 5) * Y + readNumber(m, 9) * Z + readNumber(m, 13);
 
         const screenX = (xNdc / wNdc + 1) * 0.5 * canvasWidth;
         const screenY = (1 - yNdc / wNdc) * 0.5 * canvasHeight;
@@ -101,8 +109,8 @@ export class CPURenderer {
 
     try {
       const xy = projection.project(latRad, lonRad, height);
-      const px = xy[0];
-      const py = xy[1];
+      const px = readNumber(xy, 0);
+      const py = readNumber(xy, 1);
 
       const tx = px - cx;
       const ty = py - cy;
@@ -249,6 +257,9 @@ export class CPURenderer {
     const solved = this.declutterEngine.solve([targetInput]);
     if (solved.length > 0) {
       const placement = solved[0];
+      if (placement === undefined) {
+        return;
+      }
       this.occupiedRects.push({
         x: placement.rect.x,
         y: placement.rect.y,

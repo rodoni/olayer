@@ -1,4 +1,4 @@
-import { MapDataSource, TileCacheStats, TileRequestOptions } from "./datasource";
+import { MapDataSource, ProviderLogger, SILENT_PROVIDER_LOGGER, TileCacheStats, TileRequestOptions } from "./datasource";
 import { TileCache, throwIfAborted } from "./tile_cache";
 
 /**
@@ -14,11 +14,13 @@ export class RasterTileSource implements MapDataSource {
   private generation = 0;
   private urlResolver: string | ((x: number, y: number, z: number) => string);
   private maxTiles: number;
+  private readonly logger: ProviderLogger;
 
   constructor(
     gl: WebGL2RenderingContext,
     urlResolver: string | ((x: number, y: number, z: number) => string) = "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
-    maxTiles: number = 100
+    maxTiles: number = 100,
+    logger: ProviderLogger = SILENT_PROVIDER_LOGGER,
   ) {
     this.gl = gl;
     this.urlResolver = urlResolver;
@@ -26,6 +28,7 @@ export class RasterTileSource implements MapDataSource {
       throw new Error("Raster tile cache capacity must be a positive integer");
     }
     this.maxTiles = maxTiles;
+    this.logger = logger;
     this.tileCache = new TileCache(maxTiles, (texture) => this.gl.deleteTexture(texture));
   }
 
@@ -102,7 +105,7 @@ export class RasterTileSource implements MapDataSource {
       throwIfAborted(options.signal);
       this.tileCache.set(key, texture);
     } catch (err) {
-      console.error(`Failed to load raster tile [z:${z}, x:${x}, y:${y}] from ${url}:`, err);
+      this.logger.error("Failed to load raster tile", { z, x, y, url, error: err });
       throw err;
     }
   }

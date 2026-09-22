@@ -12,7 +12,59 @@ import init, {
   VectorTileLayer,
   WasmStyleRegistry,
 } from "../src";
-import type { AltitudeMode, TerrainRenderMode } from "../src";
+import type { AltitudeMode, InterpolatedTarget, TerrainRenderMode } from "../src";
+
+interface DemoLogger {
+  info(message: string): void;
+  error(message: string, error?: unknown): void;
+}
+
+const demoLogger: DemoLogger = {
+  info: (message) => {
+    const output = document.getElementById("consoleLog");
+    if (output) output.textContent = `${message}\n${output.textContent}`;
+  },
+  error: (message, error) => {
+    const detail = error instanceof Error ? error.message : String(error ?? "unknown error");
+    const output = document.getElementById("consoleLog");
+    if (output) output.textContent = `${message} ${detail}\n${output.textContent}`;
+  },
+};
+
+function isInterpolatedTarget(value: unknown): value is InterpolatedTarget {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as Record<string, unknown>;
+  const position = candidate.position;
+  if (typeof position !== "object" || position === null) return false;
+  const coordinates = position as Record<string, unknown>;
+  return typeof candidate.id === "string" &&
+    typeof coordinates.lat === "number" &&
+    typeof coordinates.lon === "number" &&
+    typeof coordinates.height === "number" &&
+    typeof candidate.heading_rad === "number";
+}
+
+function isInterpolatedTargetArray(value: unknown): value is InterpolatedTarget[] {
+  return Array.isArray(value) && value.every(isInterpolatedTarget);
+}
+
+function getProjectionVersion(projection: WasmProjection): number {
+  const candidate = projection as unknown as Record<string, unknown>;
+  const version = candidate.version;
+  return typeof version === "function" ? Number(version.call(projection)) : 0;
+}
+
+function getAtlasCanvas(atlasManager: unknown): HTMLCanvasElement | null {
+  if (typeof atlasManager !== "object" || atlasManager === null) return null;
+  const canvas = (atlasManager as Record<string, unknown>).atlasCanvas;
+  return canvas instanceof HTMLCanvasElement ? canvas : null;
+}
+
+declare global {
+  interface Window {
+    olayerController?: OlayerController;
+  }
+}
 
 // Pre-define coordinates for São Paulo (TMA SP) in radians
 const SP_LAT_RAD = -23.62 * (Math.PI / 180);
@@ -108,14 +160,14 @@ async function loadLocalGeoTiff(fileName: string): Promise<boolean> {
     if (status) status.textContent = `${fileName} loaded (${bounds.map(value => value.toFixed(3)).join(", ")})`;
     return true;
   } catch (error) {
-    console.error(`Failed to load local GeoTIFF ${fileName}:`, error);
+    demoLogger.error(`Failed to load local GeoTIFF ${fileName}:`, error);
     if (status) status.textContent = `Could not load ${fileName}; using synthetic DTED`;
     return false;
   }
 }
 
 function loadMockDtedTerrain(): void {
-  console.log("Loading mock DTED tiles...");
+  demoLogger.info("Loading mock DTED tiles...");
   for (let lat = -25; lat <= -22; lat++) {
     for (let lon = -48; lon <= -45; lon++) {
       const latStr = Math.abs(lat).toString().padStart(2, "0") + "0000" + (lat < 0 ? "S" : "N");
@@ -124,11 +176,11 @@ function loadMockDtedTerrain(): void {
       try {
         controller.terrainEngine.load_tile(tile);
       } catch (error) {
-        console.error(`Failed to load tile for lat=${lat}, lon=${lon}:`, error);
+        demoLogger.error(`Failed to load tile for lat=${lat}, lon=${lon}:`, error);
       }
     }
   }
-  console.log("Mock DTED tiles loaded successfully!");
+  demoLogger.info("Mock DTED tiles loaded successfully!");
 }
 
 function selectedAltitudeMode(): AltitudeMode {
@@ -137,7 +189,7 @@ function selectedAltitudeMode(): AltitudeMode {
 }
 
 // Draw the 2.5D vertical flight profile chart
-function drawVerticalProfile(target: any, profileData: number[]) {
+function drawVerticalProfile(target: InterpolatedTarget, profileData: number[]): void {
   const canvas = document.getElementById("profileCanvas") as HTMLCanvasElement;
   if (!canvas) return;
   const ctx = canvas.getContext("2d");
@@ -286,19 +338,19 @@ class GridLayer extends Layer {
     this.renderer = new WebGLRenderer(gl);
     this.projection = projection;
     this.viewMode = viewMode;
-    this.lastVersion = (projection as any).version ? (projection as any).version() : 0;
+    this.lastVersion = getProjectionVersion(projection);
     this.renderer.rebuildGrid(this.projection, this.viewMode);
   }
 
   public updateProjection(newProjection: WasmProjection, viewMode: string): void {
     this.projection = newProjection;
     this.viewMode = viewMode;
-    this.lastVersion = (newProjection as any).version ? (newProjection as any).version() : 0;
+    this.lastVersion = getProjectionVersion(newProjection);
     this.renderer.rebuildGrid(this.projection, this.viewMode);
   }
 
   public renderStatic(gl: WebGL2RenderingContext, viewProjMatrix: Float32Array): void {
-    const version = (this.projection as any).version ? (this.projection as any).version() : 0;
+    const version = getProjectionVersion(this.projection);
     if (this.lastVersion !== version) {
       this.renderer.rebuildGrid(this.projection, this.viewMode);
       this.lastVersion = version;
@@ -377,7 +429,7 @@ class NavAidLayer extends Layer {
       }
     }
 
-    const atlasCanvas = (this.controller.atlasManager as any).atlasCanvas;
+    const atlasCanvas = getAtlasCanvas(this.controller.atlasManager);
 
     for (const na of NAV_AIDS) {
       const screenPos = this.cpuRenderer.projectToScreen(
@@ -410,7 +462,7 @@ class NavAidLayer extends Layer {
               this.controller.styleRegistry
             );
           } catch (err) {
-            console.error("Failed to register WASM symbol in atlas:", err);
+            demoLogger.error("Failed to register WASM symbol in atlas:", err);
           }
         }
 
@@ -484,14 +536,12 @@ class RadarLayer extends Layer {
     }
 
     // Retrieve active targets list interpolated at currentTime
-    let targets: any[] = [];
+    let targets: InterpolatedTarget[] = [];
     try {
-      const jsVal = this.controller.interpolator.interpolate_all(currentTime);
-      if (jsVal) {
-        targets = jsVal as any[];
-      }
+      const jsVal: unknown = this.controller.interpolator.interpolate_all(currentTime);
+      if (isInterpolatedTargetArray(jsVal)) targets = jsVal;
     } catch (err) {
-      console.error("Failed to interpolate targets:", err);
+      demoLogger.error("Failed to interpolate targets:", err);
     }
 
     // Se houver tráfego ativo, mantém o controlador ativo (60 FPS) para animação suave
@@ -538,7 +588,7 @@ class RadarLayer extends Layer {
             drawVerticalProfile(selectedTarget, Array.from(profileData));
           }
         } catch (err) {
-          console.error("Failed to calculate vertical profile:", err);
+          demoLogger.error("Failed to calculate vertical profile:", err);
         }
       } else {
         selectedTargetId = null;
@@ -588,11 +638,11 @@ class RadarLayer extends Layer {
               this.controller.styleRegistry
             );
           } catch (err) {
-            console.error("Failed to register WASM symbol in atlas:", err);
+            demoLogger.error("Failed to register WASM symbol in atlas:", err);
           }
         }
 
-        const atlasCanvas = (this.controller.atlasManager as any).atlasCanvas;
+        const atlasCanvas = getAtlasCanvas(this.controller.atlasManager);
 
         this.cpuRenderer.drawTarget(
           {
@@ -841,9 +891,9 @@ function updateMapLayers(): void {
 // Startup execution after WASM loading
 async function start() {
   // 1. Initialize WebAssembly
-  console.log("Initializing WebAssembly...");
+  demoLogger.info("Initializing WebAssembly...");
   await init();
-  console.log("WebAssembly initialized successfully!");
+  demoLogger.info("WebAssembly initialized successfully!");
 
   // 2. Set active projection
   activeProjection = WasmProjection.new_stereographic(SP_LAT_RAD, SP_LON_RAD);
@@ -872,9 +922,9 @@ async function start() {
     }
     const compiledSymbolsJson = await symbolsResponse.text();
     controller.symbolRegistry.register_declarative_provider(compiledSymbolsJson);
-    console.log("Compiled symbols library registered successfully!");
+    demoLogger.info("Compiled symbols library registered successfully!");
   } catch (err) {
-    console.error("Failed to load compiled symbols library:", err);
+    demoLogger.error("Failed to load compiled symbols library:", err);
   }
 
   // Register custom PNG helicopter symbol in atlas
@@ -885,9 +935,9 @@ async function start() {
       32,
       32
     );
-    console.log("Custom PNG helicopter symbol registered in atlas successfully!");
+    demoLogger.info("Custom PNG helicopter symbol registered in atlas successfully!");
   } catch (err) {
-    console.error("Failed to register custom PNG helicopter symbol:", err);
+    demoLogger.error("Failed to register custom PNG helicopter symbol:", err);
   }
 
   const sldXml = `<?xml version="1.0" encoding="UTF-8"?>
@@ -914,7 +964,7 @@ async function start() {
   controller.styleRegistry = WasmStyleRegistry.parse(sldXml);
 
   // Set controller on window for layers to access
-  (window as any).olayerController = controller;
+  window.olayerController = controller;
 
   // Create static grid, navaid and radar layers (independent of base map URL)
   gridLayer = new GridLayer(controller.gl, activeProjection, "2D");
@@ -1101,7 +1151,7 @@ async function start() {
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
 
-    let nearestTarget: any = null;
+    let nearestTarget: InterpolatedTarget | null = null;
     let minDist = 15; // click threshold in pixels
 
     const camera = controller.getCameraState();
@@ -1119,12 +1169,10 @@ async function start() {
       } catch {}
     }
 
-    let targets: any[] = [];
+    let targets: InterpolatedTarget[] = [];
     try {
-      const jsVal = controller.interpolator.interpolate_all(Date.now() / 1000);
-      if (jsVal) {
-        targets = jsVal as any[];
-      }
+      const jsVal: unknown = controller.interpolator.interpolate_all(Date.now() / 1000);
+      if (isInterpolatedTargetArray(jsVal)) targets = jsVal;
     } catch {}
 
     for (const t of targets) {
@@ -1203,7 +1251,7 @@ async function start() {
     }
 
     controller.setViewMode(viewMode);
-    (controller as any).projection = activeProjection;
+    Object.defineProperty(controller, "projection", { value: activeProjection, writable: false });
     gridLayer.updateProjection(activeProjection, viewMode);
     updateTerrainControlsVisibility(viewMode);
     
@@ -1375,6 +1423,6 @@ function syncCameraSliders() {
 }
 
 // Launch application
-start().catch(err => {
-  console.error("Failed to start Olayer Demo:", err);
+start().catch((err: unknown) => {
+  demoLogger.error("Failed to start Olayer Demo:", err);
 });
