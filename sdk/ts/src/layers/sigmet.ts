@@ -97,7 +97,7 @@ export class SigmetLayer extends Layer {
     // Dynamic warning labels and animations hook
   }
 
-  public destroy(): void {
+  public override destroy(): void {
     if (this.dataset) {
       this.dataset.free();
       this.dataset = null;

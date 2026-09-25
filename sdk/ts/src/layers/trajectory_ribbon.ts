@@ -144,8 +144,8 @@ export class TrajectoryRibbonLayer extends Layer {
   /**
    * Returns map of all active trajectory ribbon meshes.
    */
-  public getAllRibbonMeshes(): Map<string, TrajectoryRibbonRecord> {
-    return this.ribbons;
+  public getAllRibbonMeshes(): ReadonlyMap<string, TrajectoryRibbonRecord> {
+    return new Map(this.ribbons);
   }
 
   public override renderStatic(_gl: WebGL2RenderingContext, _viewProjMatrix: Float32Array): void {
@@ -156,7 +156,7 @@ export class TrajectoryRibbonLayer extends Layer {
     // Dynamic overlay hook
   }
 
-  public destroy(): void {
+  public override destroy(): void {
     this.ribbons.clear();
   }
 }

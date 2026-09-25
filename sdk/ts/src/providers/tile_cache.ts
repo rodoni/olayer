@@ -104,11 +104,21 @@ export async function retryTileRequest<T>(
       if (attempt >= maxRetries) throw error;
       attempt++;
       await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(resolve, 50 * (2 ** (attempt - 1)));
-        signal?.addEventListener("abort", () => {
-          clearTimeout(timer);
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const cleanup = (): void => {
+          if (timer !== undefined) clearTimeout(timer);
+          signal?.removeEventListener("abort", onAbort);
+        };
+        const onAbort = (): void => {
+          cleanup();
           reject(new DOMException("The tile request was aborted", "AbortError"));
-        }, { once: true });
+        };
+        const settle = (settler: () => void): void => {
+          cleanup();
+          settler();
+        };
+        timer = setTimeout(() => settle(resolve), 50 * (2 ** (attempt - 1)));
+        signal?.addEventListener("abort", onAbort, { once: true });
       });
     }
   }

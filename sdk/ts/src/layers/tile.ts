@@ -1,4 +1,5 @@
 import { Layer } from "./layer";
+import type { LayerRenderContext } from "./layer";
 import type { OlayerController } from "../controller";
 import { RasterTileSource } from "../providers/raster";
 import { WasmProjection, lla_to_ecef } from "olayer-wasm";
@@ -278,12 +279,12 @@ export class TileLayer extends Layer {
   /**
    * Implementação da renderização estática na GPU.
    */
-  public renderStatic(gl: WebGL2RenderingContext, viewProjMatrix: Float32Array): void {
+  public renderStatic(gl: WebGL2RenderingContext, viewProjMatrix: Float32Array, context?: LayerRenderContext): void {
     if (!this.visible || this.opacity <= 0.01) return;
 
     this.initWebGL(gl);
 
-    const controller = window.olayerController;
+    const controller = context?.controller;
     if (!controller) return;
 
     const camera = controller.getCameraState();
@@ -344,7 +345,9 @@ export class TileLayer extends Layer {
     for (let ty = bounds.minY; ty <= bounds.maxY; ty++) {
       for (let tx = bounds.minX; tx <= bounds.maxX; tx++) {
         // Dispara o carregamento assíncrono (se não estiver no cache)
-        this.rasterSource.loadTile(tx, ty, z).catch(() => {});
+        void this.rasterSource.loadTile(tx, ty, z).catch((error: unknown) => {
+          controller.logger.error("Raster tile loading failed", { tx, ty, z, error });
+        });
         
         const texture = this.rasterSource.getTileTexture(tx, ty, z);
         if (texture) {
@@ -469,7 +472,7 @@ export class TileLayer extends Layer {
   /**
    * Liberação de recursos WebGL do layer.
    */
-  public destroy(gl: WebGL2RenderingContext): void {
+  public override destroy(gl: WebGL2RenderingContext): void {
     this.clearGeometryCache(gl);
     if (this.indexBuffer) {
       gl.deleteBuffer(this.indexBuffer);

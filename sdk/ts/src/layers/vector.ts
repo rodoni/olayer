@@ -1,4 +1,5 @@
 import { Layer } from "./layer";
+import type { LayerRenderContext } from "./layer";
 import type { OlayerController } from "../controller";
 import { VectorTileSource, VectorFeature } from "../providers/vector";
 import { WasmProjection, lla_to_ecef } from "olayer-wasm";
@@ -218,12 +219,12 @@ export class VectorTileLayer extends Layer {
     };
   }
 
-  public renderStatic(gl: WebGL2RenderingContext, viewProjMatrix: Float32Array): void {
+  public renderStatic(gl: WebGL2RenderingContext, viewProjMatrix: Float32Array, context?: LayerRenderContext): void {
     if (!this.visible || this.opacity <= 0.01) return;
 
     this.initWebGL(gl);
 
-    const controller = window.olayerController;
+    const controller = context?.controller;
     if (!controller) return;
 
     const camera = controller.getCameraState();
@@ -242,7 +243,9 @@ export class VectorTileLayer extends Layer {
     for (let ty = bounds.minY; ty <= bounds.maxY; ty++) {
       for (let tx = bounds.minX; tx <= bounds.maxX; tx++) {
         // Dispara o carregamento assíncrono (se não estiver no cache)
-        this.vectorSource.loadTile(tx, ty, z).catch(() => {});
+        void this.vectorSource.loadTile(tx, ty, z).catch((error: unknown) => {
+          controller.logger.error("Vector tile loading failed", { tx, ty, z, error });
+        });
         const tileFeatures = this.vectorSource.getTileFeatures(tx, ty, z);
         if (tileFeatures && tileFeatures.length > 0) {
           featuresToDraw.push(...tileFeatures);
@@ -361,7 +364,7 @@ export class VectorTileLayer extends Layer {
     // Linhas de fronteira estruturais não possuem sobreposição dinâmica CPU
   }
 
-  public destroy(gl: WebGL2RenderingContext): void {
+  public override destroy(gl: WebGL2RenderingContext): void {
     if (this.vertexBuffer) {
       gl.deleteBuffer(this.vertexBuffer);
       this.vertexBuffer = null;

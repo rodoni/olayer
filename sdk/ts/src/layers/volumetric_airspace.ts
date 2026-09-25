@@ -127,8 +127,8 @@ export class VolumetricAirspaceLayer extends Layer {
   /**
    * Returns map of all active airspace meshes.
    */
-  public getAllAirspaceMeshes(): Map<string, AirspaceMeshRecord> {
-    return this.airspaces;
+  public getAllAirspaceMeshes(): ReadonlyMap<string, AirspaceMeshRecord> {
+    return new Map(this.airspaces);
   }
 
   public override renderStatic(_gl: WebGL2RenderingContext, _viewProjMatrix: Float32Array): void {
@@ -139,7 +139,7 @@ export class VolumetricAirspaceLayer extends Layer {
     // Dynamic overlay hook
   }
 
-  public destroy(): void {
+  public override destroy(): void {
     this.airspaces.clear();
   }
 }

@@ -2,12 +2,25 @@
   "name": "olayer-sdk",
   "version": "0.1.0",
   "description": "TypeScript SDK for Olayer GIS ATC Framework",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "./dist/olayer.js",
+  "module": "./dist/olayer.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "wasm/pkg"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/olayer.js",
+      "require": "./dist/olayer.umd.cjs",
+      "default": "./dist/olayer.js"
+    }
+  },
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "tsc --emitDeclarationOnly --noImplicitOverride false && vite build",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit",
     "preview": "vite preview",

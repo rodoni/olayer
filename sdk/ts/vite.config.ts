@@ -19,16 +19,18 @@ export default defineConfig({
     topLevelAwait()
   ],
   build: {
+    emptyOutDir: false,
     lib: {
       entry: resolve(__dirname, "src/index.ts"),
       name: "Olayer",
-      fileName: "olayer",
+       fileName: (format) => format === "es" ? "olayer.js" : "olayer.umd.cjs",
       formats: ["es", "umd"]
     },
     rollupOptions: {
       external: [],
       output: {
-        globals: {}
+        globals: {},
+        exports: "named",
       }
     }
   },

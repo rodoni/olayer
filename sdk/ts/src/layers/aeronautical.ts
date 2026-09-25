@@ -127,7 +127,7 @@ export class AeronauticalLayer extends Layer {
   /**
    * Releases WASM dataset allocations.
    */
-  public destroy(): void {
+  public override destroy(): void {
     if (this.dataset) {
       this.dataset.free();
       this.dataset = null;

@@ -127,6 +127,7 @@ export class OlayerController {
     // Initial Camera Setup
     this.centerLat = config.initialCenterLatRad ?? 0.0;
     this.centerLon = config.initialCenterLonRad ?? 0.0;
+    this.projection.update_center(this.centerLat, this.centerLon);
     this.zoom = config.initialZoom ?? 1.0;
     this.viewportBaseMeters = config.viewportBaseMeters ?? 100000.0;
     this.altitudeMode = config.altitudeMode ?? "absolute";
@@ -170,6 +171,9 @@ export class OlayerController {
    */
   public setCenter(latRad: number, lonRad: number): void {
     if (this.destroyed) return;
+    if (!Number.isFinite(latRad) || !Number.isFinite(lonRad)) {
+      throw new RangeError("Camera center coordinates must be finite");
+    }
     this.centerLat = latRad;
     this.centerLon = lonRad;
     this.projection.update_center(latRad, lonRad);
@@ -181,10 +185,9 @@ export class OlayerController {
    */
   public setZoom(zoom: number): void {
     if (this.destroyed) return;
-    if (zoom > 0) {
-      this.zoom = zoom;
-      this.triggerActive();
-    }
+    if (!Number.isFinite(zoom) || zoom <= 0) throw new RangeError("Zoom must be finite and positive");
+    this.zoom = zoom;
+    this.triggerActive();
   }
 
   /**
@@ -192,6 +195,7 @@ export class OlayerController {
    */
   public setRotation(rotationRad: number): void {
     if (this.destroyed) return;
+    if (!Number.isFinite(rotationRad)) throw new RangeError("Rotation must be finite");
     this.rotation = rotationRad;
     this.triggerActive();
   }
@@ -318,6 +322,7 @@ export class OlayerController {
    */
   public setPitch(pitchRad: number): void {
     if (this.destroyed) return;
+    if (!Number.isFinite(pitchRad)) throw new RangeError("Pitch must be finite");
     this.pitch = Math.max(-180 * Math.PI / 180, Math.min(180 * Math.PI / 180, pitchRad));
     this.triggerActive();
   }
@@ -334,6 +339,7 @@ export class OlayerController {
    */
   public setRoll(rollRad: number): void {
     if (this.destroyed) return;
+    if (!Number.isFinite(rollRad)) throw new RangeError("Roll must be finite");
     this.roll = ((rollRad + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
     this.triggerActive();
   }
@@ -419,21 +425,30 @@ export class OlayerController {
     this.gl.clearColor(0.08, 0.09, 0.12, 1.0); // SLEEK DARK MODE BASE
     this.gl.clear(this.gl.COLOR_BUFFER_BIT | this.gl.DEPTH_BUFFER_BIT);
 
-    this.layerManager.renderStaticLayers(this.gl, vpMatrix);
+    const renderContext = { controller: this };
+    try {
+      this.layerManager.renderStaticLayers(this.gl, vpMatrix, renderContext);
 
     // 3. Clear and Render Dynamic CPU Layers (Canvas 2D)
     this.ctx2d.clearRect(0, 0, this.canvas2D.width, this.canvas2D.height);
-    this.layerManager.renderDynamicLayers(this.ctx2d, Date.now() / 1000);
+      this.layerManager.renderDynamicLayers(this.ctx2d, Date.now() / 1000, renderContext);
+    } catch (error: unknown) {
+      this.logger.error("Layer rendering failed", error);
+    } finally {
+      camera.free();
+    }
 
-    // Free camera wrapper in WebAssembly heap
-    camera.free();
-    this.onMetrics?.({
-      type: "frame",
-      durationMs: performance.now() - frameStart,
-      fps: this.currentFps,
-      active: this.isActive,
-      timestamp: Date.now(),
-    });
+    try {
+      this.onMetrics?.({
+        type: "frame",
+        durationMs: performance.now() - frameStart,
+        fps: this.currentFps,
+        active: this.isActive,
+        timestamp: Date.now(),
+      });
+    } catch (error: unknown) {
+      this.logger.error("Metrics callback failed", error);
+    }
   }
 
   /**
@@ -509,7 +524,13 @@ export class OlayerController {
       }
 
       // Project current center to planar meters
-      const projectedCenter = this.projection.project(this.centerLat, this.centerLon, this.centerHeight);
+      let projectedCenter: Float64Array | number[];
+      try {
+        projectedCenter = this.projection.project(this.centerLat, this.centerLon, this.centerHeight);
+      } catch (error: unknown) {
+        this.logger.error("Pan projection failed", error);
+        return;
+      }
       const cx = projectedCenter[0];
       const cy = projectedCenter[1];
       if (cx === undefined || cy === undefined) {
@@ -565,6 +586,7 @@ export class OlayerController {
     this.destroyed = true;
     for (const cleanup of this.listenerCleanups.splice(0)) cleanup();
     this.stopLoop();
+    for (const layer of this.layerManager.getLayers()) layer.destroy(this.gl);
     this.dataManager.destroy();
     this.terrainEngine.free();
     this.interpolator.free();

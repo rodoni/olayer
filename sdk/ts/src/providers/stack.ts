@@ -1,4 +1,4 @@
-import { MapDataSource, TileCacheStats } from "./datasource";
+import type { MapDataSource, TileCacheStats } from "./datasource";
 
 interface CacheSizeSource extends MapDataSource {
   getCacheSize(): number;
@@ -24,10 +24,10 @@ export class MapDataStack {
   }
 
   /**
-   * Retrieves a registered data source by its identifier, casted to its specific type.
+   * Retrieves a registered data source by its identifier.
    */
-  public getSource<T extends MapDataSource>(id: string): T | null {
-    return (this.sources.get(id) as T) || null;
+  public getSource(id: string): MapDataSource | null {
+    return this.sources.get(id) ?? null;
   }
 
   /**

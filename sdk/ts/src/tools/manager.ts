@@ -141,8 +141,9 @@ export class SnailTrailTracker {
   /**
    * Returns active history dots for a specific track.
    */
-  public getTrackDots(trackId: string): HistoryDot[] | undefined {
-    return this.tracks.get(trackId);
+  public getTrackDots(trackId: string): readonly HistoryDot[] | undefined {
+    const dots = this.tracks.get(trackId);
+    return dots ? dots.map((dot) => ({ ...dot, position: { ...dot.position } })) : undefined;
   }
 
   /**

@@ -1,4 +1,5 @@
 import { Layer } from "./layer";
+import type { LayerRenderContext } from "./layer";
 import { colorize_dbz_grid, dbz_to_rgba, generate_isolines } from "olayer-wasm";
 
 export type RadarPaletteType = "nexrad" | "icao" | "high_contrast";
@@ -77,14 +78,21 @@ export class WeatherRadarLayer extends Layer {
    * Returns current grid metadata if set.
    */
   public getGridData(): RadarGridData | null {
-    return this.currentGrid;
+    if (!this.currentGrid) return null;
+    return {
+      ...this.currentGrid,
+      grid: this.currentGrid.grid instanceof Float64Array
+        ? new Float64Array(this.currentGrid.grid)
+        : [...this.currentGrid.grid],
+      boundsDeg: [...this.currentGrid.boundsDeg] as [number, number, number, number],
+    };
   }
 
   /**
    * Returns the colorized raw RGBA pixel buffer (width * height * 4).
    */
   public getColorizedRgba(): Uint8Array | null {
-    return this.colorizedRgba;
+    return this.colorizedRgba ? new Uint8Array(this.colorizedRgba) : null;
   }
 
   /**
@@ -148,12 +156,37 @@ export class WeatherRadarLayer extends Layer {
     // WebGL texture quad rendering hook
   }
 
-  public override renderDynamic(_ctx: CanvasRenderingContext2D, _currentTime: number): void {
+  public override renderDynamic(ctx: CanvasRenderingContext2D, _currentTime: number, context?: LayerRenderContext): void {
     if (!this.visible || !this.currentGrid || !this.offscreenCanvas) return;
-    // Dynamic overlay rendering
+    const [minLat, minLon, maxLat, maxLon] = this.currentGrid.boundsDeg;
+    const controller = context?.controller;
+    if (!controller) return;
+    try {
+      const sw = controller.projection.project(minLat * Math.PI / 180, minLon * Math.PI / 180, 0);
+      const ne = controller.projection.project(maxLat * Math.PI / 180, maxLon * Math.PI / 180, 0);
+      const width = controller.canvas2D.width;
+      const height = controller.canvas2D.height;
+      const aspect = width / height;
+      const viewportWidth = controller.getViewportBaseMeters() / controller.getZoom();
+      const viewportHeight = viewportWidth / aspect;
+      const center = controller.projection.project(controller.getCenterLat(), controller.getCenterLon(), 0);
+      const toScreen = (point: ArrayLike<number>): [number, number] => {
+        const dx = (point[0] ?? 0) - (center[0] ?? 0);
+        const dy = (point[1] ?? 0) - (center[1] ?? 0);
+        return [((dx / (viewportWidth / 2)) + 1) * width / 2, (1 - dy / (viewportHeight / 2)) * height / 2];
+      };
+      const [left, top] = toScreen(sw);
+      const [right, bottom] = toScreen(ne);
+      ctx.save();
+      ctx.globalAlpha = this.opacity;
+      ctx.drawImage(this.offscreenCanvas, left, bottom, right - left, top - bottom);
+      ctx.restore();
+    } catch {
+      // The radar tile is outside the active projection.
+    }
   }
 
-  public destroy(): void {
+  public override destroy(): void {
     this.currentGrid = null;
     this.colorizedRgba = null;
     this.offscreenCanvas = null;

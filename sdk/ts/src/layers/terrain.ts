@@ -1,4 +1,5 @@
 import { Layer } from "./layer";
+import type { LayerRenderContext } from "./layer";
 import type { OlayerController } from "../controller";
 import { lla_to_ecef, WasmProjection } from "olayer-wasm";
 
@@ -450,9 +451,9 @@ export class TerrainLayer extends Layer {
     image.src = this.imageryTemplate.replace("{z}", String(tile.z)).replace("{x}", String(tile.x)).replace("{y}", String(tile.y));
   }
 
-  public renderStatic(gl: WebGL2RenderingContext, viewProjMatrix: Float32Array): void {
+  public renderStatic(gl: WebGL2RenderingContext, viewProjMatrix: Float32Array, context?: LayerRenderContext): void {
     if (!this.visible || this.opacity <= 0.01) return;
-    const controller = window.olayerController;
+    const controller = context?.controller;
     if (!controller) return;
     if (controller.getViewMode() === "2D") return;
 
@@ -692,9 +693,9 @@ export class TerrainContourLayer extends Layer {
     this.vertexCount = vertices.length / 3;
   }
 
-  public renderStatic(gl: WebGL2RenderingContext, viewProjMatrix: Float32Array): void {
+  public renderStatic(gl: WebGL2RenderingContext, viewProjMatrix: Float32Array, context?: LayerRenderContext): void {
     if (!this.visible || this.opacity <= 0.01) return;
-    const controller = window.olayerController;
+    const controller = context?.controller;
     if (!controller) return;
     if (controller.getViewMode() === "2D") return;
     this.initWebGL(gl);

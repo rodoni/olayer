@@ -1,11 +1,5 @@
 import type { OlayerController } from "../controller";
 
-declare global {
-  interface Window {
-    olayerController?: OlayerController;
-  }
-}
-
 /**
  * Base abstract class for all visualization layers in the Olayer framework.
  */
@@ -22,13 +16,29 @@ export abstract class Layer {
    * Renders static elements of the layer on the GPU using WebGL2.
    * This is typically only evaluated when the camera properties change.
    */
-  public abstract renderStatic(gl: WebGL2RenderingContext, viewProjMatrix: Float32Array): void;
+  public abstract renderStatic(
+    gl: WebGL2RenderingContext,
+    viewProjMatrix: Float32Array,
+    context?: LayerRenderContext,
+  ): void;
 
   /**
    * Renders dynamic overlay elements (labels, targets) on the CPU using Canvas 2D.
    * This is evaluated on every frame at up to 60 FPS.
    */
-  public abstract renderDynamic(ctx: CanvasRenderingContext2D, currentTime: number): void;
+  public abstract renderDynamic(
+    ctx: CanvasRenderingContext2D,
+    currentTime: number,
+    context?: LayerRenderContext,
+  ): void;
+
+  public destroy(_gl: WebGL2RenderingContext): void {
+    // Layers without GPU resources have nothing to release.
+  }
+}
+
+export interface LayerRenderContext {
+  readonly controller: OlayerController;
 }
 
 /**
@@ -83,10 +93,18 @@ export class LayerManager {
   /**
    * Renders all visible static layers onto WebGL.
    */
-  public renderStaticLayers(gl: WebGL2RenderingContext, viewProjMatrix: Float32Array): void {
+  public renderStaticLayers(
+    gl: WebGL2RenderingContext,
+    viewProjMatrix: Float32Array,
+    context?: LayerRenderContext,
+  ): void {
     for (const layer of this.layers) {
       if (layer.visible) {
-        layer.renderStatic(gl, viewProjMatrix);
+        try {
+          layer.renderStatic(gl, viewProjMatrix, context);
+        } catch (error: unknown) {
+          context?.controller.logger.error(`Static layer "${layer.id}" failed`, error);
+        }
       }
     }
   }
@@ -94,10 +112,18 @@ export class LayerManager {
   /**
    * Renders all visible dynamic layers onto the Canvas 2D context.
    */
-  public renderDynamicLayers(ctx: CanvasRenderingContext2D, currentTime: number): void {
+  public renderDynamicLayers(
+    ctx: CanvasRenderingContext2D,
+    currentTime: number,
+    context?: LayerRenderContext,
+  ): void {
     for (const layer of this.layers) {
       if (layer.visible) {
-        layer.renderDynamic(ctx, currentTime);
+        try {
+          layer.renderDynamic(ctx, currentTime, context);
+        } catch (error: unknown) {
+          context?.controller.logger.error(`Dynamic layer "${layer.id}" failed`, error);
+        }
       }
     }
   }
