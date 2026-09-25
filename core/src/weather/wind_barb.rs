@@ -2,6 +2,9 @@ use crate::geodesy::coords::LatLon;
 use crate::geodesy::local_frame::{EnuPoint, LocalTangentFrame};
 use crate::weather::errors::WeatherError;
 
+const MAX_WIND_SPEED_KNOTS: f64 = 1_000.0;
+const MAX_STAFF_LENGTH_METERS: f64 = 1_000_000.0;
+
 /// Geometric elements composing an aviation standard wind barb symbol.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WindBarbGeometry {
@@ -39,13 +42,16 @@ pub fn generate_wind_barb(
     if origin.validate().is_err()
         || !speed_knots.is_finite()
         || speed_knots < 0.0
+        || speed_knots > MAX_WIND_SPEED_KNOTS
         || !direction_rad.is_finite()
         || !staff_length_meters.is_finite()
         || staff_length_meters <= 0.0
+        || staff_length_meters > MAX_STAFF_LENGTH_METERS
     {
-        return Err(WeatherError::InvalidWindParameters(format!(
-            "Wind speed cannot be negative: {speed_knots} kt"
-        )));
+        return Err(WeatherError::InvalidWindParameters(
+            "wind origin, speed, direction, or staff length is outside the supported range"
+                .to_string(),
+        ));
     }
 
     let frame = LocalTangentFrame::new(*origin);
@@ -68,7 +74,8 @@ pub fn generate_wind_barb(
             "wind speed is too large".to_string(),
         ));
     }
-    let rounded_speed = rounded_speed_f as u32;
+    let rounded_speed = u32::try_from(rounded_speed_f as u64)
+        .map_err(|_| WeatherError::InvalidWindParameters("wind speed is too large".to_string()))?;
 
     let num_pennants = (rounded_speed / 50) as usize;
     let remainder = rounded_speed % 50;
@@ -161,13 +168,32 @@ pub fn generate_wind_barb(
         barbs.push((lla_base, lla_end));
     }
 
-    Ok(WindBarbGeometry {
+    let geometry = WindBarbGeometry {
         origin: *origin,
         staff: (*origin, tip_lla),
         barbs,
         pennants,
         calm_circle_radius_m: None,
-    })
+    };
+    let valid = [geometry.staff.0, geometry.staff.1]
+        .iter()
+        .all(|point| point.validate().is_ok())
+        && geometry
+            .barbs
+            .iter()
+            .flat_map(|(start, end)| [start, end])
+            .all(|point| point.validate().is_ok())
+        && geometry
+            .pennants
+            .iter()
+            .flat_map(|triangle| triangle.iter())
+            .all(|point| point.validate().is_ok());
+    if !valid {
+        return Err(WeatherError::InvalidWindParameters(
+            "generated wind geometry is outside valid geographic bounds".to_string(),
+        ));
+    }
+    Ok(geometry)
 }
 
 /// Serializes a wind barb geometry into a flat array of lines: `[start_lat, start_lon, end_lat, end_lon, ...]` in degrees.

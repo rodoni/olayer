@@ -203,3 +203,76 @@ fn test_isolines_reject_longitude_out_of_range() {
     let grid = [0.0, 1.0, 0.0, 1.0];
     assert!(generate_isolines_rad(&grid, 2, 2, (-0.1, -4.0, 0.1, 0.0), &[0.5],).is_err());
 }
+
+#[test]
+fn test_radar_palette_name_parsing_is_case_insensitive_without_allocation_contract() {
+    assert_eq!(
+        RadarColorPalette::from_str_name(" NEXRAD "),
+        Some(RadarColorPalette::Nexrad)
+    );
+    assert_eq!(
+        RadarColorPalette::from_str_name("icao_standard"),
+        Some(RadarColorPalette::Icao)
+    );
+    assert_eq!(
+        RadarColorPalette::from_str_name("HIGH_CONTRAST"),
+        Some(RadarColorPalette::HighContrast)
+    );
+    assert_eq!(RadarColorPalette::from_str_name("unknown"), None);
+}
+
+#[test]
+fn test_isolines_constant_grid_has_no_degenerate_segments() {
+    let grid = [1.0, 1.0, 1.0, 1.0];
+    let segments = generate_isolines_rad(&grid, 2, 2, (0.0, 0.0, 1.0, 1.0), &[1.0]).unwrap();
+    assert!(segments.is_empty());
+}
+
+#[test]
+fn test_isolines_saddle_uses_center_decider() {
+    let grid = [2.0, 0.0, 0.0, 2.0];
+    let segments = generate_isolines_rad(&grid, 2, 2, (0.0, 0.0, 1.0, 1.0), &[1.0]).unwrap();
+    assert_eq!(segments.len(), 2);
+    for segment in segments {
+        assert_eq!(segment.isovalue, 1.0);
+        assert!(segment.start.lat.is_finite() && segment.end.lat.is_finite());
+        assert!(segment.start.lon.is_finite() && segment.end.lon.is_finite());
+    }
+}
+
+#[test]
+fn test_wind_barb_rejects_unbounded_inputs() {
+    let origin = LatLon::from_degrees(0.0, 0.0, 0.0);
+    assert!(matches!(
+        generate_wind_barb(&origin, 1_001.0, 0.0, 1_000.0, false),
+        Err(WeatherError::InvalidWindParameters(_))
+    ));
+    assert!(matches!(
+        generate_wind_barb(&origin, 10.0, 0.0, 1_000_001.0, false),
+        Err(WeatherError::InvalidWindParameters(_))
+    ));
+}
+
+#[test]
+fn test_sigmet_parser_requires_feature_collection_and_closed_ring() {
+    let not_collection = r#"{"type":"Feature","features":[]}"#;
+    assert!(matches!(
+        SigmetDataset::from_geojson(not_collection),
+        Err(WeatherError::ParseError(message)) if message.contains("FeatureCollection")
+    ));
+
+    let open_ring = r#"{"type":"FeatureCollection","features":[{"type":"Feature","properties":{},"geometry":{"type":"Polygon","coordinates":[[[0,0],[1,0],[1,1]]]}}]}"#;
+    assert!(matches!(
+        SigmetDataset::from_geojson(open_ring),
+        Err(WeatherError::ParseError(message)) if message.contains("closed ring")
+    ));
+}
+
+#[test]
+fn test_sigmet_parser_rejects_reversed_validity_window() {
+    let geojson = r#"{"type":"FeatureCollection","features":[{"type":"Feature","properties":{"valid_from_epoch_s":20,"valid_until_epoch_s":10},"geometry":{"type":"Polygon","coordinates":[[[0,0],[1,0],[1,1],[0,0]]]}}]}"#;
+    assert!(matches!(
+        SigmetDataset::from_geojson(geojson),
+        Err(WeatherError::ParseError(message)) if message.contains("bounds")
+    ));
+}

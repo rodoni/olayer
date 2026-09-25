@@ -84,16 +84,27 @@ pub fn generate_isolines_rad(
         LatLon::new(lat, lon, 0.0)
     };
 
-    // Helper for linear edge interpolation: returns fraction t in [0, 1] between val_a and val_b
+    // Helper for linear edge interpolation: returns fraction t in [0, 1] between val_a and val_b.
     #[inline]
     fn interp(iso: f64, val_a: f64, val_b: f64) -> f64 {
         let diff = val_b - val_a;
         if diff.abs() < 1e-12 {
-            0.5
+            0.0
         } else {
             ((iso - val_a) / diff).clamp(0.0, 1.0)
         }
     }
+
+    let mut push_segment = |start: LatLon, end: LatLon, isovalue: f64| {
+        if (start.lat - end.lat).abs() > f64::EPSILON || (start.lon - end.lon).abs() > f64::EPSILON
+        {
+            segments.push(IsolineSegment {
+                isovalue,
+                start,
+                end,
+            });
+        }
+    };
 
     for &iso in isovalues {
         for r in 0..(height - 1) {
@@ -156,77 +167,47 @@ pub fn generate_isolines_rad(
                 match bitmask {
                     1 | 14 => {
                         // Bottom to Left
-                        segments.push(IsolineSegment {
-                            isovalue: iso,
-                            start: bottom_pt(),
-                            end: left_pt(),
-                        });
+                        push_segment(bottom_pt(), left_pt(), iso);
                     }
                     2 | 13 => {
                         // Right to Bottom
-                        segments.push(IsolineSegment {
-                            isovalue: iso,
-                            start: right_pt(),
-                            end: bottom_pt(),
-                        });
+                        push_segment(right_pt(), bottom_pt(), iso);
                     }
                     3 | 12 => {
                         // Right to Left
-                        segments.push(IsolineSegment {
-                            isovalue: iso,
-                            start: right_pt(),
-                            end: left_pt(),
-                        });
+                        push_segment(right_pt(), left_pt(), iso);
                     }
                     4 | 11 => {
                         // Top to Right
-                        segments.push(IsolineSegment {
-                            isovalue: iso,
-                            start: top_pt(),
-                            end: right_pt(),
-                        });
+                        push_segment(top_pt(), right_pt(), iso);
                     }
                     5 => {
-                        // Saddle point: Top to Left & Bottom to Right
-                        segments.push(IsolineSegment {
-                            isovalue: iso,
-                            start: top_pt(),
-                            end: left_pt(),
-                        });
-                        segments.push(IsolineSegment {
-                            isovalue: iso,
-                            start: bottom_pt(),
-                            end: right_pt(),
-                        });
+                        let center_high = (v0 + v1 + v2 + v3) * 0.25 >= iso;
+                        if center_high {
+                            push_segment(top_pt(), right_pt(), iso);
+                            push_segment(bottom_pt(), left_pt(), iso);
+                        } else {
+                            push_segment(top_pt(), left_pt(), iso);
+                            push_segment(bottom_pt(), right_pt(), iso);
+                        }
                     }
                     6 | 9 => {
                         // Top to Bottom
-                        segments.push(IsolineSegment {
-                            isovalue: iso,
-                            start: top_pt(),
-                            end: bottom_pt(),
-                        });
+                        push_segment(top_pt(), bottom_pt(), iso);
                     }
                     7 | 8 => {
                         // Top to Left
-                        segments.push(IsolineSegment {
-                            isovalue: iso,
-                            start: top_pt(),
-                            end: left_pt(),
-                        });
+                        push_segment(top_pt(), left_pt(), iso);
                     }
                     10 => {
-                        // Saddle point: Top to Right & Bottom to Left
-                        segments.push(IsolineSegment {
-                            isovalue: iso,
-                            start: top_pt(),
-                            end: right_pt(),
-                        });
-                        segments.push(IsolineSegment {
-                            isovalue: iso,
-                            start: bottom_pt(),
-                            end: left_pt(),
-                        });
+                        let center_high = (v0 + v1 + v2 + v3) * 0.25 >= iso;
+                        if center_high {
+                            push_segment(top_pt(), left_pt(), iso);
+                            push_segment(bottom_pt(), right_pt(), iso);
+                        } else {
+                            push_segment(top_pt(), right_pt(), iso);
+                            push_segment(bottom_pt(), left_pt(), iso);
+                        }
                     }
                     _ => {}
                 }

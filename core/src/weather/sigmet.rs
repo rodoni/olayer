@@ -97,7 +97,11 @@ pub struct SigmetFeature {
 impl SigmetFeature {
     /// Returns true if the geodetic 2D coordinate is within the hazard polygon footprint.
     pub fn contains_2d(&self, point: &LatLon) -> bool {
-        if self.polygon.len() < 3 {
+        if self.polygon.len() < 4
+            || self.polygon.first() != self.polygon.last()
+            || point.validate().is_err()
+            || self.polygon.iter().any(|vertex| vertex.validate().is_err())
+        {
             return false;
         }
         GeodesicPolygon::contains_point_vertices(&self.polygon, point)
@@ -148,6 +152,12 @@ impl SigmetDataset {
         self.features.push(feature);
     }
 
+    pub fn try_add_feature(&mut self, feature: SigmetFeature) -> Result<(), WeatherError> {
+        validate_feature(&feature)?;
+        self.features.push(feature);
+        Ok(())
+    }
+
     pub fn len(&self) -> usize {
         self.features.len()
     }
@@ -184,6 +194,12 @@ impl SigmetDataset {
     pub fn from_geojson(geojson_str: &str) -> Result<Self, WeatherError> {
         let parsed: serde_json::Value = serde_json::from_str(geojson_str)
             .map_err(|e| WeatherError::ParseError(format!("Invalid GeoJSON: {e}")))?;
+
+        if parsed.get("type").and_then(|value| value.as_str()) != Some("FeatureCollection") {
+            return Err(WeatherError::ParseError(
+                "GeoJSON type must be FeatureCollection".to_string(),
+            ));
+        }
 
         let mut dataset = Self::new();
         let features = parsed
@@ -274,9 +290,9 @@ impl SigmetDataset {
                 let ring = coords_arr.ok_or_else(|| {
                     WeatherError::ParseError("SIGMET polygon is missing coordinates".into())
                 })?;
-                if ring.len() < 3 {
+                if ring.len() < 4 {
                     return Err(WeatherError::ParseError(
-                        "SIGMET polygon requires at least three positions".into(),
+                        "SIGMET polygon requires a closed ring with at least four positions".into(),
                     ));
                 }
                 {
@@ -319,7 +335,7 @@ impl SigmetDataset {
                         polygon.push(LatLon::from_degrees(lat_deg, lon_deg, alt_m));
                     }
 
-                    dataset.add_feature(SigmetFeature {
+                    let feature = SigmetFeature {
                         id,
                         name,
                         hazard_type,
@@ -329,7 +345,9 @@ impl SigmetDataset {
                         ceiling_m,
                         valid_from_epoch_s,
                         valid_until_epoch_s,
-                    });
+                    };
+                    validate_feature(&feature)?;
+                    dataset.add_feature(feature);
                 }
             }
         }
@@ -376,4 +394,31 @@ impl SigmetDataset {
         serde_json::to_string(&fc)
             .map_err(|e| WeatherError::ParseError(format!("Failed to serialize GeoJSON: {e}")))
     }
+}
+
+fn validate_feature(feature: &SigmetFeature) -> Result<(), WeatherError> {
+    if feature.polygon.len() < 4 || feature.polygon.first() != feature.polygon.last() {
+        return Err(WeatherError::ParseError(
+            "SIGMET polygon must be a closed ring with at least four positions".to_string(),
+        ));
+    }
+    if feature
+        .polygon
+        .iter()
+        .any(|point| point.validate().is_err())
+    {
+        return Err(WeatherError::ParseError(
+            "SIGMET polygon contains invalid coordinates".to_string(),
+        ));
+    }
+    if feature.floor_m.is_some_and(|value| !value.is_finite())
+        || feature.ceiling_m.is_some_and(|value| !value.is_finite())
+        || matches!((feature.floor_m, feature.ceiling_m), (Some(floor), Some(ceiling)) if floor > ceiling)
+        || matches!((feature.valid_from_epoch_s, feature.valid_until_epoch_s), (Some(from), Some(until)) if from > until)
+    {
+        return Err(WeatherError::ParseError(
+            "SIGMET feature contains invalid bounds".to_string(),
+        ));
+    }
+    Ok(())
 }
