@@ -3,7 +3,8 @@ use olayer_native::native_controller::NativeController;
 use olayer_native::wgpu_gpu_pipeline::WgpuGpuPipeline;
 
 fn bench_generate_grid_vertices_2d(c: &mut Criterion) {
-    let controller = NativeController::new(0.0, 0.0);
+    let controller = NativeController::new(0.0, 0.0)
+        .expect("zero latitude and longitude form a valid controller center");
     c.bench_function("generate_grid_vertices_2d", |b| {
         b.iter(|| {
             let vertices = WgpuGpuPipeline::generate_grid_vertices(black_box(&controller));
@@ -13,7 +14,8 @@ fn bench_generate_grid_vertices_2d(c: &mut Criterion) {
 }
 
 fn bench_generate_grid_vertices_3d(c: &mut Criterion) {
-    let mut controller = NativeController::new(0.0, 0.0);
+    let mut controller = NativeController::new(0.0, 0.0)
+        .expect("zero latitude and longitude form a valid controller center");
     controller.view_mode = "3D".to_string();
     c.bench_function("generate_grid_vertices_3d", |b| {
         b.iter(|| {

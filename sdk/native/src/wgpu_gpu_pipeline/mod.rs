@@ -16,6 +16,7 @@ pub struct TerrainVertex {
     pub normal: [f32; 3],
     pub elevation: f32,
     pub slope: f32,
+    pub terrain_known: f32,
 }
 
 pub struct WgpuRasterTile {
@@ -27,6 +28,56 @@ pub struct WgpuRasterTile {
     pub bind_group: wgpu::BindGroup,
     pub vertex_buffer: wgpu::Buffer,
     pub index_buffer: wgpu::Buffer,
+}
+
+const RASTER_TILE_SIZE: u32 = 256;
+const RASTER_TILE_BYTES: usize = 256 * 256 * 4;
+const MAX_GPU_RASTER_TILES: usize = 128;
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum RasterTileUploadError {
+    InvalidRgbaLength { expected: usize, actual: usize },
+    InvalidTileCoordinates { x: u32, y: u32, z: u32 },
+    ProjectionFailed,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct TerrainCacheKey {
+    view_mode: String,
+    center_lat: u64,
+    center_lon: u64,
+    zoom: u64,
+    rotation: u64,
+    pitch: u64,
+    aspect_ratio: u64,
+    viewport_base_meters: u64,
+    exaggeration: u32,
+}
+
+impl TerrainCacheKey {
+    fn new(controller: &NativeController, exaggeration: f32) -> Self {
+        Self {
+            view_mode: controller.view_mode.clone(),
+            center_lat: controller.camera.center.lat.to_bits(),
+            center_lon: controller.camera.center.lon.to_bits(),
+            zoom: controller.camera.zoom.to_bits(),
+            rotation: controller.camera.rotation.to_bits(),
+            pitch: controller.camera.pitch.to_bits(),
+            aspect_ratio: controller.camera.aspect_ratio.to_bits(),
+            viewport_base_meters: controller.camera.viewport_base_meters.to_bits(),
+            exaggeration: exaggeration.to_bits(),
+        }
+    }
+}
+
+pub struct TerrainStyle {
+    pub mode: u32,
+    pub min_elevation: f32,
+    pub max_elevation: f32,
+    pub aircraft_altitude: f32,
+    pub light_azimuth_deg: f32,
+    pub light_altitude_deg: f32,
+    pub contour_interval: f32,
 }
 
 /// Arguments required to upload a decoded raster tile to the GPU.
@@ -60,11 +111,12 @@ pub struct WgpuGpuPipeline {
     pub raster_bind_group_layout: wgpu::BindGroupLayout,
     pub raster_sampler: wgpu::Sampler,
     pub loaded_gpu_tiles: std::collections::HashMap<String, WgpuRasterTile>,
+    raster_tile_order: std::collections::VecDeque<String>,
     pub terrain_pipeline: wgpu::RenderPipeline,
     pub terrain_vertex_buffer: Option<wgpu::Buffer>,
     pub terrain_vertices_len: usize,
     pub terrain_style_buffer: wgpu::Buffer,
-    terrain_cache_key: Option<String>,
+    terrain_cache_key: Option<TerrainCacheKey>,
 }
 
 impl WgpuGpuPipeline {
@@ -346,6 +398,7 @@ struct VertexInput {
     @location(1) normal: vec3<f32>,
     @location(2) elevation: f32,
     @location(3) slope: f32,
+    @location(4) terrain_known: f32,
 };
 
 struct VertexOutput {
@@ -353,6 +406,7 @@ struct VertexOutput {
     @location(0) normal: vec3<f32>,
     @location(1) elevation: f32,
     @location(2) slope: f32,
+    @location(3) terrain_known: f32,
 };
 
 @group(0) @binding(0)
@@ -367,11 +421,17 @@ fn vs_main(in: VertexInput) -> VertexOutput {
     out.normal = in.normal;
     out.elevation = in.elevation;
     out.slope = in.slope;
+    out.terrain_known = in.terrain_known;
     return out;
 }
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+    if (in.terrain_known < 0.5) {
+        let checker = (i32(in.position.x / 8.0) + i32(in.position.y / 8.0)) % 2;
+        let unknown_color = select(vec3<f32>(0.35, 0.08, 0.48), vec3<f32>(0.72, 0.22, 0.82), checker == 0);
+        return vec4<f32>(unknown_color, 0.94);
+    }
     let amount = clamp((in.elevation - terrain_style.min_elevation) / max(1.0, terrain_style.max_elevation - terrain_style.min_elevation), 0.0, 1.0);
     let hypsometric = mix(vec3<f32>(0.08, 0.28, 0.12), vec3<f32>(0.72, 0.52, 0.22), amount);
     let slope_color = mix(vec3<f32>(0.08, 0.55, 0.18), vec3<f32>(0.9, 0.08, 0.04), clamp(in.slope / 55.0, 0.0, 1.0));
@@ -447,6 +507,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                             offset: 28,
                             shader_location: 3,
                         },
+                        wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32,
+                            offset: 32,
+                            shader_location: 4,
+                        },
                     ],
                 }],
             },
@@ -483,6 +548,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             raster_bind_group_layout,
             raster_sampler,
             loaded_gpu_tiles: std::collections::HashMap::new(),
+            raster_tile_order: std::collections::VecDeque::new(),
             terrain_pipeline,
             terrain_vertex_buffer: None,
             terrain_vertices_len: 0,
@@ -638,20 +704,6 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         }
     }
 
-    fn terrain_cache_key(controller: &NativeController, exaggeration: f32) -> String {
-        format!(
-            "{}:{:.5}:{:.5}:{:.3}:{:.3}:{:.3}:{:.2}",
-            controller.view_mode,
-            controller.camera.center.lat,
-            controller.camera.center.lon,
-            controller.camera.zoom,
-            controller.camera.rotation,
-            controller.camera.pitch,
-            exaggeration
-        )
-    }
-
-    #[allow(clippy::needless_range_loop)]
     pub fn generate_terrain_vertices(
         controller: &NativeController,
         exaggeration: f32,
@@ -662,92 +714,145 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             .to_radians()
             .min(60.0f64.to_radians());
         let lon_span = lat_span / controller.camera.center.lat.cos().abs().max(0.15);
-        let mut grid_vertices = Vec::with_capacity((grid + 1) * (grid + 1));
-        let mut elevations = vec![vec![0.0f64; grid + 1]; grid + 1];
+        let mut grid_vertices = vec![None; (grid + 1) * (grid + 1)];
+        let mut elevations = vec![vec![None; grid + 1]; grid + 1];
 
-        for row in 0..=grid {
+        for (row, elevation_row) in elevations.iter_mut().enumerate() {
             let v = row as f64 / grid as f64;
             let lat = controller.camera.center.lat + (0.5 - v) * lat_span;
-            for column in 0..=grid {
+            for (column, elevation_cell) in elevation_row.iter_mut().enumerate() {
                 let u = column as f64 / grid as f64;
                 let lon = controller.camera.center.lon + (u - 0.5) * lon_span;
                 let elevation = controller
                     .terrain
                     .get_elevation(lat.to_degrees(), lon.to_degrees())
-                    .unwrap_or(0.0);
-                elevations[row][column] = elevation;
-                let height = elevation * exaggeration as f64;
+                    .ok()
+                    .filter(|elevation| elevation.is_finite());
+                *elevation_cell = elevation;
+                let height = elevation.unwrap_or(0.0) * exaggeration as f64;
                 let position = if controller.view_mode == "3D" {
                     let ecef = olayer_core::geodesy::lla_to_ecef(
                         &LatLon::new(lat, lon, height),
                         &olayer_core::geodesy::ellipsoid::Ellipsoid::wgs84(),
                     );
-                    [ecef.x as f32, ecef.y as f32, ecef.z as f32]
+                    Some([ecef.x as f32, ecef.y as f32, ecef.z as f32])
                 } else {
                     let projected = controller
                         .projection
                         .project(&LatLon::new(lat, lon, 0.0))
-                        .unwrap_or((0.0, 0.0));
-                    [projected.0 as f32, projected.1 as f32, height as f32]
+                        .ok();
+                    projected.map(|(x, y)| [x as f32, y as f32, height as f32])
                 };
-                grid_vertices.push(TerrainVertex {
-                    position,
-                    normal: [0.0, 0.0, 1.0],
-                    elevation: elevation as f32,
-                    slope: 0.0,
-                });
+                if let Some(position) = position {
+                    grid_vertices[row * (grid + 1) + column] = Some(TerrainVertex {
+                        position,
+                        normal: [0.0, 0.0, 1.0],
+                        elevation: elevation.unwrap_or(0.0) as f32,
+                        slope: 0.0,
+                        terrain_known: if elevation.is_some() { 1.0 } else { 0.0 },
+                    });
+                }
             }
         }
 
         let spacing = (span_meters / grid as f64).max(1.0);
-        for row in 0..=grid {
-            for column in 0..=grid {
-                let left = elevations[row][column.saturating_sub(1)];
-                let right = elevations[row][(column + 1).min(grid)];
-                let north = elevations[row.saturating_sub(1)][column];
-                let south = elevations[(row + 1).min(grid)][column];
-                let dx = (right - left)
-                    / if column == 0 || column == grid {
-                        spacing
-                    } else {
-                        2.0 * spacing
-                    };
-                let dy = (south - north)
-                    / if row == 0 || row == grid {
-                        spacing
-                    } else {
-                        2.0 * spacing
-                    };
-                let slope = dx.hypot(dy).atan().to_degrees();
-                let nx = -dx;
-                let ny = -dy;
-                let nz = 1.0;
-                let normal_len = (nx * nx + ny * ny + nz * nz).sqrt();
-                let vertex = &mut grid_vertices[row * (grid + 1) + column];
-                vertex.slope = slope as f32;
-                vertex.normal = [
-                    (nx / normal_len) as f32,
-                    (ny / normal_len) as f32,
-                    (nz / normal_len) as f32,
-                ];
+        for (row, elevation_row) in elevations.iter().enumerate() {
+            for (column, center_elevation) in elevation_row.iter().enumerate() {
+                let Some(center) = *center_elevation else {
+                    continue;
+                };
+                let east_slope = terrain_axis_slope(
+                    column.checked_sub(1).and_then(|left| elevation_row[left]),
+                    column
+                        .checked_add(1)
+                        .and_then(|right| elevation_row.get(right).copied().flatten()),
+                    center,
+                    spacing,
+                );
+                let north_elevation = row
+                    .checked_sub(1)
+                    .and_then(|north| elevations.get(north))
+                    .and_then(|north_row| north_row.get(column).copied().flatten());
+                let south_elevation = row
+                    .checked_add(1)
+                    .and_then(|south| elevations.get(south))
+                    .and_then(|south_row| south_row.get(column).copied().flatten());
+                let south_slope =
+                    terrain_axis_slope(north_elevation, south_elevation, center, spacing);
+                let local_normal = [-east_slope, south_slope, 1.0];
+                let normal_len = local_normal
+                    .iter()
+                    .map(|component| component * component)
+                    .sum::<f64>()
+                    .sqrt();
+                let lat =
+                    controller.camera.center.lat + (0.5 - row as f64 / grid as f64) * lat_span;
+                let lon =
+                    controller.camera.center.lon + (column as f64 / grid as f64 - 0.5) * lon_span;
+                let normal = if controller.view_mode == "3D" {
+                    local_normal_to_ecef(
+                        lat,
+                        lon,
+                        [
+                            local_normal[0] / normal_len,
+                            local_normal[1] / normal_len,
+                            local_normal[2] / normal_len,
+                        ],
+                    )
+                } else {
+                    [
+                        (local_normal[0] / normal_len) as f32,
+                        (local_normal[1] / normal_len) as f32,
+                        (local_normal[2] / normal_len) as f32,
+                    ]
+                };
+                if let Some(vertex) = grid_vertices[row * (grid + 1) + column].as_mut() {
+                    vertex.slope = east_slope.hypot(south_slope).atan().to_degrees() as f32;
+                    vertex.normal = normal;
+                }
             }
         }
 
         let mut vertices = Vec::with_capacity(grid * grid * 6);
-        for row in 0..grid {
-            for column in 0..grid {
-                let top_left = row * (grid + 1) + column;
-                let top_right = top_left + 1;
-                let bottom_left = top_left + grid + 1;
-                let bottom_right = bottom_left + 1;
-                vertices.extend_from_slice(&[
-                    grid_vertices[top_left],
-                    grid_vertices[top_right],
-                    grid_vertices[bottom_left],
-                    grid_vertices[top_right],
-                    grid_vertices[bottom_right],
-                    grid_vertices[bottom_left],
-                ]);
+        let row_length = grid + 1;
+        for (top_row, bottom_row) in grid_vertices
+            .chunks_exact(row_length)
+            .zip(grid_vertices[row_length..].chunks_exact(row_length))
+        {
+            for (top_pair, bottom_pair) in top_row.windows(2).zip(bottom_row.windows(2)) {
+                let Some(top_left_vertex) = top_pair[0] else {
+                    continue;
+                };
+                let Some(top_right_vertex) = top_pair[1] else {
+                    continue;
+                };
+                let Some(bottom_left_vertex) = bottom_pair[0] else {
+                    continue;
+                };
+                let Some(bottom_right_vertex) = bottom_pair[1] else {
+                    continue;
+                };
+                let terrain_known = if top_left_vertex.terrain_known == 1.0
+                    && top_right_vertex.terrain_known == 1.0
+                    && bottom_left_vertex.terrain_known == 1.0
+                    && bottom_right_vertex.terrain_known == 1.0
+                {
+                    1.0
+                } else {
+                    0.0
+                };
+                let mut cell_vertices = [
+                    top_left_vertex,
+                    top_right_vertex,
+                    bottom_left_vertex,
+                    top_right_vertex,
+                    bottom_right_vertex,
+                    bottom_left_vertex,
+                ];
+                for vertex in &mut cell_vertices {
+                    vertex.terrain_known = terrain_known;
+                }
+                vertices.extend_from_slice(&cell_vertices);
             }
         }
         vertices
@@ -760,11 +865,17 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         queue: &wgpu::Queue,
         exaggeration: f32,
     ) {
-        let key = Self::terrain_cache_key(controller, exaggeration);
-        if self.terrain_cache_key.as_deref() == Some(key.as_str()) {
+        let key = TerrainCacheKey::new(controller, exaggeration);
+        if self.terrain_cache_key.as_ref() == Some(&key) {
             return;
         }
         let vertices = Self::generate_terrain_vertices(controller, exaggeration);
+        if vertices.is_empty() {
+            self.terrain_vertex_buffer = None;
+            self.terrain_vertices_len = 0;
+            self.terrain_cache_key = Some(key);
+            return;
+        }
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Terrain Vertex Buffer"),
             size: (vertices.len() * std::mem::size_of::<TerrainVertex>()) as u64,
@@ -777,20 +888,13 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         self.terrain_cache_key = Some(key);
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub fn set_terrain_style(
-        &self,
-        queue: &wgpu::Queue,
-        mode: u32,
-        min_elevation: f32,
-        max_elevation: f32,
-        aircraft_altitude: f32,
-        light_azimuth_deg: f32,
-        light_altitude_deg: f32,
-        contour_interval: f32,
-    ) {
-        let az = (light_azimuth_deg as f64).to_radians();
-        let alt = (light_altitude_deg as f64).to_radians();
+    pub fn invalidate_terrain_cache(&mut self) {
+        self.terrain_cache_key = None;
+    }
+
+    pub fn set_terrain_style(&self, queue: &wgpu::Queue, style: &TerrainStyle) {
+        let az = (style.light_azimuth_deg as f64).to_radians();
+        let alt = (style.light_altitude_deg as f64).to_radians();
         let lx = (az.sin() * alt.cos()) as f32;
         let ly = (az.cos() * alt.cos()) as f32;
         let lz = alt.sin() as f32;
@@ -798,14 +902,14 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             &self.terrain_style_buffer,
             0,
             bytemuck::cast_slice(&[
-                mode as f32,
-                min_elevation,
-                max_elevation,
-                aircraft_altitude,
+                style.mode as f32,
+                style.min_elevation,
+                style.max_elevation,
+                style.aircraft_altitude,
                 lx,
                 ly,
                 lz,
-                contour_interval,
+                style.contour_interval,
             ]),
         );
     }
@@ -820,15 +924,20 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     }
 
     /// Uploads a decoded raster tile to GPU memory and creates its projected quads.
-    pub fn upload_raster_tile(&mut self, upload: RasterTileUpload<'_>) {
+    pub fn upload_raster_tile(
+        &mut self,
+        upload: RasterTileUpload<'_>,
+    ) -> Result<(), RasterTileUploadError> {
+        validate_raster_tile_upload(upload.pixels, upload.x, upload.y, upload.z)?;
         if self.loaded_gpu_tiles.contains_key(upload.key) {
-            return;
+            return Ok(());
         }
+        let vertices = get_tile_vertices(upload.x, upload.y, upload.z, upload.controller)?;
 
         // 1. Create Texture
         let texture_size = wgpu::Extent3d {
-            width: 256,
-            height: 256,
+            width: RASTER_TILE_SIZE,
+            height: RASTER_TILE_SIZE,
             depth_or_array_layers: 1,
         };
         let texture = upload.device.create_texture(&wgpu::TextureDescriptor {
@@ -853,8 +962,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             upload.pixels,
             wgpu::ImageDataLayout {
                 offset: 0,
-                bytes_per_row: Some(4 * 256),
-                rows_per_image: Some(256),
+                bytes_per_row: Some(4 * RASTER_TILE_SIZE),
+                rows_per_image: Some(RASTER_TILE_SIZE),
             },
             texture_size,
         );
@@ -878,7 +987,6 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         });
 
         // 4. Create Buffers
-        let vertices = get_tile_vertices(upload.x, upload.y, upload.z, upload.controller);
         let vertex_buffer = upload
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -896,8 +1004,15 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                 usage: wgpu::BufferUsages::INDEX,
             });
 
+        if self.loaded_gpu_tiles.len() >= MAX_GPU_RASTER_TILES {
+            if let Some(evicted_key) = self.raster_tile_order.pop_front() {
+                self.loaded_gpu_tiles.remove(&evicted_key);
+            }
+        }
+        let key = upload.key.to_string();
+        self.raster_tile_order.push_back(key.clone());
         self.loaded_gpu_tiles.insert(
-            upload.key.to_string(),
+            key,
             WgpuRasterTile {
                 key: upload.key.to_string(),
                 x: upload.x,
@@ -909,6 +1024,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                 index_buffer,
             },
         );
+        Ok(())
     }
 
     /// Rebuilds the quad vertex buffers for all uploaded tiles (e.g. when projection changes).
@@ -917,20 +1033,30 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         device: &wgpu::Device,
         controller: &NativeController,
     ) {
-        for tile in self.loaded_gpu_tiles.values_mut() {
-            let vertices = get_tile_vertices(tile.x, tile.y, tile.z, controller);
+        self.loaded_gpu_tiles.retain(|_, tile| {
+            let Ok(vertices) = get_tile_vertices(tile.x, tile.y, tile.z, controller) else {
+                return false;
+            };
             let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some(&format!("Tile Vertex Buffer {}", tile.key)),
                 contents: bytemuck::cast_slice(&vertices),
                 usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             });
             tile.vertex_buffer = vertex_buffer;
-        }
+            true
+        });
+        self.raster_tile_order
+            .retain(|key| self.loaded_gpu_tiles.contains_key(key));
     }
 
     /// Clears all raster textures from the GPU memory.
     pub fn clear_raster_tiles(&mut self) {
         self.loaded_gpu_tiles.clear();
+        self.raster_tile_order.clear();
+    }
+
+    pub fn has_raster_tile(&self, key: &str) -> bool {
+        self.loaded_gpu_tiles.contains_key(key)
     }
 
     /// Renders all uploaded raster tiles that are currently visible.
@@ -961,51 +1087,89 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 // Helper mathematical functions for OSM / WMTS tile coordinates
 // -----------------------------------------------------------------------------
 
-fn tile_bounds_rad(x: u32, y: u32, z: u32) -> (f64, f64, f64, f64) {
-    let n = 2.0f64.powi(z as i32);
-    let lon_west = (x as f64 / n) * 360.0 - 180.0;
-    let lon_east = ((x + 1) as f64 / n) * 360.0 - 180.0;
+fn validate_tile_coordinates(x: u32, y: u32, z: u32) -> Result<u32, RasterTileUploadError> {
+    let Some(tile_count) = 1u32.checked_shl(z) else {
+        return Err(RasterTileUploadError::InvalidTileCoordinates { x, y, z });
+    };
+    if x >= tile_count || y >= tile_count {
+        return Err(RasterTileUploadError::InvalidTileCoordinates { x, y, z });
+    }
+    Ok(tile_count)
+}
 
-    let lat_north_rad = (std::f64::consts::PI * (1.0 - 2.0 * (y as f64) / n))
+fn validate_raster_tile_upload(
+    pixels: &[u8],
+    x: u32,
+    y: u32,
+    z: u32,
+) -> Result<(), RasterTileUploadError> {
+    if pixels.len() != RASTER_TILE_BYTES {
+        return Err(RasterTileUploadError::InvalidRgbaLength {
+            expected: RASTER_TILE_BYTES,
+            actual: pixels.len(),
+        });
+    }
+    validate_tile_coordinates(x, y, z)?;
+    Ok(())
+}
+
+fn tile_bounds_rad(x: u32, y: u32, z: u32) -> Result<(f64, f64, f64, f64), RasterTileUploadError> {
+    let tile_count = validate_tile_coordinates(x, y, z)?;
+    let Some(east_x) = x.checked_add(1) else {
+        return Err(RasterTileUploadError::InvalidTileCoordinates { x, y, z });
+    };
+    let Some(south_y) = y.checked_add(1) else {
+        return Err(RasterTileUploadError::InvalidTileCoordinates { x, y, z });
+    };
+    let n = f64::from(tile_count);
+    let lon_west = (f64::from(x) / n) * 360.0 - 180.0;
+    let lon_east = (f64::from(east_x) / n) * 360.0 - 180.0;
+
+    let lat_north_rad = (std::f64::consts::PI * (1.0 - 2.0 * f64::from(y) / n))
         .sinh()
         .atan();
-    let lat_south_rad = (std::f64::consts::PI * (1.0 - 2.0 * ((y + 1) as f64) / n))
+    let lat_south_rad = (std::f64::consts::PI * (1.0 - 2.0 * f64::from(south_y) / n))
         .sinh()
         .atan();
 
-    (
+    Ok((
         lat_south_rad,
         lon_west.to_radians(),
         lat_north_rad,
         lon_east.to_radians(),
-    )
+    ))
 }
 
-fn get_tile_vertices(x: u32, y: u32, z: u32, controller: &NativeController) -> [RasterVertex; 4] {
-    let (lat_south, lon_west, lat_north, lon_east) = tile_bounds_rad(x, y, z);
+fn get_tile_vertices(
+    x: u32,
+    y: u32,
+    z: u32,
+    controller: &NativeController,
+) -> Result<[RasterVertex; 4], RasterTileUploadError> {
+    let (lat_south, lon_west, lat_north, lon_east) = tile_bounds_rad(x, y, z)?;
 
-    let get_pos = |lat: f64, lon: f64| {
+    let get_pos = |lat: f64, lon: f64| -> Result<[f32; 3], RasterTileUploadError> {
         if controller.view_mode == "3D" {
             let ecef = olayer_core::geodesy::lla_to_ecef(
                 &LatLon::new(lat, lon, 0.0),
                 &olayer_core::geodesy::ellipsoid::Ellipsoid::wgs84(),
             );
-            [ecef.x as f32, ecef.y as f32, ecef.z as f32]
+            Ok([ecef.x as f32, ecef.y as f32, ecef.z as f32])
         } else {
             let proj = controller
                 .projection
                 .project(&LatLon::new(lat, lon, 0.0))
-                .unwrap_or((0.0, 0.0));
-            [proj.0 as f32, proj.1 as f32, 0.0]
+                .map_err(|_| RasterTileUploadError::ProjectionFailed)?;
+            Ok([proj.0 as f32, proj.1 as f32, 0.0])
         }
     };
 
-    let p_tl = get_pos(lat_north, lon_west);
-    let p_bl = get_pos(lat_south, lon_west);
-    let p_br = get_pos(lat_south, lon_east);
-    let p_tr = get_pos(lat_north, lon_east);
+    let p_tl = get_pos(lat_north, lon_west)?;
+    let p_bl = get_pos(lat_south, lon_west)?;
+    let p_br = get_pos(lat_south, lon_east)?;
+    let p_tr = get_pos(lat_north, lon_east)?;
 
-    [
+    Ok([
         RasterVertex {
             position: p_tl,
             tex_coords: [0.0, 0.0],
@@ -1022,6 +1186,39 @@ fn get_tile_vertices(x: u32, y: u32, z: u32, controller: &NativeController) -> [
             position: p_tr,
             tex_coords: [1.0, 0.0],
         },
+    ])
+}
+
+fn terrain_axis_slope(
+    negative_neighbor: Option<f64>,
+    positive_neighbor: Option<f64>,
+    center: f64,
+    spacing: f64,
+) -> f64 {
+    match (negative_neighbor, positive_neighbor) {
+        (Some(negative), Some(positive)) => (positive - negative) / (2.0 * spacing),
+        (None, Some(positive)) => (positive - center) / spacing,
+        (Some(negative), None) => (center - negative) / spacing,
+        (None, None) => 0.0,
+    }
+}
+
+fn local_normal_to_ecef(lat: f64, lon: f64, normal: [f64; 3]) -> [f32; 3] {
+    let east = [-lon.sin(), lon.cos(), 0.0];
+    let north = [-lat.sin() * lon.cos(), -lat.sin() * lon.sin(), lat.cos()];
+    let up = [lat.cos() * lon.cos(), lat.cos() * lon.sin(), lat.sin()];
+    let ecef = std::array::from_fn::<_, 3, _>(|index| {
+        east[index] * normal[0] + north[index] * normal[1] + up[index] * normal[2]
+    });
+    let length = ecef
+        .iter()
+        .map(|component| component * component)
+        .sum::<f64>()
+        .sqrt();
+    [
+        (ecef[0] / length) as f32,
+        (ecef[1] / length) as f32,
+        (ecef[2] / length) as f32,
     ]
 }
 
@@ -1032,7 +1229,7 @@ mod tests {
 
     #[test]
     fn test_generate_grid_vertices_2d_not_empty() {
-        let controller = NativeController::new(0.0, 0.0);
+        let controller = NativeController::new(0.0, 0.0).expect("valid test controller center");
         let vertices = WgpuGpuPipeline::generate_grid_vertices(&controller);
         assert!(!vertices.is_empty(), "2D grid should produce vertices");
         // Each vertex is 3 floats (x, y, z); each line segment is 2 vertices = 6 floats
@@ -1045,7 +1242,8 @@ mod tests {
 
     #[test]
     fn test_generate_terrain_vertices_has_two_triangles_per_cell() {
-        let controller = NativeController::new((-23.62f64).to_radians(), (-46.65f64).to_radians());
+        let controller = NativeController::new((-23.62f64).to_radians(), (-46.65f64).to_radians())
+            .expect("valid test controller center");
         let vertices = WgpuGpuPipeline::generate_terrain_vertices(&controller, 1.0);
         assert_eq!(vertices.len(), 32 * 32 * 6);
         assert!(vertices.iter().all(|vertex| {
@@ -1058,7 +1256,7 @@ mod tests {
 
     #[test]
     fn test_generate_grid_vertices_3d_not_empty() {
-        let mut controller = NativeController::new(0.0, 0.0);
+        let mut controller = NativeController::new(0.0, 0.0).expect("valid test controller center");
         controller.view_mode = "3D".to_string();
         let vertices = WgpuGpuPipeline::generate_grid_vertices(&controller);
         assert!(!vertices.is_empty(), "3D grid should produce vertices");
@@ -1071,7 +1269,7 @@ mod tests {
 
     #[test]
     fn test_generate_grid_vertices_3d_uses_ecef_scale() {
-        let mut controller = NativeController::new(0.0, 0.0);
+        let mut controller = NativeController::new(0.0, 0.0).expect("valid test controller center");
         controller.view_mode = "3D".to_string();
         let vertices = WgpuGpuPipeline::generate_grid_vertices(&controller);
         // ECEF coordinates for Earth surface should be on the order of millions of meters.
@@ -1085,7 +1283,7 @@ mod tests {
 
     #[test]
     fn test_generate_grid_vertices_2d_z_is_zero() {
-        let controller = NativeController::new(0.0, 0.0);
+        let controller = NativeController::new(0.0, 0.0).expect("valid test controller center");
         let vertices = WgpuGpuPipeline::generate_grid_vertices(&controller);
         // 2D grid vertices always have z = 0.0 (flat plane)
         let (chunks, _) = vertices.as_chunks::<3>();
@@ -1096,7 +1294,7 @@ mod tests {
 
     #[test]
     fn test_generate_grid_vertices_3d_z_is_nonzero() {
-        let mut controller = NativeController::new(0.0, 0.0);
+        let mut controller = NativeController::new(0.0, 0.0).expect("valid test controller center");
         controller.view_mode = "3D".to_string();
         let vertices = WgpuGpuPipeline::generate_grid_vertices(&controller);
         // 3D grid uses ECEF so at least some z components should be non-zero
@@ -1106,5 +1304,82 @@ mod tests {
             has_nonzero_z,
             "3D grid should have non-zero z components (ECEF)"
         );
+    }
+
+    #[test]
+    fn terrain_mesh_keeps_missing_elevation_explicitly_unknown() {
+        let controller = NativeController::new(0.0, 0.0).expect("valid test controller center");
+        let vertices = WgpuGpuPipeline::generate_terrain_vertices(&controller, 1.0);
+
+        assert!(vertices.iter().all(|vertex| vertex.terrain_known == 0.0));
+    }
+
+    #[test]
+    fn flat_surface_normal_is_rotated_into_ecef() {
+        let lat = 0.7;
+        let lon = -1.2;
+        let normal = local_normal_to_ecef(lat, lon, [0.0, 0.0, 1.0]);
+        let expected = [lat.cos() * lon.cos(), lat.cos() * lon.sin(), lat.sin()];
+
+        for (actual, expected) in normal.into_iter().zip(expected) {
+            assert!((f64::from(actual) - expected).abs() < 1.0e-6);
+        }
+
+        let east = local_normal_to_ecef(lat, lon, [1.0, 0.0, 0.0]);
+        let north = local_normal_to_ecef(lat, lon, [0.0, 1.0, 0.0]);
+        assert!((f64::from(east[0]) + lon.sin()).abs() < 1.0e-6);
+        assert!((f64::from(east[1]) - lon.cos()).abs() < 1.0e-6);
+        assert!(east[2].abs() < 1.0e-6);
+        assert!((f64::from(north[0]) + lat.sin() * lon.cos()).abs() < 1.0e-6);
+        assert!((f64::from(north[1]) + lat.sin() * lon.sin()).abs() < 1.0e-6);
+        assert!((f64::from(north[2]) - lat.cos()).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn terrain_cache_key_uses_exact_camera_state() {
+        let controller = NativeController::new(0.0, 0.0).expect("valid test controller center");
+        let original = TerrainCacheKey::new(&controller, 1.0);
+        let mut moved = NativeController::new(0.0, 0.0).expect("valid test controller center");
+        moved.camera.center.lon = 0.000_000_001;
+        let mut zoomed = NativeController::new(0.0, 0.0).expect("valid test controller center");
+        zoomed.camera.zoom += 0.000_000_001;
+        let mut resized = NativeController::new(0.0, 0.0).expect("valid test controller center");
+        resized.camera.aspect_ratio = 1.000_000_001;
+
+        assert_ne!(original, TerrainCacheKey::new(&moved, 1.0));
+        assert_ne!(original, TerrainCacheKey::new(&zoomed, 1.0));
+        assert_ne!(original, TerrainCacheKey::new(&resized, 1.0));
+    }
+
+    #[test]
+    fn raster_upload_validation_rejects_bad_rgba_and_tile_coordinates() {
+        let rgba = vec![0; 256 * 256 * 4];
+        assert!(validate_raster_tile_upload(&rgba, 0, 0, 0).is_ok());
+        assert!(validate_raster_tile_upload(&rgba[..rgba.len() - 1], 0, 0, 0).is_err());
+        assert!(validate_raster_tile_upload(&rgba, 1, 0, 0).is_err());
+        assert!(validate_raster_tile_upload(&rgba, 0, 0, 32).is_err());
+    }
+
+    #[test]
+    fn tile_bounds_reject_out_of_range_and_overflowing_zoom() {
+        assert!(tile_bounds_rad(1, 0, 0).is_err());
+        assert!(tile_bounds_rad(0, 0, 32).is_err());
+        assert!(tile_bounds_rad(1, 1, 1).is_ok());
+    }
+
+    #[test]
+    fn missing_neighbors_use_one_sided_gradient_without_zero_elevation() {
+        assert_eq!(terrain_axis_slope(None, Some(120.0), 100.0, 10.0), 2.0);
+        assert_eq!(terrain_axis_slope(Some(90.0), None, 100.0, 10.0), 1.0);
+    }
+
+    #[test]
+    fn raster_projection_failure_is_reported_instead_of_origin_fallback() {
+        let controller = NativeController::new(0.0, 0.0).expect("valid test controller center");
+
+        assert!(matches!(
+            get_tile_vertices(31, 16, 5, &controller),
+            Err(RasterTileUploadError::ProjectionFailed)
+        ));
     }
 }

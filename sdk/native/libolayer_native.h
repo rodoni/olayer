@@ -9,6 +9,10 @@
 #include <stdlib.h>
 typedef struct TerrainEngine TerrainEngine;
 typedef struct InterpolationEngine InterpolationEngine;
+typedef struct LocalTangentFrame LocalTangentFrame;
+typedef struct MagneticModel MagneticModel;
+typedef struct AeronauticalDataset AeronauticalDataset;
+typedef struct SigmetDataset SigmetDataset;
 
 /**
  * Conversion constant: 1 Nautical Mile in meters (exact standard).
@@ -19,6 +23,31 @@ typedef struct InterpolationEngine InterpolationEngine;
  * Standard Rate-One turn rate in degrees per second ($3^\circ/\text{s}$, $180^\circ$ in 1 minute).
  */
 #define STANDARD_RATE_ONE_TURN_DPS 3.0
+
+/**
+ * Maximum generated samples along each half-turn of a holding pattern.
+ */
+#define MAX_HOLDING_PATTERN_POINTS_PER_TURN 512
+
+/**
+ * Maximum number of arc intervals in an ILS funnel.
+ */
+#define MAX_ILS_ARC_STEPS 512
+
+/**
+ * Maximum number of distance ticks in an ILS centerline.
+ */
+#define MAX_ILS_TICK_MARKS 256
+
+/**
+ * Maximum number of range rings generated in one request.
+ */
+#define MAX_RANGE_RINGS 64
+
+/**
+ * Maximum sample intervals generated for each range ring.
+ */
+#define MAX_RANGE_RING_POINTS 720
 
 /**
  * C representation of vertical profile point.
@@ -122,11 +151,6 @@ struct C_NavaidSummary {
 };
 
 /**
- * Opaque pointer type for SIGMET dataset in C ABI.
- */
-typedef SigmetDataset SigmetDataset;
-
-/**
  * C-compatible target descriptor for label deconfliction.
  */
 struct C_LabelTarget {
@@ -162,6 +186,13 @@ TerrainEngine *olayer_terrain_engine_create(void);
 /**
  * Parses and registers a raw DTED buffer.
  * Returns 0 on success, or a negative code on error.
+ *
+ * # Safety
+ * `engine` must be a live exclusive handle from `olayer_terrain_engine_create`.
+ * `data` must be aligned and readable for `length` bytes; the byte range must
+ * not exceed `isize::MAX` and must not overlap the engine or output locations.
+ * Each non-null output pointer must be aligned, writable for one `i32`, and
+ * disjoint from every other referenced range for the duration of the call.
  */
 int olayer_terrain_engine_load_tile(TerrainEngine *engine,
                                     const uint8_t *data,
@@ -171,6 +202,10 @@ int olayer_terrain_engine_load_tile(TerrainEngine *engine,
 
 /**
  * Unloads a terrain tile. Returns 1 if tile existed, 0 if not, or negative error.
+ *
+ * # Safety
+ * `engine` must be a live exclusive handle returned by
+ * `olayer_terrain_engine_create`, not freed or concurrently accessed.
  */
 int olayer_terrain_engine_unload_tile(TerrainEngine *engine, int32_t lat_deg, int32_t lon_deg);
 
@@ -178,6 +213,11 @@ int olayer_terrain_engine_unload_tile(TerrainEngine *engine, int32_t lat_deg, in
  * Loads and registers a Web Mercator (Z, X, Y) RGB elevation tile.
  * encoding_code: 0 = MapboxRgb, 1 = Terrarium.
  * Returns 0 on success, or a negative code on error.
+ *
+ * # Safety
+ * `engine` must be a live shared handle returned by
+ * `olayer_terrain_engine_create`. `rgba_data` must be aligned and readable for
+ * `rgba_len` bytes (no more than `isize::MAX`), and must not overlap `engine`.
  */
 int olayer_terrain_engine_load_rgb_tile(TerrainEngine *engine,
                                         uint32_t z,
@@ -192,6 +232,13 @@ int olayer_terrain_engine_load_rgb_tile(TerrainEngine *engine,
 /**
  * Loads a GeoTIFF / Cloud-Optimized GeoTIFF raster.
  * Returns 0 on success, or negative error.
+ *
+ * # Safety
+ * `engine` must be a live shared handle returned by
+ * `olayer_terrain_engine_create`. `data` must be aligned and readable for
+ * `length` bytes, with a range no larger than `isize::MAX`. Every non-null
+ * output must be aligned and writable for one `f64`; outputs must not overlap
+ * the input or one another.
  */
 int olayer_terrain_engine_load_geotiff(TerrainEngine *engine,
                                        const uint8_t *data,
@@ -203,16 +250,27 @@ int olayer_terrain_engine_load_geotiff(TerrainEngine *engine,
 
 /**
  * Decodes Mapbox Terrain-RGB pixel value to elevation in meters.
+ *
+ * # Safety
+ * `out_elevation` must be non-null, aligned, and writable for one `f64`.
  */
 int olayer_terrain_decode_mapbox_rgb(uint8_t r, uint8_t g, uint8_t b, double *out_elevation);
 
 /**
  * Decodes Mapzen / Nextzen Terrarium RGB pixel value to elevation in meters.
+ *
+ * # Safety
+ * `out_elevation` must be non-null, aligned, and writable for one `f64`.
  */
 int olayer_terrain_decode_terrarium_rgb(uint8_t r, uint8_t g, uint8_t b, double *out_elevation);
 
 /**
  * Resolves elevation at coordinate degrees. Returns 0 on success, negative error.
+ *
+ * # Safety
+ * `engine` must be a live exclusive handle from `olayer_terrain_engine_create`.
+ * `out_elevation` must be non-null, aligned, writable for one `f64`, and must
+ * not alias the engine.
  */
 int olayer_terrain_engine_get_elevation(TerrainEngine *engine,
                                         double lat_deg,
@@ -221,6 +279,11 @@ int olayer_terrain_engine_get_elevation(TerrainEngine *engine,
 
 /**
  * Resolves elevation at coordinate radians. Returns 0 on success, negative error.
+ *
+ * # Safety
+ * `engine` must be a live exclusive handle from `olayer_terrain_engine_create`.
+ * `out_elevation` must be non-null, aligned, writable for one `f64`, and must
+ * not alias the engine.
  */
 int olayer_terrain_engine_get_elevation_rad(TerrainEngine *engine,
                                             double lat_rad,
@@ -230,6 +293,11 @@ int olayer_terrain_engine_get_elevation_rad(TerrainEngine *engine,
 /**
  * Resolves elevation at radians while preserving DTED null samples.
  * Returns 0 for valid data, 1 for unknown elevation, or a negative error.
+ *
+ * # Safety
+ * `engine` must be a live exclusive handle from `olayer_terrain_engine_create`.
+ * `out_elevation` must be non-null, aligned, writable for one `f64`, and must
+ * not alias the engine.
  */
 int olayer_terrain_engine_get_elevation_status(TerrainEngine *engine,
                                                double lat_rad,
@@ -240,6 +308,11 @@ int olayer_terrain_engine_get_elevation_status(TerrainEngine *engine,
  * Resolves an object height against terrain.
  * `mode`: 0 absolute, 1 clamp-to-ground, 2 relative-to-ground, 3 relative-to-mesh.
  * `unknown_policy`: 0 reject, 1 use-absolute, 2 use-zero.
+ *
+ * # Safety
+ * `engine` must be a live exclusive handle from `olayer_terrain_engine_create`.
+ * `out_height` must be non-null, aligned, writable for one `f64`, and must not
+ * alias the engine.
  */
 int olayer_terrain_engine_resolve_altitude(TerrainEngine *engine,
                                            double lat_rad,
@@ -252,6 +325,11 @@ int olayer_terrain_engine_resolve_altitude(TerrainEngine *engine,
 
 /**
  * Computes MSAW clearance. Returns 0 safe, 1 warning, 2 unknown terrain, or a negative error.
+ *
+ * # Safety
+ * `engine` must be a live exclusive handle from `olayer_terrain_engine_create`.
+ * `out_clearance` must be non-null, aligned, writable for one `f64`, and must
+ * not alias the engine.
  */
 int olayer_terrain_engine_calculate_clearance(TerrainEngine *engine,
                                               double lat_rad,
@@ -263,7 +341,17 @@ int olayer_terrain_engine_calculate_clearance(TerrainEngine *engine,
 
 /**
  * Generates a vertical profile. Fills out_profile and out_count.
- * Returns 0 on success, negative error.
+ * Returns 0 on success, -1 for invalid or over-budget inputs, -2 for terrain
+ * or route failures, and -99 if a panic is caught.
+ *
+ * # Safety
+ * The three route pointers must each be aligned and readable for `route_len`
+ * initialized `f64` values; their ranges must not overlap each other. `engine`
+ * must be a live exclusive handle from `olayer_terrain_engine_create`. Both
+ * output pointers must be aligned, writable, and disjoint from the inputs and
+ * each other (`out_profile` for one pointer and `out_count` for one `usize`).
+ * On success, release the returned array once with its exact count using
+ * `olayer_profile_points_free`.
  */
 int olayer_terrain_engine_get_vertical_profile(TerrainEngine *engine,
                                                const double *route_lat,
@@ -276,26 +364,47 @@ int olayer_terrain_engine_get_vertical_profile(TerrainEngine *engine,
 
 /**
  * Frees profile point array allocated by Rust.
+ *
+ * # Safety
+ * `points` must be null or the exact pointer returned by a successful
+ * `olayer_terrain_engine_get_vertical_profile`; `count` must be its exact
+ * element count. A non-null pointer must be aligned and freed exactly once.
  */
 void olayer_profile_points_free(struct C_ProfilePoint *points, uintptr_t count);
 
 /**
  * Sets the terrain tile cache capacity. Returns 0 on success, negative error.
+ *
+ * # Safety
+ * `engine` must be a live exclusive handle returned by
+ * `olayer_terrain_engine_create`, not freed or concurrently accessed.
  */
 int olayer_terrain_engine_set_cache_capacity(TerrainEngine *engine, uintptr_t capacity);
 
 /**
  * Returns the current number of cached terrain tiles.
+ *
+ * # Safety
+ * A non-null `engine` must be a live handle returned by
+ * `olayer_terrain_engine_create` and must not be concurrently mutated or freed.
  */
 uintptr_t olayer_terrain_engine_cache_size(TerrainEngine *engine);
 
 /**
  * Clears all cached terrain tiles.
+ *
+ * # Safety
+ * A non-null `engine` must be a live exclusive handle returned by
+ * `olayer_terrain_engine_create`, not freed or concurrently accessed.
  */
 void olayer_terrain_engine_clear_cache(TerrainEngine *engine);
 
 /**
  * Destroys a TerrainEngine instance.
+ *
+ * # Safety
+ * `engine` must be null or the unique, still-live pointer returned by
+ * `olayer_terrain_engine_create`; it must not have been freed or be in use.
  */
 void olayer_terrain_engine_free(TerrainEngine *engine);
 
@@ -311,6 +420,12 @@ InterpolationEngine *olayer_interpolator_create_with_threshold(double stale_thre
 
 /**
  * Updates or inserts a target state. Returns 0 on success, negative error.
+ *
+ * # Safety
+ * `engine` must be a live exclusive handle returned by an interpolator
+ * constructor. `id` must point to a readable, aligned, NUL-terminated byte
+ * string of at most `MAX_TARGET_ID_BYTES` bytes whose bytes remain valid for
+ * this call and do not overlap the engine.
  */
 int olayer_interpolator_update(InterpolationEngine *engine,
                                const char *id,
@@ -324,12 +439,24 @@ int olayer_interpolator_update(InterpolationEngine *engine,
 
 /**
  * Removes a target. Returns 1 if present, 0 if not, or negative error.
+ *
+ * # Safety
+ * `engine` must be a live exclusive handle returned by an interpolator
+ * constructor. `id` must point to a readable, aligned, NUL-terminated byte
+ * string of at most `MAX_TARGET_ID_BYTES` bytes whose bytes remain valid for
+ * this call and do not overlap the engine.
  */
 int olayer_interpolator_remove(InterpolationEngine *engine, const char *id);
 
 /**
  * Interpolates all targets. Fills out_targets and out_count.
  * Returns 0 on success, negative error.
+ *
+ * # Safety
+ * `engine` must be a live exclusive handle returned by an interpolator
+ * constructor. Both output pointers must be aligned, writable for one value,
+ * and disjoint from each other and the engine. On success, release the returned
+ * array once with its exact count using `olayer_interpolated_targets_free`.
  */
 int olayer_interpolator_interpolate_all(InterpolationEngine *engine,
                                         double current_time,
@@ -338,11 +465,21 @@ int olayer_interpolator_interpolate_all(InterpolationEngine *engine,
 
 /**
  * Frees interpolated targets allocated by Rust.
+ *
+ * # Safety
+ * `targets` must be null or the exact pointer returned by a successful
+ * `olayer_interpolator_interpolate_all`; `count` must be its exact element
+ * count. Each non-null ID must still be the original returned CString pointer.
+ * The array and each ID must be freed exactly once and must not have been altered.
  */
 void olayer_interpolated_targets_free(struct C_InterpolatedTarget *targets, uintptr_t count);
 
 /**
  * Destroys an InterpolationEngine instance.
+ *
+ * # Safety
+ * `engine` must be null or the unique, still-live pointer returned by an
+ * interpolator constructor; it must not have been freed or be in use.
  */
 void olayer_interpolator_free(InterpolationEngine *engine);
 
@@ -355,6 +492,11 @@ LocalTangentFrame *olayer_local_frame_create(double origin_lat,
 
 /**
  * Converts LLA to local ENU coordinates. Returns 0 on success, negative error.
+ *
+ * # Safety
+ * `frame` must be a live handle returned by `olayer_local_frame_create`.
+ * `out_enu` must be aligned and writable for one `C_EnuPoint`, and must not
+ * overlap the frame.
  */
 int olayer_local_frame_lla_to_enu(LocalTangentFrame *frame,
                                   double lat,
@@ -364,6 +506,11 @@ int olayer_local_frame_lla_to_enu(LocalTangentFrame *frame,
 
 /**
  * Converts local ENU coordinates to LLA. Returns 0 on success, negative error.
+ *
+ * # Safety
+ * `frame` must be a live handle returned by `olayer_local_frame_create`.
+ * `out_lla` must be aligned and writable for one `C_LatLon`, and must not
+ * overlap the frame.
  */
 int olayer_local_frame_enu_to_lla(LocalTangentFrame *frame,
                                   double east_m,
@@ -373,6 +520,11 @@ int olayer_local_frame_enu_to_lla(LocalTangentFrame *frame,
 
 /**
  * Calculates radar look angles without atmospheric refraction. Returns 0 on success, negative error.
+ *
+ * # Safety
+ * `frame` must be a live handle returned by `olayer_local_frame_create`. Each
+ * output pointer must be aligned and writable for one `f64`; they must be
+ * mutually disjoint and must not overlap the frame.
  */
 int olayer_local_frame_radar_look_angles(LocalTangentFrame *frame,
                                          double target_lat,
@@ -384,6 +536,11 @@ int olayer_local_frame_radar_look_angles(LocalTangentFrame *frame,
 
 /**
  * Calculates radar look angles with 4/3 tropospheric refraction. Returns 0 on success, negative error.
+ *
+ * # Safety
+ * `frame` must be a live handle returned by `olayer_local_frame_create`. Each
+ * output pointer must be aligned and writable for one `f64`; they must be
+ * mutually disjoint and must not overlap the frame.
  */
 int olayer_local_frame_radar_look_angles_refracted(LocalTangentFrame *frame,
                                                    double target_lat,
@@ -396,6 +553,10 @@ int olayer_local_frame_radar_look_angles_refracted(LocalTangentFrame *frame,
 
 /**
  * Destroys a `LocalTangentFrame` instance.
+ *
+ * # Safety
+ * `frame` must be null or the unique, still-live pointer returned by
+ * `olayer_local_frame_create`; it must not have been freed or be in use.
  */
 void olayer_local_frame_free(LocalTangentFrame *frame);
 
@@ -407,11 +568,21 @@ MagneticModel *olayer_magnetic_model_create_default(void);
 /**
  * Creates a `MagneticModel` from a null-terminated `WMM.COF` string.
  * Returns null pointer if parsing fails or string is invalid UTF-8.
+ *
+ * # Safety
+ * `cof_str` must be null or point to an aligned, readable, NUL-terminated byte
+ * string no longer than `MAX_FFI_TEXT_BYTES` bytes that remains valid for this
+ * call.
  */
 MagneticModel *olayer_magnetic_model_create_from_cof(const char *cof_str);
 
 /**
  * Computes magnetic declination using a specific `MagneticModel` instance.
+ *
+ * # Safety
+ * `model` must be a live handle returned by a magnetic-model constructor.
+ * `out_declination_rad` must be aligned and writable for one `f64`, without
+ * overlapping the model.
  */
 int olayer_magnetic_model_get_declination(MagneticModel *model,
                                           double lat,
@@ -422,6 +593,11 @@ int olayer_magnetic_model_get_declination(MagneticModel *model,
 
 /**
  * Computes magnetic field elements using a specific `MagneticModel` instance.
+ *
+ * # Safety
+ * `model` must be a live handle returned by a magnetic-model constructor.
+ * `out_elements` must be aligned and writable for one `C_MagneticElements`,
+ * without overlapping the model.
  */
 int olayer_magnetic_model_get_elements(MagneticModel *model,
                                        double lat,
@@ -432,6 +608,11 @@ int olayer_magnetic_model_get_elements(MagneticModel *model,
 
 /**
  * Converts True bearing to Magnetic bearing using a specific `MagneticModel` instance.
+ *
+ * # Safety
+ * `model` must be a live handle returned by a magnetic-model constructor.
+ * `out_mag_bearing_rad` must be aligned and writable for one `f64`, without
+ * overlapping the model.
  */
 int olayer_magnetic_model_true_to_magnetic(MagneticModel *model,
                                            double true_bearing_rad,
@@ -443,6 +624,11 @@ int olayer_magnetic_model_true_to_magnetic(MagneticModel *model,
 
 /**
  * Converts Magnetic bearing to True bearing using a specific `MagneticModel` instance.
+ *
+ * # Safety
+ * `model` must be a live handle returned by a magnetic-model constructor.
+ * `out_true_bearing_rad` must be aligned and writable for one `f64`, without
+ * overlapping the model.
  */
 int olayer_magnetic_model_magnetic_to_true(MagneticModel *model,
                                            double mag_bearing_rad,
@@ -454,11 +640,18 @@ int olayer_magnetic_model_magnetic_to_true(MagneticModel *model,
 
 /**
  * Destroys a `MagneticModel` instance.
+ *
+ * # Safety
+ * `model` must be null or the unique, still-live pointer returned by a
+ * magnetic-model constructor; it must not have been freed or be in use.
  */
 void olayer_magnetic_model_free(MagneticModel *model);
 
 /**
  * Computes magnetic declination in radians using default WMM-2025. Returns 0 on success, negative error.
+ *
+ * # Safety
+ * `out_declination_rad` must be non-null, aligned, and writable for one `f64`.
  */
 int olayer_magnetic_get_declination(double lat,
                                     double lon,
@@ -468,6 +661,9 @@ int olayer_magnetic_get_declination(double lat,
 
 /**
  * Computes all magnetic field elements using default WMM-2025. Returns 0 on success, negative error.
+ *
+ * # Safety
+ * `out_elements` must be non-null, aligned, and writable for one `C_MagneticElements`.
  */
 int olayer_magnetic_get_elements(double lat,
                                  double lon,
@@ -477,6 +673,9 @@ int olayer_magnetic_get_elements(double lat,
 
 /**
  * Converts True bearing to Magnetic bearing using default WMM-2025. Returns 0 on success, negative error.
+ *
+ * # Safety
+ * `out_mag_bearing_rad` must be non-null, aligned, and writable for one `f64`.
  */
 int olayer_magnetic_true_to_magnetic(double true_bearing_rad,
                                      double lat,
@@ -487,6 +686,9 @@ int olayer_magnetic_true_to_magnetic(double true_bearing_rad,
 
 /**
  * Converts Magnetic bearing to True bearing using default WMM-2025. Returns 0 on success, negative error.
+ *
+ * # Safety
+ * `out_true_bearing_rad` must be non-null, aligned, and writable for one `f64`.
  */
 int olayer_magnetic_magnetic_to_true(double mag_bearing_rad,
                                      double lat,
@@ -497,6 +699,10 @@ int olayer_magnetic_magnetic_to_true(double mag_bearing_rad,
 
 /**
  * Computes route deviation (XTK and ATD). Returns 0 on success, negative error.
+ *
+ * # Safety
+ * `out_deviation` must be non-null, aligned, and writable for one
+ * `C_RouteDeviation`.
  */
 int olayer_spatial_compute_route_deviation(struct C_LatLon start,
                                            struct C_LatLon end,
@@ -505,6 +711,9 @@ int olayer_spatial_compute_route_deviation(struct C_LatLon start,
 
 /**
  * Computes geodesic line-line intersection. Returns 1 if intersects, 0 if disjoint, negative error.
+ *
+ * # Safety
+ * `out_intersection` must be non-null, aligned, and writable for one `C_LatLon`.
  */
 int olayer_spatial_geodesic_intersection(struct C_LatLon p1,
                                          struct C_LatLon p2,
@@ -515,6 +724,12 @@ int olayer_spatial_geodesic_intersection(struct C_LatLon p1,
 /**
  * Evaluates spherical polygon point containment. Returns 0 on success, negative error.
  * `*out_contains` is set to 1 if contained, 0 if not.
+ *
+ * # Safety
+ * `poly_coords` must be aligned and readable for `num_coords` initialized
+ * `C_LatLon` elements; that range must not exceed `isize::MAX` bytes.
+ * `out_contains` must be aligned and writable for one `c_int`; it must not
+ * overlap the coordinate array.
  */
 int olayer_spatial_polygon_contains_point(const struct C_LatLon *poly_coords,
                                           uintptr_t num_coords,
@@ -523,6 +738,10 @@ int olayer_spatial_polygon_contains_point(const struct C_LatLon *poly_coords,
 
 /**
  * Computes Range and Bearing Line (RBL / CRSR) measurement. Returns 0 on success, negative error.
+ *
+ * # Safety
+ * `out_measurement` must be non-null, aligned, and writable for one
+ * `C_RblMeasurement`.
  */
 int olayer_tools_compute_rbl(double from_lat_deg,
                              double from_lon_deg,
@@ -533,7 +752,16 @@ int olayer_tools_compute_rbl(double from_lat_deg,
                              struct C_RblMeasurement *out_measurement);
 
 /**
- * Generates Projected Position Leader (PPL) vector ticks. Returns 0 on success, negative error.
+ * Generates Projected Position Leader (PPL) vector ticks. Returns 0 on success,
+ * -1 for invalid pointers or empty intervals, and -2 if `num_intervals` exceeds
+ * the configured input limit.
+ *
+ * # Safety
+ * `intervals_minutes` must be aligned and readable for `num_intervals`
+ * initialized `f64` values; the range must not exceed `isize::MAX` bytes.
+ * `out_ticks` must be aligned and writable for `max_ticks` `C_PplTick`
+ * elements, and `out_ticks_written` aligned/writable for one `usize`; output
+ * ranges must be disjoint from the input and each other.
  */
 int olayer_tools_generate_ppl(double lat_deg,
                               double lon_deg,
@@ -546,7 +774,15 @@ int olayer_tools_generate_ppl(double lat_deg,
                               uintptr_t *out_ticks_written);
 
 /**
- * Generates racetrack holding pattern polyline coordinates. Returns 0 on success, negative error.
+ * Generates racetrack holding pattern polyline coordinates. Returns 0 on
+ * success, -1 for invalid pointers, and -2 if `points_per_turn` exceeds its
+ * configured generation limit.
+ *
+ * # Safety
+ * `out_coords` must be aligned and writable for `max_coords` `C_LatLon`
+ * elements; `out_coords_written` must be aligned and writable for one `usize`.
+ * These ranges must not overlap. `max_coords` must describe the actual output
+ * allocation, even when smaller than the generated result.
  */
 int olayer_tools_generate_holding_pattern(double fix_lat_deg,
                                           double fix_lon_deg,
@@ -560,7 +796,13 @@ int olayer_tools_generate_holding_pattern(double fix_lat_deg,
                                           uintptr_t *out_coords_written);
 
 /**
- * Generates ILS approach funnel polygon coordinates. Returns 0 on success, negative error.
+ * Generates ILS approach funnel polygon coordinates. Returns 0 on success,
+ * -1 for invalid pointers, and -2 if `arc_steps` exceeds its configured limit.
+ *
+ * # Safety
+ * `out_polygon_coords` must be aligned and writable for `max_polygon_coords`
+ * `C_LatLon` elements; `out_polygon_coords_written` must be aligned and
+ * writable for one `usize`. The ranges must not overlap.
  */
 int olayer_tools_generate_ils_cone(double threshold_lat_deg,
                                    double threshold_lon_deg,
@@ -573,7 +815,13 @@ int olayer_tools_generate_ils_cone(double threshold_lat_deg,
                                    uintptr_t *out_polygon_coords_written);
 
 /**
- * Generates concentric range rings coordinates. Returns 0 on success, negative error.
+ * Generates concentric range rings coordinates. Returns 0 on success, -1 for
+ * invalid pointers, and -2 if `points_per_ring` exceeds its configured limit.
+ *
+ * # Safety
+ * `out_ring_coords` must be aligned and writable for `max_coords` `C_LatLon`
+ * elements; `out_coords_written` must be aligned and writable for one `usize`.
+ * The ranges must not overlap.
  */
 int olayer_tools_generate_range_rings(double center_lat_deg,
                                       double center_lon_deg,
@@ -586,17 +834,32 @@ int olayer_tools_generate_range_rings(double center_lat_deg,
 /**
  * Loads an `AeronauticalDataset` from an AIXM 5.1 XML null-terminated UTF-8 string.
  * Returns null pointer on error.
+ *
+ * # Safety
+ * `xml_utf8` must be null or point to readable, aligned, NUL-terminated bytes
+ * valid for this call. The complete string must be no longer than
+ * `MAX_FFI_TEXT_BYTES` bytes, excluding its terminator.
  */
 AeronauticalDataset *olayer_aeronautical_dataset_from_aixm(const char *xml_utf8);
 
 /**
  * Loads an `AeronauticalDataset` from a GeoJSON-Aviation null-terminated UTF-8 string.
  * Returns null pointer on error.
+ *
+ * # Safety
+ * `json_utf8` must be null or point to readable, aligned, NUL-terminated bytes
+ * valid for this call. The complete string must be no longer than
+ * `MAX_FFI_TEXT_BYTES` bytes, excluding its terminator.
  */
 AeronauticalDataset *olayer_aeronautical_dataset_from_geojson(const char *json_utf8);
 
 /**
  * Returns the counts of airspaces, navaids, airways, and airports in the dataset. Returns 0 on success.
+ *
+ * # Safety
+ * `ds` must be a live handle returned by an aeronautical dataset constructor.
+ * Each non-null output must be aligned and writable for one `usize`; output
+ * pointers must not overlap one another or the dataset.
  */
 int olayer_aeronautical_dataset_counts(AeronauticalDataset *ds,
                                        uintptr_t *out_airspaces,
@@ -606,6 +869,12 @@ int olayer_aeronautical_dataset_counts(AeronauticalDataset *ds,
 
 /**
  * Finds a navaid by its identification code. Returns 0 on success, -1 on null pointer, -2 if not found.
+ *
+ * # Safety
+ * `ds` must be a live dataset handle. `ident_utf8` must point to readable,
+ * aligned, NUL-terminated bytes of at most `MAX_TARGET_ID_BYTES` valid for
+ * this call. `out_navaid` must be aligned and writable for one
+ * `C_NavaidSummary`, disjoint from both inputs.
  */
 int olayer_aeronautical_dataset_find_navaid(AeronauticalDataset *ds,
                                             const char *ident_utf8,
@@ -614,6 +883,11 @@ int olayer_aeronautical_dataset_find_navaid(AeronauticalDataset *ds,
 /**
  * Serializes the dataset into a standard GeoJSON FeatureCollection string into a C buffer.
  * Returns 0 on success, -1 on error, or -2 if buffer capacity is insufficient.
+ *
+ * # Safety
+ * `ds` must be a live dataset handle. `out_len` must be aligned and writable
+ * for one `usize`. If `out_buf` is non-null, it must be aligned and writable
+ * for `out_capacity` bytes; its range must not overlap the dataset or `out_len`.
  */
 int olayer_aeronautical_dataset_to_geojson(AeronauticalDataset *ds,
                                            char *out_buf,
@@ -622,18 +896,31 @@ int olayer_aeronautical_dataset_to_geojson(AeronauticalDataset *ds,
 
 /**
  * Destroys an `AeronauticalDataset` instance.
+ *
+ * # Safety
+ * `ds` must be null or the unique, still-live pointer returned by an
+ * aeronautical dataset constructor; it must not have been freed or be in use.
  */
 void olayer_aeronautical_dataset_free(AeronauticalDataset *ds);
 
 /**
  * Maps a radar reflectivity value (dBZ) to 4-byte RGBA array.
  * palette_code: 0 = Nexrad, 1 = Icao, 2 = HighContrast.
+ *
+ * # Safety
+ * `out_rgba` must be non-null, aligned, and writable for four initialized
+ * `u8` slots.
  */
 int olayer_weather_dbz_to_rgba(double dbz, int palette_code, uint8_t *out_rgba);
 
 /**
  * Generates aviation-standard wind barb line coordinates in degrees.
  * Writes flat lines `[start_lat, start_lon, end_lat, end_lon, ...]` into `out_lines`.
+ *
+ * # Safety
+ * `out_lines` must be non-null, aligned, and writable for `max_floats` `f64`
+ * elements. `out_count` must be non-null, aligned, and writable for one
+ * `usize`; the output ranges must not overlap.
  */
 int olayer_weather_generate_wind_barb(double origin_lat_deg,
                                       double origin_lon_deg,
@@ -648,6 +935,14 @@ int olayer_weather_generate_wind_barb(double origin_lat_deg,
 /**
  * Generates Marching Squares 2D isolines from a scalar grid.
  * Writes flat segments `[isovalue, start_lat_deg, start_lon_deg, end_lat_deg, end_lon_deg, ...]` into `out_segments`.
+ *
+ * # Safety
+ * `grid` must be aligned and readable for `width * height` initialized `f64`
+ * values and `isovalues` for `isovalues_count` initialized `f64` values. The
+ * element counts are bounded and multiplication is checked before slicing.
+ * `out_segments` must be aligned and writable for `max_floats` `f64` values;
+ * `out_count` must be aligned and writable for one `usize`. The input and
+ * output ranges must be pairwise disjoint.
  */
 int olayer_weather_generate_isolines(const double *grid,
                                      uintptr_t width,
@@ -664,16 +959,29 @@ int olayer_weather_generate_isolines(const double *grid,
 
 /**
  * Parses a GeoJSON string into a heap-allocated `SigmetDataset`.
+ *
+ * # Safety
+ * `geojson_str` must be null or point to readable, aligned, NUL-terminated
+ * bytes valid for this call and no longer than `MAX_FFI_TEXT_BYTES` bytes.
  */
 SigmetDataset *olayer_sigmet_dataset_from_geojson(const char *geojson_str);
 
 /**
  * Returns the total number of warnings in a `SigmetDataset`.
+ *
+ * # Safety
+ * `ds` must be a live dataset handle returned by
+ * `olayer_sigmet_dataset_from_geojson`. `out_count` must be aligned, writable
+ * for one `usize`, and disjoint from the dataset.
  */
 int olayer_sigmet_dataset_total_count(const SigmetDataset *ds, uintptr_t *out_count);
 
 /**
  * Destroys a heap-allocated `SigmetDataset`.
+ *
+ * # Safety
+ * `ds` must be null or the unique, still-live pointer returned by
+ * `olayer_sigmet_dataset_from_geojson`; it must not have been freed or be in use.
  */
 void olayer_sigmet_dataset_free(SigmetDataset *ds);
 
@@ -681,6 +989,13 @@ void olayer_sigmet_dataset_free(SigmetDataset *ds);
  * Generates an extruded 3D volumetric airspace mesh.
  * Writes flat interleaved vertices `[x, y, z, nx, ny, nz, height_ratio, is_edge, ...]` into `out_vertices`
  * and triangle indices into `out_indices`.
+ *
+ * # Safety
+ * `polygon_coords` must be aligned and readable for `polygon_len` initialized
+ * `C_LatLon` values. `out_vertices` must be aligned and writable for
+ * `max_vertices_floats` `f32` values and `out_indices` for `max_indices` `u32`
+ * values. Each count output must be aligned and writable for one `usize`.
+ * Input, outputs, and the two count locations must be pairwise disjoint.
  */
 int olayer_volumetric_generate_airspace_mesh(const struct C_LatLon *polygon_coords,
                                              uintptr_t polygon_len,
@@ -697,6 +1012,13 @@ int olayer_volumetric_generate_airspace_mesh(const struct C_LatLon *polygon_coor
  * Generates a continuous 3D flight trajectory ribbon mesh in ECEF coordinates.
  * Writes flat interleaved vertices `[x, y, z, nx, ny, nz, u, v, scalar, ...]` into `out_vertices`
  * and triangle indices into `out_indices`.
+ *
+ * # Safety
+ * `waypoints` must be aligned and readable for `waypoints_len` initialized
+ * `C_LatLon` values. A non-null `scalars` pointer must be aligned and readable
+ * for `scalars_len` initialized `f64` values. Vertex/index buffers must be
+ * aligned and writable for their supplied capacities, and both count outputs
+ * aligned/writable for one `usize`; all referenced ranges must be disjoint.
  */
 int olayer_volumetric_generate_trajectory_ribbon(const struct C_LatLon *waypoints,
                                                  uintptr_t waypoints_len,
@@ -712,6 +1034,12 @@ int olayer_volumetric_generate_trajectory_ribbon(const struct C_LatLon *waypoint
 
 /**
  * Solves optimal 8-octant non-overlapping label placements for a batch of screen targets.
+ *
+ * # Safety
+ * `targets` must be aligned and readable for `targets_len` initialized
+ * `C_LabelTarget` values. `out_placements` must be aligned and writable for
+ * `max_placements` placements and `out_placements_count` aligned/writable for
+ * one `usize`; output ranges must not overlap each other or the input.
  */
 int olayer_declutter_solve_labels(const struct C_LabelTarget *targets,
                                   uintptr_t targets_len,

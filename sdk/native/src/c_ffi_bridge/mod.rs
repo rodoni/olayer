@@ -1,9 +1,6 @@
-#![allow(clippy::must_use_candidate)]
-#![allow(clippy::missing_safety_doc)]
-#![allow(clippy::too_many_arguments)]
-
 use crate::tools::{
     HoldingPatternConfig, IlsConeConfig, RangeRingsConfig, TacticalToolsManager, TurnDirection,
+    MAX_HOLDING_PATTERN_POINTS_PER_TURN, MAX_ILS_ARC_STEPS, MAX_RANGE_RING_POINTS,
 };
 use olayer_core::aeronautical::{
     export_dataset_to_geojson, parse_aixm_51_str, parse_geojson_aviation_str, AeronauticalDataset,
@@ -16,6 +13,17 @@ use olayer_core::geodesy::{
 use olayer_core::interpolator::{InterpolationEngine, TargetState};
 use olayer_core::terrain::TerrainEngine;
 use std::os::raw::{c_char, c_int};
+
+const MAX_FFI_BUFFER_BYTES: usize = 256 * 1024 * 1024;
+const MAX_FFI_TEXT_BYTES: usize = 16 * 1024 * 1024;
+const MAX_TARGET_ID_BYTES: usize = 1_024;
+const MAX_FFI_ARRAY_ITEMS: usize = 65_536;
+const MAX_ROUTE_POINTS: usize = 4_096;
+const MAX_PROFILE_SAMPLES: usize = 1_000_000;
+const MAX_GRID_CELLS: usize = 1_000_000;
+const MAX_ISOLINE_WORK: usize = 1_000_000;
+const MAX_ISOVALUES: usize = 64;
+const MAX_LABEL_TARGETS: usize = 256;
 
 // --- C-COMPATIBLE DATA STRUCTURES ---
 
@@ -140,6 +148,13 @@ pub extern "C" fn olayer_terrain_engine_create() -> *mut TerrainEngine {
 
 /// Parses and registers a raw DTED buffer.
 /// Returns 0 on success, or a negative code on error.
+///
+/// # Safety
+/// `engine` must be a live exclusive handle from `olayer_terrain_engine_create`.
+/// `data` must be aligned and readable for `length` bytes; the byte range must
+/// not exceed `isize::MAX` and must not overlap the engine or output locations.
+/// Each non-null output pointer must be aligned, writable for one `i32`, and
+/// disjoint from every other referenced range for the duration of the call.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_terrain_engine_load_tile(
     engine: *mut TerrainEngine,
@@ -150,7 +165,11 @@ pub unsafe extern "C" fn olayer_terrain_engine_load_tile(
 ) -> c_int {
     // SAFETY: The caller must provide a live engine, a readable `data` buffer
     // of `length` bytes, and writable output pointers when non-null.
-    if engine.is_null() || data.is_null() {
+    if engine.is_null()
+        || data.is_null()
+        || length > MAX_FFI_BUFFER_BYTES
+        || length > isize::MAX as usize
+    {
         return -1; // Null pointer error
     }
 
@@ -178,6 +197,10 @@ pub unsafe extern "C" fn olayer_terrain_engine_load_tile(
 }
 
 /// Unloads a terrain tile. Returns 1 if tile existed, 0 if not, or negative error.
+///
+/// # Safety
+/// `engine` must be a live exclusive handle returned by
+/// `olayer_terrain_engine_create`, not freed or concurrently accessed.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_terrain_engine_unload_tile(
     engine: *mut TerrainEngine,
@@ -204,6 +227,11 @@ pub unsafe extern "C" fn olayer_terrain_engine_unload_tile(
 /// Loads and registers a Web Mercator (Z, X, Y) RGB elevation tile.
 /// encoding_code: 0 = MapboxRgb, 1 = Terrarium.
 /// Returns 0 on success, or a negative code on error.
+///
+/// # Safety
+/// `engine` must be a live shared handle returned by
+/// `olayer_terrain_engine_create`. `rgba_data` must be aligned and readable for
+/// `rgba_len` bytes (no more than `isize::MAX`), and must not overlap `engine`.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_terrain_engine_load_rgb_tile(
     engine: *mut TerrainEngine,
@@ -216,7 +244,20 @@ pub unsafe extern "C" fn olayer_terrain_engine_load_rgb_tile(
     width: usize,
     height: usize,
 ) -> c_int {
-    if engine.is_null() || rgba_data.is_null() {
+    if engine.is_null()
+        || rgba_data.is_null()
+        || rgba_len > MAX_FFI_BUFFER_BYTES
+        || rgba_len > isize::MAX as usize
+    {
+        return -1;
+    }
+    let Some(expected_rgba_len) = width
+        .checked_mul(height)
+        .and_then(|pixels| pixels.checked_mul(4))
+    else {
+        return -1;
+    };
+    if expected_rgba_len != rgba_len {
         return -1;
     }
     let encoding = match encoding_code {
@@ -234,6 +275,13 @@ pub unsafe extern "C" fn olayer_terrain_engine_load_rgb_tile(
 
 /// Loads a GeoTIFF / Cloud-Optimized GeoTIFF raster.
 /// Returns 0 on success, or negative error.
+///
+/// # Safety
+/// `engine` must be a live shared handle returned by
+/// `olayer_terrain_engine_create`. `data` must be aligned and readable for
+/// `length` bytes, with a range no larger than `isize::MAX`. Every non-null
+/// output must be aligned and writable for one `f64`; outputs must not overlap
+/// the input or one another.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_terrain_engine_load_geotiff(
     engine: *mut TerrainEngine,
@@ -244,7 +292,11 @@ pub unsafe extern "C" fn olayer_terrain_engine_load_geotiff(
     out_max_lat_deg: *mut f64,
     out_max_lon_deg: *mut f64,
 ) -> c_int {
-    if engine.is_null() || data.is_null() {
+    if engine.is_null()
+        || data.is_null()
+        || length > MAX_FFI_BUFFER_BYTES
+        || length > isize::MAX as usize
+    {
         return -1;
     }
     let data_slice = std::slice::from_raw_parts(data, length);
@@ -270,6 +322,9 @@ pub unsafe extern "C" fn olayer_terrain_engine_load_geotiff(
 }
 
 /// Decodes Mapbox Terrain-RGB pixel value to elevation in meters.
+///
+/// # Safety
+/// `out_elevation` must be non-null, aligned, and writable for one `f64`.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_terrain_decode_mapbox_rgb(
     r: u8,
@@ -285,6 +340,9 @@ pub unsafe extern "C" fn olayer_terrain_decode_mapbox_rgb(
 }
 
 /// Decodes Mapzen / Nextzen Terrarium RGB pixel value to elevation in meters.
+///
+/// # Safety
+/// `out_elevation` must be non-null, aligned, and writable for one `f64`.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_terrain_decode_terrarium_rgb(
     r: u8,
@@ -300,6 +358,11 @@ pub unsafe extern "C" fn olayer_terrain_decode_terrarium_rgb(
 }
 
 /// Resolves elevation at coordinate degrees. Returns 0 on success, negative error.
+///
+/// # Safety
+/// `engine` must be a live exclusive handle from `olayer_terrain_engine_create`.
+/// `out_elevation` must be non-null, aligned, writable for one `f64`, and must
+/// not alias the engine.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_terrain_engine_get_elevation(
     engine: *mut TerrainEngine,
@@ -327,6 +390,11 @@ pub unsafe extern "C" fn olayer_terrain_engine_get_elevation(
 }
 
 /// Resolves elevation at coordinate radians. Returns 0 on success, negative error.
+///
+/// # Safety
+/// `engine` must be a live exclusive handle from `olayer_terrain_engine_create`.
+/// `out_elevation` must be non-null, aligned, writable for one `f64`, and must
+/// not alias the engine.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_terrain_engine_get_elevation_rad(
     engine: *mut TerrainEngine,
@@ -355,6 +423,11 @@ pub unsafe extern "C" fn olayer_terrain_engine_get_elevation_rad(
 
 /// Resolves elevation at radians while preserving DTED null samples.
 /// Returns 0 for valid data, 1 for unknown elevation, or a negative error.
+///
+/// # Safety
+/// `engine` must be a live exclusive handle from `olayer_terrain_engine_create`.
+/// `out_elevation` must be non-null, aligned, writable for one `f64`, and must
+/// not alias the engine.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_terrain_engine_get_elevation_status(
     engine: *mut TerrainEngine,
@@ -384,6 +457,11 @@ pub unsafe extern "C" fn olayer_terrain_engine_get_elevation_status(
 /// Resolves an object height against terrain.
 /// `mode`: 0 absolute, 1 clamp-to-ground, 2 relative-to-ground, 3 relative-to-mesh.
 /// `unknown_policy`: 0 reject, 1 use-absolute, 2 use-zero.
+///
+/// # Safety
+/// `engine` must be a live exclusive handle from `olayer_terrain_engine_create`.
+/// `out_height` must be non-null, aligned, writable for one `f64`, and must not
+/// alias the engine.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_terrain_engine_resolve_altitude(
     engine: *mut TerrainEngine,
@@ -430,6 +508,11 @@ pub unsafe extern "C" fn olayer_terrain_engine_resolve_altitude(
 }
 
 /// Computes MSAW clearance. Returns 0 safe, 1 warning, 2 unknown terrain, or a negative error.
+///
+/// # Safety
+/// `engine` must be a live exclusive handle from `olayer_terrain_engine_create`.
+/// `out_clearance` must be non-null, aligned, writable for one `f64`, and must
+/// not alias the engine.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_terrain_engine_calculate_clearance(
     engine: *mut TerrainEngine,
@@ -474,7 +557,17 @@ pub unsafe extern "C" fn olayer_terrain_engine_calculate_clearance(
 }
 
 /// Generates a vertical profile. Fills out_profile and out_count.
-/// Returns 0 on success, negative error.
+/// Returns 0 on success, -1 for invalid or over-budget inputs, -2 for terrain
+/// or route failures, and -99 if a panic is caught.
+///
+/// # Safety
+/// The three route pointers must each be aligned and readable for `route_len`
+/// initialized `f64` values; their ranges must not overlap each other. `engine`
+/// must be a live exclusive handle from `olayer_terrain_engine_create`. Both
+/// output pointers must be aligned, writable, and disjoint from the inputs and
+/// each other (`out_profile` for one pointer and `out_count` for one `usize`).
+/// On success, release the returned array once with its exact count using
+/// `olayer_profile_points_free`.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_terrain_engine_get_vertical_profile(
     engine: *mut TerrainEngine,
@@ -494,18 +587,56 @@ pub unsafe extern "C" fn olayer_terrain_engine_get_vertical_profile(
         || route_height.is_null()
         || out_profile.is_null()
         || out_count.is_null()
-        || route_len > 1_000_000
+        || !(2..=MAX_ROUTE_POINTS).contains(&route_len)
+        || route_len > isize::MAX as usize / std::mem::size_of::<f64>()
+        || !step_meters.is_finite()
+        || step_meters <= 0.0
     {
         return -1;
     }
 
     let mut route = Vec::with_capacity(route_len);
     for i in 0..route_len {
-        route.push(LatLon::from_degrees(
-            *route_lat.add(i),
-            *route_lon.add(i),
-            *route_height.add(i),
-        ));
+        // SAFETY: Each input array is documented to contain `route_len`
+        // initialized f64 values, and the bounded index is within that range.
+        let lat_deg = unsafe { *route_lat.add(i) };
+        // SAFETY: `route_lon` has the same validated readable length.
+        let lon_deg = unsafe { *route_lon.add(i) };
+        // SAFETY: `route_height` has the same validated readable length.
+        let height = unsafe { *route_height.add(i) };
+        if !lat_deg.is_finite()
+            || !(-90.0..=90.0).contains(&lat_deg)
+            || !lon_deg.is_finite()
+            || !(-180.0..=180.0).contains(&lon_deg)
+            || !height.is_finite()
+        {
+            return -1;
+        }
+        route.push(LatLon::from_degrees(lat_deg, lon_deg, height));
+    }
+
+    let mut estimated_samples = route_len;
+    for segment in route.windows(2) {
+        if estimated_samples > MAX_PROFILE_SAMPLES {
+            return -1;
+        }
+        let lat1 = segment[0].lat;
+        let lat2 = segment[1].lat;
+        let delta_lat = lat2 - lat1;
+        let delta_lon = segment[1].lon - segment[0].lon;
+        let haversine = (delta_lat * 0.5).sin().powi(2)
+            + lat1.cos() * lat2.cos() * (delta_lon * 0.5).sin().powi(2);
+        let angular_distance = 2.0 * haversine.clamp(0.0, 1.0).sqrt().asin();
+        let segment_samples = angular_distance * 6_400_000.0 / step_meters;
+        if !segment_samples.is_finite()
+            || segment_samples > (MAX_PROFILE_SAMPLES - estimated_samples) as f64
+        {
+            return -1;
+        }
+        estimated_samples += segment_samples.ceil() as usize;
+        if estimated_samples > MAX_PROFILE_SAMPLES {
+            return -1;
+        }
     }
 
     let engine_ref = &mut *engine;
@@ -515,7 +646,7 @@ pub unsafe extern "C" fn olayer_terrain_engine_get_vertical_profile(
 
     match result {
         Ok(Ok(profile)) => {
-            let mut c_points: Vec<C_ProfilePoint> = profile
+            let c_points: Vec<C_ProfilePoint> = profile
                 .into_iter()
                 .map(|p| C_ProfilePoint {
                     distance_meters: p.distance_meters,
@@ -526,10 +657,9 @@ pub unsafe extern "C" fn olayer_terrain_engine_get_vertical_profile(
                 })
                 .collect();
 
-            c_points.shrink_to_fit();
-            let count = c_points.len();
-            let ptr = c_points.as_mut_ptr();
-            std::mem::forget(c_points); // Leak vector allocation to C host control
+            let boxed_points = c_points.into_boxed_slice();
+            let count = boxed_points.len();
+            let ptr = Box::into_raw(boxed_points).cast::<C_ProfilePoint>();
 
             *out_profile = ptr;
             *out_count = count;
@@ -541,14 +671,27 @@ pub unsafe extern "C" fn olayer_terrain_engine_get_vertical_profile(
 }
 
 /// Frees profile point array allocated by Rust.
+///
+/// # Safety
+/// `points` must be null or the exact pointer returned by a successful
+/// `olayer_terrain_engine_get_vertical_profile`; `count` must be its exact
+/// element count. A non-null pointer must be aligned and freed exactly once.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_profile_points_free(points: *mut C_ProfilePoint, count: usize) {
-    if !points.is_null() && count > 0 {
-        let _ = Vec::from_raw_parts(points, count, count);
+    if !points.is_null() {
+        // SAFETY: The paired allocator returns a boxed slice and the caller must
+        // pass its original pointer and element count exactly once.
+        let slice = std::ptr::slice_from_raw_parts_mut(points, count);
+        // SAFETY: The slice pointer preserves the original boxed-slice layout.
+        drop(unsafe { Box::from_raw(slice) });
     }
 }
 
 /// Sets the terrain tile cache capacity. Returns 0 on success, negative error.
+///
+/// # Safety
+/// `engine` must be a live exclusive handle returned by
+/// `olayer_terrain_engine_create`, not freed or concurrently accessed.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_terrain_engine_set_cache_capacity(
     engine: *mut TerrainEngine,
@@ -568,6 +711,10 @@ pub unsafe extern "C" fn olayer_terrain_engine_set_cache_capacity(
 }
 
 /// Returns the current number of cached terrain tiles.
+///
+/// # Safety
+/// A non-null `engine` must be a live handle returned by
+/// `olayer_terrain_engine_create` and must not be concurrently mutated or freed.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_terrain_engine_cache_size(engine: *mut TerrainEngine) -> usize {
     if engine.is_null() {
@@ -578,6 +725,10 @@ pub unsafe extern "C" fn olayer_terrain_engine_cache_size(engine: *mut TerrainEn
 }
 
 /// Clears all cached terrain tiles.
+///
+/// # Safety
+/// A non-null `engine` must be a live exclusive handle returned by
+/// `olayer_terrain_engine_create`, not freed or concurrently accessed.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_terrain_engine_clear_cache(engine: *mut TerrainEngine) {
     if engine.is_null() {
@@ -590,6 +741,10 @@ pub unsafe extern "C" fn olayer_terrain_engine_clear_cache(engine: *mut TerrainE
 }
 
 /// Destroys a TerrainEngine instance.
+///
+/// # Safety
+/// `engine` must be null or the unique, still-live pointer returned by
+/// `olayer_terrain_engine_create`; it must not have been freed or be in use.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_terrain_engine_free(engine: *mut TerrainEngine) {
     if !engine.is_null() {
@@ -617,6 +772,12 @@ pub extern "C" fn olayer_interpolator_create_with_threshold(
 }
 
 /// Updates or inserts a target state. Returns 0 on success, negative error.
+///
+/// # Safety
+/// `engine` must be a live exclusive handle returned by an interpolator
+/// constructor. `id` must point to a readable, aligned, NUL-terminated byte
+/// string of at most `MAX_TARGET_ID_BYTES` bytes whose bytes remain valid for
+/// this call and do not overlap the engine.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_interpolator_update(
     engine: *mut InterpolationEngine,
@@ -637,6 +798,9 @@ pub unsafe extern "C" fn olayer_interpolator_update(
         Ok(s) => s,
         Err(_) => return -3,
     };
+    if id_str.len() > MAX_TARGET_ID_BYTES {
+        return -4;
+    }
 
     let engine_ref = &mut *engine;
     let state = TargetState {
@@ -660,6 +824,12 @@ pub unsafe extern "C" fn olayer_interpolator_update(
 }
 
 /// Removes a target. Returns 1 if present, 0 if not, or negative error.
+///
+/// # Safety
+/// `engine` must be a live exclusive handle returned by an interpolator
+/// constructor. `id` must point to a readable, aligned, NUL-terminated byte
+/// string of at most `MAX_TARGET_ID_BYTES` bytes whose bytes remain valid for
+/// this call and do not overlap the engine.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_interpolator_remove(
     engine: *mut InterpolationEngine,
@@ -673,6 +843,9 @@ pub unsafe extern "C" fn olayer_interpolator_remove(
         Ok(s) => s,
         Err(_) => return -3,
     };
+    if id_str.len() > MAX_TARGET_ID_BYTES {
+        return -1;
+    }
 
     let engine_ref = &mut *engine;
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -688,6 +861,12 @@ pub unsafe extern "C" fn olayer_interpolator_remove(
 
 /// Interpolates all targets. Fills out_targets and out_count.
 /// Returns 0 on success, negative error.
+///
+/// # Safety
+/// `engine` must be a live exclusive handle returned by an interpolator
+/// constructor. Both output pointers must be aligned, writable for one value,
+/// and disjoint from each other and the engine. On success, release the returned
+/// array once with its exact count using `olayer_interpolated_targets_free`.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_interpolator_interpolate_all(
     engine: *mut InterpolationEngine,
@@ -728,9 +907,9 @@ pub unsafe extern "C" fn olayer_interpolator_interpolate_all(
                 });
             }
 
-            let count = c_targets.len();
-            let ptr = c_targets.as_mut_ptr();
-            std::mem::forget(c_targets); // Leak allocation to C host control
+            let boxed_targets = c_targets.into_boxed_slice();
+            let count = boxed_targets.len();
+            let ptr = Box::into_raw(boxed_targets).cast::<C_InterpolatedTarget>();
 
             *out_targets = ptr;
             *out_count = count;
@@ -742,22 +921,38 @@ pub unsafe extern "C" fn olayer_interpolator_interpolate_all(
 }
 
 /// Frees interpolated targets allocated by Rust.
+///
+/// # Safety
+/// `targets` must be null or the exact pointer returned by a successful
+/// `olayer_interpolator_interpolate_all`; `count` must be its exact element
+/// count. Each non-null ID must still be the original returned CString pointer.
+/// The array and each ID must be freed exactly once and must not have been altered.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_interpolated_targets_free(
     targets: *mut C_InterpolatedTarget,
     count: usize,
 ) {
-    if !targets.is_null() && count > 0 {
-        let vec = Vec::from_raw_parts(targets, count, count);
-        for t in vec {
+    if !targets.is_null() {
+        // SAFETY: The paired allocator returns a boxed slice and the caller must
+        // pass its original pointer and element count exactly once.
+        let slice = std::ptr::slice_from_raw_parts_mut(targets, count);
+        // SAFETY: The slice pointer preserves the original boxed-slice layout.
+        let boxed_targets = unsafe { Box::from_raw(slice) };
+        for t in boxed_targets {
             if !t.id.is_null() {
-                let _ = std::ffi::CString::from_raw(t.id);
+                // SAFETY: Every non-null ID was created by CString::into_raw in
+                // the paired interpolation function and is freed exactly once.
+                drop(unsafe { std::ffi::CString::from_raw(t.id) });
             }
         }
     }
 }
 
 /// Destroys an InterpolationEngine instance.
+///
+/// # Safety
+/// `engine` must be null or the unique, still-live pointer returned by an
+/// interpolator constructor; it must not have been freed or be in use.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_interpolator_free(engine: *mut InterpolationEngine) {
     if !engine.is_null() {
@@ -779,6 +974,11 @@ pub extern "C" fn olayer_local_frame_create(
 }
 
 /// Converts LLA to local ENU coordinates. Returns 0 on success, negative error.
+///
+/// # Safety
+/// `frame` must be a live handle returned by `olayer_local_frame_create`.
+/// `out_enu` must be aligned and writable for one `C_EnuPoint`, and must not
+/// overlap the frame.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_local_frame_lla_to_enu(
     frame: *mut LocalTangentFrame,
@@ -802,6 +1002,11 @@ pub unsafe extern "C" fn olayer_local_frame_lla_to_enu(
 }
 
 /// Converts local ENU coordinates to LLA. Returns 0 on success, negative error.
+///
+/// # Safety
+/// `frame` must be a live handle returned by `olayer_local_frame_create`.
+/// `out_lla` must be aligned and writable for one `C_LatLon`, and must not
+/// overlap the frame.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_local_frame_enu_to_lla(
     frame: *mut LocalTangentFrame,
@@ -825,6 +1030,11 @@ pub unsafe extern "C" fn olayer_local_frame_enu_to_lla(
 }
 
 /// Calculates radar look angles without atmospheric refraction. Returns 0 on success, negative error.
+///
+/// # Safety
+/// `frame` must be a live handle returned by `olayer_local_frame_create`. Each
+/// output pointer must be aligned and writable for one `f64`; they must be
+/// mutually disjoint and must not overlap the frame.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_local_frame_radar_look_angles(
     frame: *mut LocalTangentFrame,
@@ -852,6 +1062,11 @@ pub unsafe extern "C" fn olayer_local_frame_radar_look_angles(
 }
 
 /// Calculates radar look angles with 4/3 tropospheric refraction. Returns 0 on success, negative error.
+///
+/// # Safety
+/// `frame` must be a live handle returned by `olayer_local_frame_create`. Each
+/// output pointer must be aligned and writable for one `f64`; they must be
+/// mutually disjoint and must not overlap the frame.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_local_frame_radar_look_angles_refracted(
     frame: *mut LocalTangentFrame,
@@ -880,6 +1095,10 @@ pub unsafe extern "C" fn olayer_local_frame_radar_look_angles_refracted(
 }
 
 /// Destroys a `LocalTangentFrame` instance.
+///
+/// # Safety
+/// `frame` must be null or the unique, still-live pointer returned by
+/// `olayer_local_frame_create`; it must not have been freed or be in use.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_local_frame_free(frame: *mut LocalTangentFrame) {
     if !frame.is_null() {
@@ -897,6 +1116,11 @@ pub extern "C" fn olayer_magnetic_model_create_default() -> *mut MagneticModel {
 
 /// Creates a `MagneticModel` from a null-terminated `WMM.COF` string.
 /// Returns null pointer if parsing fails or string is invalid UTF-8.
+///
+/// # Safety
+/// `cof_str` must be null or point to an aligned, readable, NUL-terminated byte
+/// string no longer than `MAX_FFI_TEXT_BYTES` bytes that remains valid for this
+/// call.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_magnetic_model_create_from_cof(
     cof_str: *const c_char,
@@ -908,6 +1132,9 @@ pub unsafe extern "C" fn olayer_magnetic_model_create_from_cof(
         Ok(s) => s,
         Err(_) => return std::ptr::null_mut(),
     };
+    if c_str.len() > MAX_FFI_TEXT_BYTES {
+        return std::ptr::null_mut();
+    }
     match MagneticModel::from_cof_str(c_str) {
         Ok(model) => Box::into_raw(Box::new(model)),
         Err(_) => std::ptr::null_mut(),
@@ -915,6 +1142,11 @@ pub unsafe extern "C" fn olayer_magnetic_model_create_from_cof(
 }
 
 /// Computes magnetic declination using a specific `MagneticModel` instance.
+///
+/// # Safety
+/// `model` must be a live handle returned by a magnetic-model constructor.
+/// `out_declination_rad` must be aligned and writable for one `f64`, without
+/// overlapping the model.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_magnetic_model_get_declination(
     model: *mut MagneticModel,
@@ -934,6 +1166,11 @@ pub unsafe extern "C" fn olayer_magnetic_model_get_declination(
 }
 
 /// Computes magnetic field elements using a specific `MagneticModel` instance.
+///
+/// # Safety
+/// `model` must be a live handle returned by a magnetic-model constructor.
+/// `out_elements` must be aligned and writable for one `C_MagneticElements`,
+/// without overlapping the model.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_magnetic_model_get_elements(
     model: *mut MagneticModel,
@@ -962,6 +1199,11 @@ pub unsafe extern "C" fn olayer_magnetic_model_get_elements(
 }
 
 /// Converts True bearing to Magnetic bearing using a specific `MagneticModel` instance.
+///
+/// # Safety
+/// `model` must be a live handle returned by a magnetic-model constructor.
+/// `out_mag_bearing_rad` must be aligned and writable for one `f64`, without
+/// overlapping the model.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_magnetic_model_true_to_magnetic(
     model: *mut MagneticModel,
@@ -982,6 +1224,11 @@ pub unsafe extern "C" fn olayer_magnetic_model_true_to_magnetic(
 }
 
 /// Converts Magnetic bearing to True bearing using a specific `MagneticModel` instance.
+///
+/// # Safety
+/// `model` must be a live handle returned by a magnetic-model constructor.
+/// `out_true_bearing_rad` must be aligned and writable for one `f64`, without
+/// overlapping the model.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_magnetic_model_magnetic_to_true(
     model: *mut MagneticModel,
@@ -1002,6 +1249,10 @@ pub unsafe extern "C" fn olayer_magnetic_model_magnetic_to_true(
 }
 
 /// Destroys a `MagneticModel` instance.
+///
+/// # Safety
+/// `model` must be null or the unique, still-live pointer returned by a
+/// magnetic-model constructor; it must not have been freed or be in use.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_magnetic_model_free(model: *mut MagneticModel) {
     if !model.is_null() {
@@ -1010,6 +1261,9 @@ pub unsafe extern "C" fn olayer_magnetic_model_free(model: *mut MagneticModel) {
 }
 
 /// Computes magnetic declination in radians using default WMM-2025. Returns 0 on success, negative error.
+///
+/// # Safety
+/// `out_declination_rad` must be non-null, aligned, and writable for one `f64`.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_magnetic_get_declination(
     lat: f64,
@@ -1027,6 +1281,9 @@ pub unsafe extern "C" fn olayer_magnetic_get_declination(
 }
 
 /// Computes all magnetic field elements using default WMM-2025. Returns 0 on success, negative error.
+///
+/// # Safety
+/// `out_elements` must be non-null, aligned, and writable for one `C_MagneticElements`.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_magnetic_get_elements(
     lat: f64,
@@ -1053,6 +1310,9 @@ pub unsafe extern "C" fn olayer_magnetic_get_elements(
 }
 
 /// Converts True bearing to Magnetic bearing using default WMM-2025. Returns 0 on success, negative error.
+///
+/// # Safety
+/// `out_mag_bearing_rad` must be non-null, aligned, and writable for one `f64`.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_magnetic_true_to_magnetic(
     true_bearing_rad: f64,
@@ -1072,6 +1332,9 @@ pub unsafe extern "C" fn olayer_magnetic_true_to_magnetic(
 }
 
 /// Converts Magnetic bearing to True bearing using default WMM-2025. Returns 0 on success, negative error.
+///
+/// # Safety
+/// `out_true_bearing_rad` must be non-null, aligned, and writable for one `f64`.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_magnetic_magnetic_to_true(
     mag_bearing_rad: f64,
@@ -1093,6 +1356,10 @@ pub unsafe extern "C" fn olayer_magnetic_magnetic_to_true(
 // --- SPATIAL ANALYSIS C-API ---
 
 /// Computes route deviation (XTK and ATD). Returns 0 on success, negative error.
+///
+/// # Safety
+/// `out_deviation` must be non-null, aligned, and writable for one
+/// `C_RouteDeviation`.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_spatial_compute_route_deviation(
     start: C_LatLon,
@@ -1120,6 +1387,9 @@ pub unsafe extern "C" fn olayer_spatial_compute_route_deviation(
 }
 
 /// Computes geodesic line-line intersection. Returns 1 if intersects, 0 if disjoint, negative error.
+///
+/// # Safety
+/// `out_intersection` must be non-null, aligned, and writable for one `C_LatLon`.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_spatial_geodesic_intersection(
     p1: C_LatLon,
@@ -1150,6 +1420,12 @@ pub unsafe extern "C" fn olayer_spatial_geodesic_intersection(
 
 /// Evaluates spherical polygon point containment. Returns 0 on success, negative error.
 /// `*out_contains` is set to 1 if contained, 0 if not.
+///
+/// # Safety
+/// `poly_coords` must be aligned and readable for `num_coords` initialized
+/// `C_LatLon` elements; that range must not exceed `isize::MAX` bytes.
+/// `out_contains` must be aligned and writable for one `c_int`; it must not
+/// overlap the coordinate array.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_spatial_polygon_contains_point(
     poly_coords: *const C_LatLon,
@@ -1157,7 +1433,10 @@ pub unsafe extern "C" fn olayer_spatial_polygon_contains_point(
     point: C_LatLon,
     out_contains: *mut c_int,
 ) -> c_int {
-    if poly_coords.is_null() || out_contains.is_null() || num_coords < 3 {
+    if poly_coords.is_null()
+        || out_contains.is_null()
+        || !(3..=MAX_ROUTE_POINTS).contains(&num_coords)
+    {
         return -1;
     }
     let slice = std::slice::from_raw_parts(poly_coords, num_coords);
@@ -1174,6 +1453,10 @@ pub unsafe extern "C" fn olayer_spatial_polygon_contains_point(
 // --- TACTICAL MEASUREMENT TOOLS C-API (GIS-PROP-003) ---
 
 /// Computes Range and Bearing Line (RBL / CRSR) measurement. Returns 0 on success, negative error.
+///
+/// # Safety
+/// `out_measurement` must be non-null, aligned, and writable for one
+/// `C_RblMeasurement`.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_tools_compute_rbl(
     from_lat_deg: f64,
@@ -1198,7 +1481,11 @@ pub unsafe extern "C" fn olayer_tools_compute_rbl(
     } else {
         None
     };
-    let res = manager.compute_rbl(from_lat_deg, from_lon_deg, to_lat_deg, to_lon_deg, spd, ep);
+    let res = match manager.compute_rbl(from_lat_deg, from_lon_deg, to_lat_deg, to_lon_deg, spd, ep)
+    {
+        Ok(measurement) => measurement,
+        Err(_) => return -2,
+    };
 
     *out_measurement = C_RblMeasurement {
         from_lat_deg: res.from_lat_deg,
@@ -1216,7 +1503,16 @@ pub unsafe extern "C" fn olayer_tools_compute_rbl(
     0
 }
 
-/// Generates Projected Position Leader (PPL) vector ticks. Returns 0 on success, negative error.
+/// Generates Projected Position Leader (PPL) vector ticks. Returns 0 on success,
+/// -1 for invalid pointers or empty intervals, and -2 if `num_intervals` exceeds
+/// the configured input limit.
+///
+/// # Safety
+/// `intervals_minutes` must be aligned and readable for `num_intervals`
+/// initialized `f64` values; the range must not exceed `isize::MAX` bytes.
+/// `out_ticks` must be aligned and writable for `max_ticks` `C_PplTick`
+/// elements, and `out_ticks_written` aligned/writable for one `usize`; output
+/// ranges must be disjoint from the input and each other.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_tools_generate_ppl(
     lat_deg: f64,
@@ -1236,6 +1532,11 @@ pub unsafe extern "C" fn olayer_tools_generate_ppl(
     {
         return -1;
     }
+    if num_intervals > MAX_FFI_ARRAY_ITEMS
+        || num_intervals > isize::MAX as usize / std::mem::size_of::<f64>()
+    {
+        return -2;
+    }
     let intervals = std::slice::from_raw_parts(intervals_minutes, num_intervals);
     let manager = TacticalToolsManager::new();
     let ppl = manager.generate_ppl(lat_deg, lon_deg, ground_speed_knots, track_deg, intervals);
@@ -1253,7 +1554,15 @@ pub unsafe extern "C" fn olayer_tools_generate_ppl(
     0
 }
 
-/// Generates racetrack holding pattern polyline coordinates. Returns 0 on success, negative error.
+/// Generates racetrack holding pattern polyline coordinates. Returns 0 on
+/// success, -1 for invalid pointers, and -2 if `points_per_turn` exceeds its
+/// configured generation limit.
+///
+/// # Safety
+/// `out_coords` must be aligned and writable for `max_coords` `C_LatLon`
+/// elements; `out_coords_written` must be aligned and writable for one `usize`.
+/// These ranges must not overlap. `max_coords` must describe the actual output
+/// allocation, even when smaller than the generated result.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_tools_generate_holding_pattern(
     fix_lat_deg: f64,
@@ -1269,6 +1578,9 @@ pub unsafe extern "C" fn olayer_tools_generate_holding_pattern(
 ) -> c_int {
     if out_coords.is_null() || out_coords_written.is_null() || max_coords == 0 {
         return -1;
+    }
+    if points_per_turn > MAX_HOLDING_PATTERN_POINTS_PER_TURN {
+        return -2;
     }
     let config = HoldingPatternConfig {
         fix_lat_deg,
@@ -1298,7 +1610,13 @@ pub unsafe extern "C" fn olayer_tools_generate_holding_pattern(
     0
 }
 
-/// Generates ILS approach funnel polygon coordinates. Returns 0 on success, negative error.
+/// Generates ILS approach funnel polygon coordinates. Returns 0 on success,
+/// -1 for invalid pointers, and -2 if `arc_steps` exceeds its configured limit.
+///
+/// # Safety
+/// `out_polygon_coords` must be aligned and writable for `max_polygon_coords`
+/// `C_LatLon` elements; `out_polygon_coords_written` must be aligned and
+/// writable for one `usize`. The ranges must not overlap.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_tools_generate_ils_cone(
     threshold_lat_deg: f64,
@@ -1316,6 +1634,9 @@ pub unsafe extern "C" fn olayer_tools_generate_ils_cone(
         || max_polygon_coords == 0
     {
         return -1;
+    }
+    if arc_steps > MAX_ILS_ARC_STEPS {
+        return -2;
     }
     let config = IlsConeConfig {
         threshold_lat_deg,
@@ -1341,7 +1662,13 @@ pub unsafe extern "C" fn olayer_tools_generate_ils_cone(
     0
 }
 
-/// Generates concentric range rings coordinates. Returns 0 on success, negative error.
+/// Generates concentric range rings coordinates. Returns 0 on success, -1 for
+/// invalid pointers, and -2 if `points_per_ring` exceeds its configured limit.
+///
+/// # Safety
+/// `out_ring_coords` must be aligned and writable for `max_coords` `C_LatLon`
+/// elements; `out_coords_written` must be aligned and writable for one `usize`.
+/// The ranges must not overlap.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_tools_generate_range_rings(
     center_lat_deg: f64,
@@ -1354,6 +1681,9 @@ pub unsafe extern "C" fn olayer_tools_generate_range_rings(
 ) -> c_int {
     if out_ring_coords.is_null() || out_coords_written.is_null() || max_coords == 0 {
         return -1;
+    }
+    if points_per_ring > MAX_RANGE_RING_POINTS {
+        return -2;
     }
     let config = RangeRingsConfig {
         center_lat_deg,
@@ -1384,6 +1714,11 @@ pub unsafe extern "C" fn olayer_tools_generate_range_rings(
 
 /// Loads an `AeronauticalDataset` from an AIXM 5.1 XML null-terminated UTF-8 string.
 /// Returns null pointer on error.
+///
+/// # Safety
+/// `xml_utf8` must be null or point to readable, aligned, NUL-terminated bytes
+/// valid for this call. The complete string must be no longer than
+/// `MAX_FFI_TEXT_BYTES` bytes, excluding its terminator.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_aeronautical_dataset_from_aixm(
     xml_utf8: *const c_char,
@@ -1395,6 +1730,9 @@ pub unsafe extern "C" fn olayer_aeronautical_dataset_from_aixm(
         Ok(s) => s,
         Err(_) => return std::ptr::null_mut(),
     };
+    if c_str.len() > MAX_FFI_TEXT_BYTES {
+        return std::ptr::null_mut();
+    }
     match parse_aixm_51_str(c_str) {
         Ok(ds) => Box::into_raw(Box::new(ds)),
         Err(_) => std::ptr::null_mut(),
@@ -1403,6 +1741,11 @@ pub unsafe extern "C" fn olayer_aeronautical_dataset_from_aixm(
 
 /// Loads an `AeronauticalDataset` from a GeoJSON-Aviation null-terminated UTF-8 string.
 /// Returns null pointer on error.
+///
+/// # Safety
+/// `json_utf8` must be null or point to readable, aligned, NUL-terminated bytes
+/// valid for this call. The complete string must be no longer than
+/// `MAX_FFI_TEXT_BYTES` bytes, excluding its terminator.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_aeronautical_dataset_from_geojson(
     json_utf8: *const c_char,
@@ -1414,6 +1757,9 @@ pub unsafe extern "C" fn olayer_aeronautical_dataset_from_geojson(
         Ok(s) => s,
         Err(_) => return std::ptr::null_mut(),
     };
+    if c_str.len() > MAX_FFI_TEXT_BYTES {
+        return std::ptr::null_mut();
+    }
     match parse_geojson_aviation_str(c_str) {
         Ok(ds) => Box::into_raw(Box::new(ds)),
         Err(_) => std::ptr::null_mut(),
@@ -1421,6 +1767,11 @@ pub unsafe extern "C" fn olayer_aeronautical_dataset_from_geojson(
 }
 
 /// Returns the counts of airspaces, navaids, airways, and airports in the dataset. Returns 0 on success.
+///
+/// # Safety
+/// `ds` must be a live handle returned by an aeronautical dataset constructor.
+/// Each non-null output must be aligned and writable for one `usize`; output
+/// pointers must not overlap one another or the dataset.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_aeronautical_dataset_counts(
     ds: *mut AeronauticalDataset,
@@ -1449,6 +1800,12 @@ pub unsafe extern "C" fn olayer_aeronautical_dataset_counts(
 }
 
 /// Finds a navaid by its identification code. Returns 0 on success, -1 on null pointer, -2 if not found.
+///
+/// # Safety
+/// `ds` must be a live dataset handle. `ident_utf8` must point to readable,
+/// aligned, NUL-terminated bytes of at most `MAX_TARGET_ID_BYTES` valid for
+/// this call. `out_navaid` must be aligned and writable for one
+/// `C_NavaidSummary`, disjoint from both inputs.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_aeronautical_dataset_find_navaid(
     ds: *mut AeronauticalDataset,
@@ -1462,6 +1819,9 @@ pub unsafe extern "C" fn olayer_aeronautical_dataset_find_navaid(
         Ok(s) => s,
         Err(_) => return -1,
     };
+    if ident.len() > MAX_TARGET_ID_BYTES {
+        return -1;
+    }
     let ds_ref = &*ds;
     if let Some(nav) = ds_ref.find_navaid(ident) {
         let code = match nav.navaid_type {
@@ -1489,6 +1849,11 @@ pub unsafe extern "C" fn olayer_aeronautical_dataset_find_navaid(
 
 /// Serializes the dataset into a standard GeoJSON FeatureCollection string into a C buffer.
 /// Returns 0 on success, -1 on error, or -2 if buffer capacity is insufficient.
+///
+/// # Safety
+/// `ds` must be a live dataset handle. `out_len` must be aligned and writable
+/// for one `usize`. If `out_buf` is non-null, it must be aligned and writable
+/// for `out_capacity` bytes; its range must not overlap the dataset or `out_len`.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_aeronautical_dataset_to_geojson(
     ds: *mut AeronauticalDataset,
@@ -1515,6 +1880,10 @@ pub unsafe extern "C" fn olayer_aeronautical_dataset_to_geojson(
 }
 
 /// Destroys an `AeronauticalDataset` instance.
+///
+/// # Safety
+/// `ds` must be null or the unique, still-live pointer returned by an
+/// aeronautical dataset constructor; it must not have been freed or be in use.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_aeronautical_dataset_free(ds: *mut AeronauticalDataset) {
     if !ds.is_null() {
@@ -1531,6 +1900,10 @@ pub type SigmetDataset = olayer_core::weather::SigmetDataset;
 
 /// Maps a radar reflectivity value (dBZ) to 4-byte RGBA array.
 /// palette_code: 0 = Nexrad, 1 = Icao, 2 = HighContrast.
+///
+/// # Safety
+/// `out_rgba` must be non-null, aligned, and writable for four initialized
+/// `u8` slots.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_weather_dbz_to_rgba(
     dbz: f64,
@@ -1553,6 +1926,11 @@ pub unsafe extern "C" fn olayer_weather_dbz_to_rgba(
 
 /// Generates aviation-standard wind barb line coordinates in degrees.
 /// Writes flat lines `[start_lat, start_lon, end_lat, end_lon, ...]` into `out_lines`.
+///
+/// # Safety
+/// `out_lines` must be non-null, aligned, and writable for `max_floats` `f64`
+/// elements. `out_count` must be non-null, aligned, and writable for one
+/// `usize`; the output ranges must not overlap.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_weather_generate_wind_barb(
     origin_lat_deg: f64,
@@ -1591,6 +1969,14 @@ pub unsafe extern "C" fn olayer_weather_generate_wind_barb(
 
 /// Generates Marching Squares 2D isolines from a scalar grid.
 /// Writes flat segments `[isovalue, start_lat_deg, start_lon_deg, end_lat_deg, end_lon_deg, ...]` into `out_segments`.
+///
+/// # Safety
+/// `grid` must be aligned and readable for `width * height` initialized `f64`
+/// values and `isovalues` for `isovalues_count` initialized `f64` values. The
+/// element counts are bounded and multiplication is checked before slicing.
+/// `out_segments` must be aligned and writable for `max_floats` `f64` values;
+/// `out_count` must be aligned and writable for one `usize`. The input and
+/// output ranges must be pairwise disjoint.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_weather_generate_isolines(
     grid: *const f64,
@@ -1614,6 +2000,22 @@ pub unsafe extern "C" fn olayer_weather_generate_isolines(
     let Some(grid_len) = width.checked_mul(height) else {
         return -2;
     };
+    let cell_count = width
+        .saturating_sub(1)
+        .checked_mul(height.saturating_sub(1));
+    if width < 2
+        || height < 2
+        || grid_len > MAX_GRID_CELLS
+        || isovalues_count == 0
+        || isovalues_count > MAX_ISOVALUES
+        || cell_count
+            .and_then(|cells| cells.checked_mul(isovalues_count))
+            .is_none_or(|work| work > MAX_ISOLINE_WORK)
+        || grid_len > isize::MAX as usize / std::mem::size_of::<f64>()
+        || isovalues_count > isize::MAX as usize / std::mem::size_of::<f64>()
+    {
+        return -2;
+    }
     let grid_slice = std::slice::from_raw_parts(grid, grid_len);
     let iso_slice = std::slice::from_raw_parts(isovalues, isovalues_count);
     let bounds_rad = (
@@ -1640,6 +2042,10 @@ pub unsafe extern "C" fn olayer_weather_generate_isolines(
 }
 
 /// Parses a GeoJSON string into a heap-allocated `SigmetDataset`.
+///
+/// # Safety
+/// `geojson_str` must be null or point to readable, aligned, NUL-terminated
+/// bytes valid for this call and no longer than `MAX_FFI_TEXT_BYTES` bytes.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_sigmet_dataset_from_geojson(
     geojson_str: *const c_char,
@@ -1651,6 +2057,9 @@ pub unsafe extern "C" fn olayer_sigmet_dataset_from_geojson(
         Ok(s) => s,
         Err(_) => return std::ptr::null_mut(),
     };
+    if c_str.len() > MAX_FFI_TEXT_BYTES {
+        return std::ptr::null_mut();
+    }
     match olayer_core::weather::SigmetDataset::from_geojson(c_str) {
         Ok(ds) => Box::into_raw(Box::new(ds)),
         Err(_) => std::ptr::null_mut(),
@@ -1658,6 +2067,11 @@ pub unsafe extern "C" fn olayer_sigmet_dataset_from_geojson(
 }
 
 /// Returns the total number of warnings in a `SigmetDataset`.
+///
+/// # Safety
+/// `ds` must be a live dataset handle returned by
+/// `olayer_sigmet_dataset_from_geojson`. `out_count` must be aligned, writable
+/// for one `usize`, and disjoint from the dataset.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_sigmet_dataset_total_count(
     ds: *const SigmetDataset,
@@ -1671,6 +2085,10 @@ pub unsafe extern "C" fn olayer_sigmet_dataset_total_count(
 }
 
 /// Destroys a heap-allocated `SigmetDataset`.
+///
+/// # Safety
+/// `ds` must be null or the unique, still-live pointer returned by
+/// `olayer_sigmet_dataset_from_geojson`; it must not have been freed or be in use.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_sigmet_dataset_free(ds: *mut SigmetDataset) {
     if !ds.is_null() {
@@ -1685,6 +2103,13 @@ pub unsafe extern "C" fn olayer_sigmet_dataset_free(ds: *mut SigmetDataset) {
 /// Generates an extruded 3D volumetric airspace mesh.
 /// Writes flat interleaved vertices `[x, y, z, nx, ny, nz, height_ratio, is_edge, ...]` into `out_vertices`
 /// and triangle indices into `out_indices`.
+///
+/// # Safety
+/// `polygon_coords` must be aligned and readable for `polygon_len` initialized
+/// `C_LatLon` values. `out_vertices` must be aligned and writable for
+/// `max_vertices_floats` `f32` values and `out_indices` for `max_indices` `u32`
+/// values. Each count output must be aligned and writable for one `usize`.
+/// Input, outputs, and the two count locations must be pairwise disjoint.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_volumetric_generate_airspace_mesh(
     polygon_coords: *const C_LatLon,
@@ -1708,7 +2133,9 @@ pub unsafe extern "C" fn olayer_volumetric_generate_airspace_mesh(
     {
         return -1;
     }
-    if !(3..=1_000_000).contains(&polygon_len) {
+    if !(3..=MAX_ROUTE_POINTS).contains(&polygon_len)
+        || polygon_len > isize::MAX as usize / std::mem::size_of::<C_LatLon>()
+    {
         return -2;
     }
 
@@ -1741,6 +2168,13 @@ pub unsafe extern "C" fn olayer_volumetric_generate_airspace_mesh(
 /// Generates a continuous 3D flight trajectory ribbon mesh in ECEF coordinates.
 /// Writes flat interleaved vertices `[x, y, z, nx, ny, nz, u, v, scalar, ...]` into `out_vertices`
 /// and triangle indices into `out_indices`.
+///
+/// # Safety
+/// `waypoints` must be aligned and readable for `waypoints_len` initialized
+/// `C_LatLon` values. A non-null `scalars` pointer must be aligned and readable
+/// for `scalars_len` initialized `f64` values. Vertex/index buffers must be
+/// aligned and writable for their supplied capacities, and both count outputs
+/// aligned/writable for one `usize`; all referenced ranges must be disjoint.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_volumetric_generate_trajectory_ribbon(
     waypoints: *const C_LatLon,
@@ -1765,7 +2199,10 @@ pub unsafe extern "C" fn olayer_volumetric_generate_trajectory_ribbon(
     {
         return -1;
     }
-    if !(2..=1_000_000).contains(&waypoints_len) {
+    if !(2..=MAX_FFI_ARRAY_ITEMS).contains(&waypoints_len)
+        || scalars_len > MAX_FFI_ARRAY_ITEMS
+        || waypoints_len > isize::MAX as usize / std::mem::size_of::<C_LatLon>()
+    {
         return -2;
     }
 
@@ -1836,6 +2273,12 @@ pub struct C_LabelPlacement {
 }
 
 /// Solves optimal 8-octant non-overlapping label placements for a batch of screen targets.
+///
+/// # Safety
+/// `targets` must be aligned and readable for `targets_len` initialized
+/// `C_LabelTarget` values. `out_placements` must be aligned and writable for
+/// `max_placements` placements and `out_placements_count` aligned/writable for
+/// one `usize`; output ranges must not overlap each other or the input.
 #[no_mangle]
 pub unsafe extern "C" fn olayer_declutter_solve_labels(
     targets: *const C_LabelTarget,
@@ -1852,6 +2295,11 @@ pub unsafe extern "C" fn olayer_declutter_solve_labels(
     if targets_len == 0 {
         *out_placements_count = 0;
         return 0;
+    }
+    if targets_len > MAX_LABEL_TARGETS
+        || targets_len > isize::MAX as usize / std::mem::size_of::<C_LabelTarget>()
+    {
+        return -2;
     }
     if max_placements < targets_len {
         return -2; // Output buffer too small
@@ -1911,6 +2359,117 @@ pub unsafe extern "C" fn olayer_declutter_solve_labels(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::alloc::{GlobalAlloc, Layout, System};
+    use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering};
+
+    struct LayoutCheckingAllocator;
+
+    static WATCHED_ALLOCATION: AtomicPtr<()> = AtomicPtr::new(std::ptr::null_mut());
+    static LAYOUT_MISMATCHED: AtomicBool = AtomicBool::new(false);
+    const TRACKED_ALLOCATION_SLOTS: usize = 8_192;
+    static ALLOCATION_POINTERS: [AtomicPtr<()>; TRACKED_ALLOCATION_SLOTS] =
+        [const { AtomicPtr::new(std::ptr::null_mut()) }; TRACKED_ALLOCATION_SLOTS];
+    static ALLOCATION_SIZES: [AtomicUsize; TRACKED_ALLOCATION_SLOTS] =
+        [const { AtomicUsize::new(0) }; TRACKED_ALLOCATION_SLOTS];
+    static ALLOCATION_ALIGNS: [AtomicUsize; TRACKED_ALLOCATION_SLOTS] =
+        [const { AtomicUsize::new(0) }; TRACKED_ALLOCATION_SLOTS];
+    static NEXT_ALLOCATION_SLOT: AtomicUsize = AtomicUsize::new(0);
+    std::thread_local! {
+        static TRACK_ALLOCATIONS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    }
+
+    fn track_allocation(ptr: *mut u8, layout: Layout) {
+        if ptr.is_null() {
+            return;
+        }
+        let ptr = ptr.cast::<()>();
+        let slot = ALLOCATION_POINTERS
+            .iter()
+            .position(|candidate| candidate.load(Ordering::Acquire) == ptr)
+            .unwrap_or_else(|| {
+                NEXT_ALLOCATION_SLOT.fetch_add(1, Ordering::Relaxed) % TRACKED_ALLOCATION_SLOTS
+            });
+        ALLOCATION_POINTERS[slot].store(std::ptr::null_mut(), Ordering::Release);
+        ALLOCATION_SIZES[slot].store(layout.size(), Ordering::Relaxed);
+        ALLOCATION_ALIGNS[slot].store(layout.align(), Ordering::Relaxed);
+        ALLOCATION_POINTERS[slot].store(ptr, Ordering::Release);
+    }
+
+    fn untrack_allocation(ptr: *mut u8) {
+        let ptr = ptr.cast::<()>();
+        if let Some(slot) = ALLOCATION_POINTERS
+            .iter()
+            .position(|candidate| candidate.load(Ordering::Acquire) == ptr)
+        {
+            ALLOCATION_POINTERS[slot].store(std::ptr::null_mut(), Ordering::Release);
+        }
+    }
+
+    fn recorded_layout(ptr: *mut u8) -> Option<(usize, usize)> {
+        let ptr = ptr.cast::<()>();
+        let slot = ALLOCATION_POINTERS
+            .iter()
+            .position(|candidate| candidate.load(Ordering::Acquire) == ptr)?;
+        Some((
+            ALLOCATION_SIZES[slot].load(Ordering::Relaxed),
+            ALLOCATION_ALIGNS[slot].load(Ordering::Relaxed),
+        ))
+    }
+
+    // SAFETY: The implementation forwards every allocation operation unchanged
+    // to `System`; its tracking side table uses only atomics and never touches
+    // memory owned by the caller.
+    unsafe impl GlobalAlloc for LayoutCheckingAllocator {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            // SAFETY: The exact layout is forwarded unchanged to the system allocator.
+            let ptr = unsafe { System.alloc(layout) };
+            if TRACK_ALLOCATIONS
+                .try_with(std::cell::Cell::get)
+                .unwrap_or(false)
+            {
+                track_allocation(ptr, layout);
+            }
+            ptr
+        }
+
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+            if TRACK_ALLOCATIONS
+                .try_with(std::cell::Cell::get)
+                .unwrap_or(false)
+            {
+                if ptr.cast::<()>() == WATCHED_ALLOCATION.load(Ordering::SeqCst) {
+                    let expected = recorded_layout(ptr);
+                    LAYOUT_MISMATCHED.store(
+                        expected != Some((layout.size(), layout.align())),
+                        Ordering::SeqCst,
+                    );
+                    WATCHED_ALLOCATION.store(std::ptr::null_mut(), Ordering::SeqCst);
+                }
+                untrack_allocation(ptr);
+            }
+            // SAFETY: `ptr` and `layout` are passed unchanged from Rust's allocator contract.
+            unsafe { System.dealloc(ptr, layout) };
+        }
+
+        unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+            // SAFETY: The original pointer, layout, and requested size are forwarded unchanged.
+            let new_ptr = unsafe { System.realloc(ptr, layout, new_size) };
+            if !new_ptr.is_null()
+                && TRACK_ALLOCATIONS
+                    .try_with(std::cell::Cell::get)
+                    .unwrap_or(false)
+            {
+                untrack_allocation(ptr);
+                if let Ok(new_layout) = Layout::from_size_align(new_size, layout.align()) {
+                    track_allocation(new_ptr, new_layout);
+                }
+            }
+            new_ptr
+        }
+    }
+
+    #[global_allocator]
+    static TEST_ALLOCATOR: LayoutCheckingAllocator = LayoutCheckingAllocator;
 
     /// Builds a minimal mock DTED Level 0 tile (4x4) for FFI tests.
     fn create_mock_dted0(
@@ -1951,7 +2510,295 @@ mod tests {
     }
 
     #[test]
+    fn interpolated_target_free_uses_the_allocation_layout_after_skipping_ids() {
+        TRACK_ALLOCATIONS.with(|enabled| enabled.set(true));
+        let engine = olayer_interpolator_create();
+        assert!(!engine.is_null());
+        let good_id = std::ffi::CString::new("GOOD").unwrap();
+
+        // SAFETY: `engine` came from the matching constructor and `good_id` is NUL-terminated.
+        assert_eq!(
+            unsafe {
+                olayer_interpolator_update(
+                    engine,
+                    good_id.as_ptr(),
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                )
+            },
+            0
+        );
+
+        let invalid_id = "BAD\0ID".to_owned();
+        let engine_ref = unsafe {
+            // SAFETY: The live engine handle is exclusively accessed in this test.
+            &mut *engine
+        };
+        assert!(engine_ref
+            .update_target(TargetState {
+                id: invalid_id,
+                last_position: LatLon::new(0.0, 0.0, 0.0),
+                speed_mps: 0.0,
+                track_heading_rad: 0.0,
+                vertical_rate_mps: 0.0,
+                last_ping_time: 0.0,
+            })
+            .is_ok());
+
+        let mut targets = std::ptr::null_mut();
+        let mut count = 0;
+        // SAFETY: The engine is live and both output pointers are valid and distinct.
+        assert_eq!(
+            unsafe { olayer_interpolator_interpolate_all(engine, 1.0, &mut targets, &mut count) },
+            0
+        );
+        assert_eq!(count, 1);
+        assert!(!targets.is_null());
+
+        let expected_layout = recorded_layout(targets.cast::<u8>())
+            .expect("the returned target allocation must be recorded");
+        assert_eq!(
+            expected_layout.0,
+            count * std::mem::size_of::<C_InterpolatedTarget>(),
+            "returned slice allocation must have the same layout as its count"
+        );
+        LAYOUT_MISMATCHED.store(false, Ordering::SeqCst);
+        WATCHED_ALLOCATION.store(targets.cast(), Ordering::SeqCst);
+        // SAFETY: This pointer/count pair is exactly the array returned above.
+        unsafe { olayer_interpolated_targets_free(targets, count) };
+        assert!(!LAYOUT_MISMATCHED.load(Ordering::SeqCst));
+
+        // SAFETY: The live engine handle came from `olayer_interpolator_create` and is freed once.
+        unsafe { olayer_interpolator_free(engine) };
+        TRACK_ALLOCATIONS.with(|enabled| enabled.set(false));
+    }
+
+    #[test]
+    fn generators_reject_unbounded_work_before_touching_output_buffers() {
+        let mut written = 0;
+        let mut coord = C_LatLon {
+            lat: 0.0,
+            lon: 0.0,
+            height: 0.0,
+        };
+        // SAFETY: Output pointers address one writable element; large generation parameters
+        // must be rejected before output is accessed.
+        assert_eq!(
+            unsafe {
+                olayer_tools_generate_holding_pattern(
+                    0.0,
+                    0.0,
+                    0.0,
+                    1,
+                    1.0,
+                    100.0,
+                    usize::MAX,
+                    &mut coord,
+                    1,
+                    &mut written,
+                )
+            },
+            -2
+        );
+        // SAFETY: Same valid one-element output storage; the oversized arc must be rejected first.
+        assert_eq!(
+            unsafe {
+                olayer_tools_generate_ils_cone(
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0,
+                    1.0,
+                    usize::MAX,
+                    &mut coord,
+                    1,
+                    &mut written,
+                )
+            },
+            -2
+        );
+        // SAFETY: Same valid output storage; the oversized ring must be rejected first.
+        assert_eq!(
+            unsafe {
+                olayer_tools_generate_range_rings(
+                    0.0,
+                    0.0,
+                    1.0,
+                    usize::MAX,
+                    &mut coord,
+                    1,
+                    &mut written,
+                )
+            },
+            -2
+        );
+
+        let intervals = vec![1.0; MAX_FFI_ARRAY_ITEMS + 1];
+        let mut tick = C_PplTick {
+            time_minutes: 0.0,
+            distance_nm: 0.0,
+            lat_deg: 0.0,
+            lon_deg: 0.0,
+        };
+        // SAFETY: `intervals` contains every declared readable value; the cap
+        // rejects the oversized input before generation.
+        assert_eq!(
+            unsafe {
+                olayer_tools_generate_ppl(
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    intervals.as_ptr(),
+                    intervals.len(),
+                    &mut tick,
+                    1,
+                    &mut written,
+                )
+            },
+            -2
+        );
+    }
+
+    #[test]
+    fn array_work_limits_reject_oversized_polygons_grids_labels_and_profiles() {
+        let mut count = 0;
+        let mut index_count = 0;
+        let polygon = vec![
+            C_LatLon {
+                lat: 0.0,
+                lon: 0.0,
+                height: 0.0,
+            };
+            MAX_ROUTE_POINTS + 1
+        ];
+        let mut vertex = 0.0_f32;
+        let mut index = 0_u32;
+        // SAFETY: The input allocation contains the declared polygon length and
+        // output pointers/counters refer to distinct writable locations.
+        assert_eq!(
+            unsafe {
+                olayer_volumetric_generate_airspace_mesh(
+                    polygon.as_ptr(),
+                    polygon.len(),
+                    0.0,
+                    1.0,
+                    &mut vertex,
+                    1,
+                    &mut count,
+                    &mut index,
+                    1,
+                    &mut index_count,
+                )
+            },
+            -2
+        );
+
+        let grid = vec![0.0; MAX_GRID_CELLS + 1];
+        let mut segment = 0.0;
+        let iso = 0.0;
+        // SAFETY: The grid allocation contains the declared elements; isovalue
+        // and output pointers refer to valid separate scalar locations.
+        assert_eq!(
+            unsafe {
+                olayer_weather_generate_isolines(
+                    grid.as_ptr(),
+                    MAX_GRID_CELLS + 1,
+                    1,
+                    0.0,
+                    0.0,
+                    1.0,
+                    1.0,
+                    &iso,
+                    1,
+                    &mut segment,
+                    1,
+                    &mut count,
+                )
+            },
+            -2
+        );
+
+        let labels = vec![
+            C_LabelTarget {
+                x: 0.0,
+                y: 0.0,
+                heading_rad: -1.0,
+                width: 1.0,
+                height: 1.0,
+                priority: 0,
+            };
+            MAX_LABEL_TARGETS + 1
+        ];
+        let mut placements = vec![
+            C_LabelPlacement {
+                rect_x: 0.0,
+                rect_y: 0.0,
+                rect_width: 0.0,
+                rect_height: 0.0,
+                leader_start_x: 0.0,
+                leader_start_y: 0.0,
+                leader_end_x: 0.0,
+                leader_end_y: 0.0,
+                octant: 0,
+                cost: 0.0,
+            };
+            MAX_LABEL_TARGETS + 1
+        ];
+        // SAFETY: Both arrays contain all declared elements and the count output
+        // is a separate writable usize.
+        assert_eq!(
+            unsafe {
+                olayer_declutter_solve_labels(
+                    labels.as_ptr(),
+                    labels.len(),
+                    1.0,
+                    1.0,
+                    placements.as_mut_ptr(),
+                    placements.len(),
+                    &mut count,
+                )
+            },
+            -2
+        );
+
+        let engine = olayer_terrain_engine_create();
+        let route_lat = [-22.9, -22.8];
+        let route_lon = [-48.0, -48.0];
+        let route_height = [0.0, 0.0];
+        let mut profile = std::ptr::null_mut();
+        // SAFETY: All route arrays have two valid elements, the engine is live,
+        // and output pointers are valid and distinct. The tiny step is rejected
+        // by the sample budget before terrain sampling.
+        assert_eq!(
+            unsafe {
+                olayer_terrain_engine_get_vertical_profile(
+                    engine,
+                    route_lat.as_ptr(),
+                    route_lon.as_ptr(),
+                    route_height.as_ptr(),
+                    route_lat.len(),
+                    1.0e-9,
+                    &mut profile,
+                    &mut count,
+                )
+            },
+            -1
+        );
+        // SAFETY: This engine is the unique live handle created immediately above.
+        unsafe { olayer_terrain_engine_free(engine) };
+    }
+
+    #[test]
     fn test_c_ffi_interpolator_flow() {
+        // SAFETY: Every handle is created and freed by its matching API, all
+        // strings and outputs are local valid storage, and returned arrays use
+        // their exact pointer/count pairs for release.
         unsafe {
             let engine = olayer_interpolator_create();
             assert!(!engine.is_null());
@@ -1995,6 +2842,8 @@ mod tests {
 
     #[test]
     fn test_c_ffi_terrain_error_handling() {
+        // SAFETY: The engine and input/output buffers are locally owned and
+        // satisfy each called API's documented length and aliasing requirements.
         unsafe {
             let engine = olayer_terrain_engine_create();
             assert!(!engine.is_null());
@@ -2023,6 +2872,8 @@ mod tests {
 
     #[test]
     fn test_c_ffi_null_pointers() {
+        // SAFETY: Non-null pointers reference live local storage; null pointers
+        // are intentionally supplied only to APIs that validate them first.
         unsafe {
             // Terrain create is the only one that doesn't take a pointer
             let engine = olayer_terrain_engine_create();
@@ -2129,6 +2980,8 @@ mod tests {
 
     #[test]
     fn test_c_ffi_terrain_load_and_query() {
+        // SAFETY: The engine handle, DTED byte buffer, and scalar outputs remain
+        // valid and non-overlapping throughout every call in this test.
         unsafe {
             let engine = olayer_terrain_engine_create();
             assert!(!engine.is_null());
@@ -2177,6 +3030,8 @@ mod tests {
 
     #[test]
     fn test_c_ffi_vertical_profile() {
+        // SAFETY: Route arrays have matching lengths; output storage and engine
+        // handle are valid, and the returned profile is freed with its count.
         unsafe {
             let engine = olayer_terrain_engine_create();
             assert!(!engine.is_null());
@@ -2200,6 +3055,7 @@ mod tests {
             let mut out_profile: *mut C_ProfilePoint = std::ptr::null_mut();
             let mut count: usize = 0;
 
+            TRACK_ALLOCATIONS.with(|enabled| enabled.set(true));
             let prof_res = olayer_terrain_engine_get_vertical_profile(
                 engine,
                 route_lat.as_ptr(),
@@ -2218,13 +3074,22 @@ mod tests {
             assert!((first.lat - -22.9).abs() < 1e-5);
             assert!((first.lon - -48.0).abs() < 1e-5);
 
+            let profile_layout = recorded_layout(out_profile.cast::<u8>())
+                .expect("the returned profile allocation must be recorded");
+            assert_eq!(
+                profile_layout.0,
+                count * std::mem::size_of::<C_ProfilePoint>()
+            );
             olayer_profile_points_free(out_profile, count);
+            TRACK_ALLOCATIONS.with(|enabled| enabled.set(false));
             olayer_terrain_engine_free(engine);
         }
     }
 
     #[test]
     fn test_c_ffi_interpolator_remove() {
+        // SAFETY: The engine and ID string are live; every output is valid and
+        // any returned array is paired with its API-specific release function.
         unsafe {
             let engine = olayer_interpolator_create();
             assert!(!engine.is_null());
@@ -2264,6 +3129,8 @@ mod tests {
 
     #[test]
     fn test_c_ffi_null_byte_id_skipped() {
+        // SAFETY: The engine is live and uniquely borrowed for the direct Rust
+        // insertion; all FFI inputs and returned outputs have valid lifetimes.
         unsafe {
             let engine = olayer_interpolator_create();
             assert!(!engine.is_null());
@@ -2314,6 +3181,8 @@ mod tests {
 
     #[test]
     fn test_c_ffi_invalid_utf8_id() {
+        // SAFETY: The byte input includes a terminator and remains readable; the
+        // engine handle comes from the matching constructor and is freed once.
         unsafe {
             let engine = olayer_interpolator_create();
             assert!(!engine.is_null());
@@ -2339,6 +3208,8 @@ mod tests {
 
     #[test]
     fn test_c_ffi_local_frame() {
+        // SAFETY: The frame comes from its constructor, and every output pointer
+        // addresses a distinct writable local value until the frame is freed.
         unsafe {
             let frame = olayer_local_frame_create(0.0, 0.0, 0.0);
             assert!(!frame.is_null());
@@ -2387,6 +3258,8 @@ mod tests {
 
     #[test]
     fn test_c_ffi_magnetic_model() {
+        // SAFETY: Both model handles and the COF string are constructor-produced;
+        // all output pointers address writable local values and handles are freed once.
         unsafe {
             let mut declination = 0.0;
             let r1 = olayer_magnetic_get_declination(
@@ -2480,6 +3353,8 @@ mod tests {
 
     #[test]
     fn test_c_ffi_spatial_analysis() {
+        // SAFETY: The polygon slice and all output values are valid local storage
+        // with no overlap for every synchronous call.
         unsafe {
             let start = C_LatLon {
                 lat: 0.0,
@@ -2594,6 +3469,8 @@ mod tests {
 
     #[test]
     fn test_c_ffi_tactical_tools() {
+        // SAFETY: Each output buffer is sized for the requested capacity and all
+        // scalar inputs are local; no returned pointer outlives this test.
         unsafe {
             // RBL
             let mut rbl = C_RblMeasurement {
@@ -2705,6 +3582,8 @@ mod tests {
 
     #[test]
     fn test_c_ffi_aeronautical_dataset() {
+        // SAFETY: Dataset and C-string pointers are constructor/local values;
+        // output buffers have the declared capacity and the dataset is freed once.
         unsafe {
             let geojson = std::ffi::CString::new(
                 r#"{
@@ -2772,6 +3651,8 @@ mod tests {
 
     #[test]
     fn test_c_ffi_civil_terrain() {
+        // SAFETY: Every engine handle and input byte slice is local and valid;
+        // scalar outputs are writable and do not alias the engine.
         unsafe {
             let mut elev_mb = 0.0;
             let r1 = olayer_terrain_decode_mapbox_rgb(1, 134, 160, &mut elev_mb);
@@ -2816,6 +3697,8 @@ mod tests {
 
     #[test]
     fn test_c_ffi_weather_overlays() {
+        // SAFETY: Grid and isovalue arrays are readable for their declared sizes,
+        // outputs have sufficient capacity, and the dataset is freed exactly once.
         unsafe {
             // 1. dBZ to RGBA
             let mut rgba = [0u8; 4];
@@ -2891,6 +3774,8 @@ mod tests {
 
     #[test]
     fn test_c_ffi_volumetric_overlays() {
+        // SAFETY: Polygon/waypoint/label inputs and vertex/index/output arrays
+        // have the lengths passed to the ABI functions and do not overlap.
         unsafe {
             // 1. Volumetric Airspace Mesh
             let polygon = [

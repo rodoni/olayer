@@ -1,8 +1,6 @@
-#![allow(clippy::too_many_arguments)]
-
-use crate::native_controller::NativeController;
 use olayer_core::geodesy::LatLon;
 use olayer_core::projections::{CameraState, Projection};
+use std::fmt;
 use std::sync::Arc;
 use usvg::TreeParsing;
 
@@ -14,6 +12,39 @@ use usvg::TreeParsing;
 /// manages heading vectors, tactical data labels, and the 2.5D flight profile.
 #[derive(Default)]
 pub struct WgpuCpuVertexPipeline {}
+
+pub struct ProjectionViewport<'a> {
+    pub view_mode: &'a str,
+    pub camera: &'a CameraState,
+    pub projection: &'a dyn Projection,
+    pub view_proj_matrix: &'a [f32; 16],
+    pub screen_size: egui::Vec2,
+}
+
+/// Errors returned while rasterizing an SVG symbol.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SvgRasterizeError {
+    /// The SVG document could not be parsed.
+    Parse(String),
+    /// The requested dimensions could not be allocated as an RGBA pixmap.
+    PixmapAllocation { width: u32, height: u32 },
+}
+
+impl fmt::Display for SvgRasterizeError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Parse(message) => write!(formatter, "failed to parse SVG: {message}"),
+            Self::PixmapAllocation { width, height } => {
+                write!(
+                    formatter,
+                    "failed to allocate an RGBA pixmap of {width}x{height}"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for SvgRasterizeError {}
 
 impl WgpuCpuVertexPipeline {
     pub fn new() -> Self {
@@ -27,25 +58,14 @@ impl WgpuCpuVertexPipeline {
         painter: &egui::Painter,
         targets: &[olayer_core::interpolator::InterpolatedTarget],
         selected_target_id: &Option<Arc<str>>,
-        controller: &NativeController,
-        view_proj_matrix: &[f32; 16],
-        width: u32,
-        height: u32,
+        viewport: &ProjectionViewport<'_>,
         simulated_speeds: &std::collections::HashMap<String, f64>,
     ) {
         for t in targets {
             let speed_mps = simulated_speeds.get(&t.id).copied().unwrap_or(0.0);
-            if let Some(pos) = project_lla_to_screen(
-                t.position.lat,
-                t.position.lon,
-                t.position.height,
-                &controller.view_mode,
-                &controller.camera,
-                controller.projection.as_ref(),
-                view_proj_matrix,
-                width,
-                height,
-            ) {
+            if let Some(pos) =
+                project_lla_to_screen(t.position.lat, t.position.lon, t.position.height, viewport)
+            {
                 // Draw target dot
                 let color = if selected_target_id
                     .as_ref()
@@ -72,12 +92,7 @@ impl WgpuCpuVertexPipeline {
                     t.position.lat + lat_offset,
                     t.position.lon + lon_offset,
                     t.position.height,
-                    &controller.view_mode,
-                    &controller.camera,
-                    controller.projection.as_ref(),
-                    view_proj_matrix,
-                    width,
-                    height,
+                    viewport,
                 ) {
                     painter.line_segment(
                         [pos, end_pos],
@@ -116,14 +131,23 @@ pub fn project_lla_to_screen(
     lat: f64,
     lon: f64,
     alt: f64,
-    view_mode: &str,
-    camera: &CameraState,
-    projection: &dyn Projection,
-    view_proj_matrix: &[f32; 16],
-    width: u32,
-    height: u32,
+    viewport: &ProjectionViewport<'_>,
 ) -> Option<egui::Pos2> {
-    if view_mode == "3D" {
+    let ProjectionViewport {
+        view_mode,
+        camera,
+        projection,
+        view_proj_matrix,
+        screen_size,
+    } = viewport;
+    if !screen_size.x.is_finite()
+        || !screen_size.y.is_finite()
+        || screen_size.x <= 0.0
+        || screen_size.y <= 0.0
+    {
+        return None;
+    }
+    if *view_mode == "3D" {
         let xyz = olayer_core::geodesy::lla_to_ecef(
             &LatLon::new(lat, lon, alt),
             &olayer_core::geodesy::ellipsoid::Ellipsoid::wgs84(),
@@ -147,31 +171,25 @@ pub fn project_lla_to_screen(
 
         let m = view_proj_matrix;
         let w_ndc = m[3] * x + m[7] * y + m[11] * z + m[15];
-        if w_ndc <= 0.0 {
+        if !w_ndc.is_finite() || w_ndc <= 0.0 {
             return None;
         }
         let x_ndc = (m[0] * x + m[4] * y + m[8] * z + m[12]) / w_ndc;
         let y_ndc = (m[1] * x + m[5] * y + m[9] * z + m[13]) / w_ndc;
-        Some(egui::pos2(
-            (x_ndc + 1.0) * 0.5 * width as f32,
-            (1.0 - y_ndc) * 0.5 * height as f32,
-        ))
-    } else if view_mode == "2.5D" {
+        screen_position(x_ndc, y_ndc, *screen_size)
+    } else if *view_mode == "2.5D" {
         if let Ok(xy) = projection.project(&LatLon::new(lat, lon, 0.0)) {
             let x = xy.0 as f32;
             let y = xy.1 as f32;
             let z = alt as f32;
             let m = view_proj_matrix;
             let w_ndc = m[3] * x + m[7] * y + m[11] * z + m[15];
-            if w_ndc <= 0.0 {
+            if !w_ndc.is_finite() || w_ndc <= 0.0 {
                 return None;
             }
             let x_ndc = (m[0] * x + m[4] * y + m[8] * z + m[12]) / w_ndc;
             let y_ndc = (m[1] * x + m[5] * y + m[9] * z + m[13]) / w_ndc;
-            Some(egui::pos2(
-                (x_ndc + 1.0) * 0.5 * width as f32,
-                (1.0 - y_ndc) * 0.5 * height as f32,
-            ))
+            screen_position(x_ndc, y_ndc, *screen_size)
         } else {
             None
         }
@@ -195,26 +213,53 @@ pub fn project_lla_to_screen(
         let h_meters = w_meters / aspect;
         let ndc_x = rx as f32 / (w_meters / 2.0);
         let ndc_y = ry as f32 / (h_meters / 2.0);
-        Some(egui::pos2(
-            (ndc_x + 1.0) * 0.5 * width as f32,
-            (1.0 - ndc_y) * 0.5 * height as f32,
-        ))
+        screen_position(ndc_x, ndc_y, *screen_size)
     } else {
         None
     }
 }
 
+fn screen_position(x_ndc: f32, y_ndc: f32, screen_size: egui::Vec2) -> Option<egui::Pos2> {
+    if !x_ndc.is_finite() || !y_ndc.is_finite() {
+        return None;
+    }
+    Some(egui::pos2(
+        (x_ndc + 1.0) * 0.5 * screen_size.x,
+        (1.0 - y_ndc) * 0.5 * screen_size.y,
+    ))
+}
+
+pub fn screen_size_in_points(
+    physical_width: u32,
+    physical_height: u32,
+    pixels_per_point: f32,
+) -> Option<egui::Vec2> {
+    if !pixels_per_point.is_finite() || pixels_per_point <= 0.0 {
+        return None;
+    }
+    Some(egui::vec2(
+        physical_width as f32 / pixels_per_point,
+        physical_height as f32 / pixels_per_point,
+    ))
+}
+
 /// Rasterizes SVG symbol data using resvg into a raw RGBA buffer.
 ///
 /// # Errors
-/// Returns an error when SVG parsing or pixmap allocation fails.
-pub fn rasterize_svg(svg_data: &str, width: u32, height: u32) -> Result<Vec<u8>, String> {
+/// Returns [`SvgRasterizeError::Parse`] when the SVG document is malformed, or
+/// [`SvgRasterizeError::PixmapAllocation`] when the requested dimensions cannot
+/// be allocated.
+pub fn rasterize_svg(
+    svg_data: &str,
+    width: u32,
+    height: u32,
+) -> Result<Vec<u8>, SvgRasterizeError> {
     let opt = usvg::Options::default();
     let tree = usvg::Tree::from_str(svg_data, &opt)
-        .map_err(|e| format!("Failed to parse SVG: {:?}", e))?;
+        .map_err(|error| SvgRasterizeError::Parse(error.to_string()))?;
 
-    let mut pixmap =
-        resvg::tiny_skia::Pixmap::new(width, height).ok_or("Failed to allocate Pixmap")?;
+    let mut pixmap = resvg::tiny_skia::Pixmap::new(width, height)
+        .ok_or(SvgRasterizeError::PixmapAllocation { width, height })?;
 
     resvg::render(
         &tree,
@@ -235,6 +280,20 @@ mod tests {
     use olayer_core::geodesy::ellipsoid::Ellipsoid;
     use olayer_core::projections::Stereographic;
 
+    fn viewport<'a>(
+        camera: &'a CameraState,
+        projection: &'a dyn Projection,
+        view_proj_matrix: &'a [f32; 16],
+    ) -> ProjectionViewport<'a> {
+        ProjectionViewport {
+            view_mode: "2D",
+            camera,
+            projection,
+            view_proj_matrix,
+            screen_size: egui::vec2(800.0, 600.0),
+        }
+    }
+
     #[test]
     fn test_project_lla_to_screen_2d_center() {
         let projection = Stereographic::new(0.0, 0.0, Ellipsoid::wgs84()).unwrap();
@@ -249,7 +308,7 @@ mod tests {
         );
         let vp = camera.get_2d_view_proj_matrix(&projection).unwrap();
 
-        let pos = project_lla_to_screen(0.0, 0.0, 0.0, "2D", &camera, &projection, &vp, 800, 600);
+        let pos = project_lla_to_screen(0.0, 0.0, 0.0, &viewport(&camera, &projection, &vp));
         assert!(pos.is_some());
         let p = pos.unwrap();
         // Center of screen at 800x600 with no rotation should be roughly (400, 300)
@@ -272,7 +331,7 @@ mod tests {
         let vp = camera.get_2d_view_proj_matrix(&projection).unwrap();
 
         // A point slightly north of center should be above center on screen
-        let pos = project_lla_to_screen(0.01, 0.0, 0.0, "2D", &camera, &projection, &vp, 800, 600);
+        let pos = project_lla_to_screen(0.01, 0.0, 0.0, &viewport(&camera, &projection, &vp));
         assert!(pos.is_some());
         let p = pos.unwrap();
         // Screen Y goes down, so north is smaller Y
@@ -294,7 +353,7 @@ mod tests {
         let vp = camera.get_2d_view_proj_matrix(&projection).unwrap();
 
         // A point slightly east of center should be to the right on screen
-        let pos = project_lla_to_screen(0.0, 0.01, 0.0, "2D", &camera, &projection, &vp, 800, 600);
+        let pos = project_lla_to_screen(0.0, 0.01, 0.0, &viewport(&camera, &projection, &vp));
         assert!(pos.is_some());
         let p = pos.unwrap();
         assert!(p.x > 400.0);
@@ -315,7 +374,7 @@ mod tests {
         let vp = camera.get_2d_view_proj_matrix(&projection).unwrap();
 
         // With 90° rotation, a point north of center should appear to the right
-        let pos = project_lla_to_screen(0.01, 0.0, 0.0, "2D", &camera, &projection, &vp, 800, 600);
+        let pos = project_lla_to_screen(0.01, 0.0, 0.0, &viewport(&camera, &projection, &vp));
         assert!(pos.is_some());
         let p = pos.unwrap();
         assert!(p.x > 400.0);
@@ -340,14 +399,18 @@ mod tests {
             0.0,
             std::f64::consts::PI,
             0.0,
-            "2D",
-            &camera,
-            &projection,
-            &vp,
-            800,
-            600,
+            &viewport(&camera, &projection, &vp),
         );
         assert!(pos.is_none());
+    }
+
+    #[test]
+    fn physical_window_size_is_converted_to_egui_points() {
+        assert_eq!(
+            screen_size_in_points(1200, 900, 1.5),
+            Some(egui::vec2(800.0, 600.0))
+        );
+        assert!(screen_size_in_points(1200, 900, 0.0).is_none());
     }
 
     #[test]
@@ -358,5 +421,20 @@ mod tests {
         let pixels = result.unwrap();
         // 64 x 64 x 4 bytes (RGBA)
         assert_eq!(pixels.len(), 64 * 64 * 4);
+    }
+
+    #[test]
+    fn rasterize_svg_returns_distinct_typed_errors() {
+        assert!(matches!(
+            rasterize_svg("not svg", 32, 32),
+            Err(SvgRasterizeError::Parse(_))
+        ));
+        assert_eq!(
+            rasterize_svg(r#"<svg xmlns="http://www.w3.org/2000/svg"/>"#, 0, 32),
+            Err(SvgRasterizeError::PixmapAllocation {
+                width: 0,
+                height: 32
+            })
+        );
     }
 }

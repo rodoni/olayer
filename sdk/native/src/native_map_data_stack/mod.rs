@@ -1,8 +1,66 @@
 use olayer_core::terrain::TerrainEngine;
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::io::Read;
+use std::fmt;
+use std::io::{Cursor, Read};
 use std::sync::mpsc::{channel, Sender};
 use std::sync::{Arc, Mutex};
+
+const MAX_HTTP_RESPONSE_BYTES: usize = 1024 * 1024;
+const WMTS_TILE_SIZE: u32 = 256;
+const WMTS_TILE_RGBA_BYTES: usize = 256 * 256 * 4;
+const WMTS_DECODER_MAX_ALLOC_BYTES: u64 = 4 * 1024 * 1024;
+
+/// Errors returned while loading local map data or decoding WMTS tiles.
+#[derive(Debug)]
+pub enum NativeMapDataError {
+    /// An underlying file or HTTP response body could not be read.
+    Io(std::io::Error),
+    /// A map data source with the same identifier is already registered.
+    DuplicateSource(String),
+    /// DTED input could not be parsed by the terrain engine.
+    InvalidTerrainData(String),
+    /// Elevation lookup failed in the terrain engine.
+    TerrainQuery(String),
+    /// An HTTP response exceeded the configured byte limit.
+    ResponseTooLarge { max_bytes: usize },
+    /// The WMTS HTTP request failed.
+    HttpRequestFailed,
+    /// A decoded map tile did not have the dimensions expected by the GPU.
+    InvalidTileDimensions { width: u32, height: u32 },
+    /// An image could not be identified or decoded.
+    ImageDecode(String),
+}
+
+impl fmt::Display for NativeMapDataError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Io(error) => write!(formatter, "map data I/O failed: {error}"),
+            Self::DuplicateSource(id) => write!(formatter, "data source '{id}' already registered"),
+            Self::InvalidTerrainData(message) => write!(formatter, "invalid DTED data: {message}"),
+            Self::TerrainQuery(message) => {
+                write!(formatter, "terrain elevation query failed: {message}")
+            }
+            Self::ResponseTooLarge { max_bytes } => {
+                write!(formatter, "HTTP response exceeds {max_bytes} bytes")
+            }
+            Self::HttpRequestFailed => formatter.write_str("WMTS HTTP request failed"),
+            Self::InvalidTileDimensions { width, height } => write!(
+                formatter,
+                "WMTS tile dimensions are {width}x{height}; expected 256x256"
+            ),
+            Self::ImageDecode(message) => write!(formatter, "WMTS image decode failed: {message}"),
+        }
+    }
+}
+
+impl std::error::Error for NativeMapDataError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io(error) => Some(error),
+            _ => None,
+        }
+    }
+}
 
 // =============================================================================
 // 1. DATA SOURCE TRAIT
@@ -50,10 +108,16 @@ impl NativeMapDataStack {
     /// Registers a data source in the stack.
     ///
     /// Returns `Err` if a source with the same ID already exists.
-    pub fn register_source(&mut self, source: Box<dyn MapDataSource>) -> Result<(), String> {
+    ///
+    /// # Errors
+    /// Returns [`NativeMapDataError::DuplicateSource`] when the ID is already registered.
+    pub fn register_source(
+        &mut self,
+        source: Box<dyn MapDataSource>,
+    ) -> Result<(), NativeMapDataError> {
         let id = source.id().to_string();
         if self.sources.contains_key(&id) {
-            return Err(format!("Data source '{}' already registered.", id));
+            return Err(NativeMapDataError::DuplicateSource(id));
         }
         self.sources.insert(id, source);
         Ok(())
@@ -81,23 +145,34 @@ impl NativeMapDataStack {
     // =========================================================================
 
     /// Loads a DTED tile from a file path into the given terrain engine.
-    pub fn load_dted_file(&self, path: &str, terrain: &mut TerrainEngine) -> Result<(), String> {
-        let data = std::fs::read(path).map_err(|e| format!("Failed to read DTED file: {}", e))?;
+    ///
+    /// # Errors
+    /// Returns [`NativeMapDataError::Io`] if the file cannot be read, or
+    /// [`NativeMapDataError::InvalidTerrainData`] if the bytes are not valid DTED data.
+    pub fn load_dted_file(
+        &self,
+        path: &str,
+        terrain: &mut TerrainEngine,
+    ) -> Result<(), NativeMapDataError> {
+        let data = std::fs::read(path).map_err(NativeMapDataError::Io)?;
         terrain
             .load_tile(&data)
-            .map_err(|e| format!("Failed to parse DTED data: {:?}", e))?;
+            .map_err(|error| NativeMapDataError::InvalidTerrainData(format!("{error:?}")))?;
         Ok(())
     }
 
     /// Loads a DTED tile from a raw buffer into the given terrain engine.
+    ///
+    /// # Errors
+    /// Returns [`NativeMapDataError::InvalidTerrainData`] if the bytes are not valid DTED data.
     pub fn load_dted_buffer(
         &self,
         buffer: &[u8],
         terrain: &mut TerrainEngine,
-    ) -> Result<(), String> {
+    ) -> Result<(), NativeMapDataError> {
         terrain
             .load_tile(buffer)
-            .map_err(|e| format!("Failed to parse DTED data: {:?}", e))?;
+            .map_err(|error| NativeMapDataError::InvalidTerrainData(format!("{error:?}")))?;
         Ok(())
     }
 }
@@ -113,7 +188,7 @@ impl NativeMapDataStack {
 pub struct TerrainDataSource {
     id: String,
     engine: TerrainEngine,
-    loaded_tiles: Vec<(i32, i32)>,
+    loaded_tiles: HashSet<(i32, i32)>,
 }
 
 impl TerrainDataSource {
@@ -121,28 +196,35 @@ impl TerrainDataSource {
         Self {
             id: id.to_string(),
             engine: TerrainEngine::new(),
-            loaded_tiles: Vec::new(),
+            loaded_tiles: HashSet::new(),
         }
     }
 
     /// Loads a DTED tile from a file path into the internal engine.
-    pub fn load_file(&mut self, path: &str) -> Result<(), String> {
-        let data = std::fs::read(path).map_err(|e| format!("Failed to read DTED file: {}", e))?;
+    ///
+    /// # Errors
+    /// Returns [`NativeMapDataError::Io`] if the file cannot be read, or
+    /// [`NativeMapDataError::InvalidTerrainData`] if the bytes are not valid DTED data.
+    pub fn load_file(&mut self, path: &str) -> Result<(), NativeMapDataError> {
+        let data = std::fs::read(path).map_err(NativeMapDataError::Io)?;
         let key = self
             .engine
             .load_tile(&data)
-            .map_err(|e| format!("Failed to parse DTED data: {:?}", e))?;
-        self.loaded_tiles.push((key.lat_deg, key.lon_deg));
+            .map_err(|error| NativeMapDataError::InvalidTerrainData(format!("{error:?}")))?;
+        self.loaded_tiles.insert((key.lat_deg, key.lon_deg));
         Ok(())
     }
 
     /// Loads a DTED tile from a raw buffer into the internal engine.
-    pub fn load_buffer(&mut self, buffer: &[u8]) -> Result<(), String> {
+    ///
+    /// # Errors
+    /// Returns [`NativeMapDataError::InvalidTerrainData`] if the bytes are not valid DTED data.
+    pub fn load_buffer(&mut self, buffer: &[u8]) -> Result<(), NativeMapDataError> {
         let key = self
             .engine
             .load_tile(buffer)
-            .map_err(|e| format!("Failed to parse DTED data: {:?}", e))?;
-        self.loaded_tiles.push((key.lat_deg, key.lon_deg));
+            .map_err(|error| NativeMapDataError::InvalidTerrainData(format!("{error:?}")))?;
+        self.loaded_tiles.insert((key.lat_deg, key.lon_deg));
         Ok(())
     }
 
@@ -158,10 +240,13 @@ impl TerrainDataSource {
     }
 
     /// Queries elevation at the given coordinate degrees.
-    pub fn get_elevation(&self, lat_deg: f64, lon_deg: f64) -> Result<f64, String> {
+    ///
+    /// # Errors
+    /// Returns [`NativeMapDataError::TerrainQuery`] if no loaded terrain tile can satisfy the query.
+    pub fn get_elevation(&self, lat_deg: f64, lon_deg: f64) -> Result<f64, NativeMapDataError> {
         self.engine
             .get_elevation(lat_deg, lon_deg)
-            .map_err(|e| format!("{:?}", e))
+            .map_err(|error| NativeMapDataError::TerrainQuery(format!("{error:?}")))
     }
 }
 
@@ -218,6 +303,99 @@ struct WmtsWorker {
     handle: Mutex<Option<std::thread::JoinHandle<()>>>,
 }
 
+fn read_http_body(reader: impl Read) -> Result<Vec<u8>, NativeMapDataError> {
+    let mut bytes = Vec::new();
+    reader
+        .take(1_048_577)
+        .read_to_end(&mut bytes)
+        .map_err(NativeMapDataError::Io)?;
+    if bytes.len() > MAX_HTTP_RESPONSE_BYTES {
+        return Err(NativeMapDataError::ResponseTooLarge {
+            max_bytes: MAX_HTTP_RESPONSE_BYTES,
+        });
+    }
+    Ok(bytes)
+}
+
+fn decode_wmts_tile(bytes: &[u8]) -> Result<Vec<u8>, NativeMapDataError> {
+    if bytes.len() > MAX_HTTP_RESPONSE_BYTES {
+        return Err(NativeMapDataError::ResponseTooLarge {
+            max_bytes: MAX_HTTP_RESPONSE_BYTES,
+        });
+    }
+
+    let reader = image::io::Reader::new(Cursor::new(bytes))
+        .with_guessed_format()
+        .map_err(|error| NativeMapDataError::ImageDecode(error.to_string()))?;
+    let format = reader
+        .format()
+        .ok_or_else(|| NativeMapDataError::ImageDecode("unrecognized image format".to_string()))?;
+    let (width, height) = reader
+        .into_dimensions()
+        .map_err(|error| NativeMapDataError::ImageDecode(error.to_string()))?;
+    if width != WMTS_TILE_SIZE || height != WMTS_TILE_SIZE {
+        return Err(NativeMapDataError::InvalidTileDimensions { width, height });
+    }
+
+    let mut limits = image::io::Limits::default();
+    limits.max_image_width = Some(WMTS_TILE_SIZE);
+    limits.max_image_height = Some(WMTS_TILE_SIZE);
+    limits.max_alloc = Some(WMTS_DECODER_MAX_ALLOC_BYTES);
+
+    let mut reader = image::io::Reader::with_format(Cursor::new(bytes), format);
+    reader.limits(limits);
+    let image = reader
+        .decode()
+        .map_err(|error| NativeMapDataError::ImageDecode(error.to_string()))?;
+    let rgba = image.to_rgba8().into_raw();
+    if rgba.len() != WMTS_TILE_RGBA_BYTES {
+        return Err(NativeMapDataError::ImageDecode(format!(
+            "decoded RGBA buffer has {} bytes; expected {WMTS_TILE_RGBA_BYTES}",
+            rgba.len()
+        )));
+    }
+    Ok(rgba)
+}
+
+fn fetch_wmts_tile(agent: &ureq::Agent, url: &str) -> Result<Vec<u8>, NativeMapDataError> {
+    let response = agent
+        .get(url)
+        .call()
+        .map_err(|_| NativeMapDataError::HttpRequestFailed)?;
+    let bytes = read_http_body(response.into_reader())?;
+    decode_wmts_tile(&bytes)
+}
+
+fn insert_cached_tile(
+    cache: &Mutex<HashMap<String, Vec<u8>>>,
+    order: &Mutex<VecDeque<String>>,
+    key: &str,
+    pixels: Vec<u8>,
+) {
+    let Ok(mut cache) = cache.lock() else {
+        return;
+    };
+    let Ok(mut keys) = order.lock() else {
+        return;
+    };
+
+    cache.insert(key.to_string(), pixels);
+    keys.retain(|cached_key| cached_key != key);
+    keys.push_back(key.to_string());
+    while keys.len() > DEFAULT_WMTS_CACHE_CAPACITY {
+        if let Some(oldest) = keys.pop_front() {
+            cache.remove(&oldest);
+        }
+    }
+}
+
+fn touch_cached_key(order: &Mutex<VecDeque<String>>, key: &str) {
+    if let Ok(mut keys) = order.lock() {
+        keys.retain(|cached_key| cached_key != key);
+        keys.push_back(key.to_string());
+    }
+}
+
 impl GeoserverWmtsSource {
     /// Creates a new `GeoserverWmtsSource` and spawns its background worker thread.
     pub fn new(id: &str, base_url: &str, layer_name: &str) -> Self {
@@ -239,7 +417,7 @@ impl GeoserverWmtsSource {
 
         // Spawn background worker thread
         let handle = std::thread::spawn(move || {
-            println!("[GeoserverWmtsSource] Background worker thread started.");
+            log::debug!("WMTS background worker started");
             while let Ok(command) = rx_req.recv() {
                 let (key, request_generation) = match command {
                     WorkerCommand::Load(key, request_generation) => {
@@ -257,10 +435,7 @@ impl GeoserverWmtsSource {
                     }
                     WorkerCommand::Shutdown => break,
                 };
-                println!(
-                    "[GeoserverWmtsSource] Received request for tile key: {}",
-                    key
-                );
+                log::debug!("Received WMTS tile request: {key}");
                 // Parse key "z/x/y"
                 let parts: Vec<&str> = key.split('/').collect();
                 if parts.len() != 3 {
@@ -277,7 +452,7 @@ impl GeoserverWmtsSource {
                     format!("{}?service=WMTS&request=GetTile&version=1.0.0&layer={}&style=&tilematrixset=EPSG:900913&TileMatrix=EPSG:900913:{}&TileRow={}&TileCol={}&format=image/png", base_url_for_thread, layer_name_for_thread, z, y, x)
                 };
 
-                println!("[GeoserverWmtsSource] Fetching tile from URL: {}", url);
+                log::debug!("Fetching WMTS tile {key}");
 
                 // Fetch tile bytes via ureq with timeout to prevent blocking forever
                 let agent = ureq::AgentBuilder::new()
@@ -285,78 +460,17 @@ impl GeoserverWmtsSource {
                     .timeout_read(std::time::Duration::from_secs(5))
                     .build();
 
-                match agent.get(&url).call() {
-                    Ok(response) => {
-                        println!("[GeoserverWmtsSource] HTTP response ok for url: {}", url);
-                        let mut bytes = Vec::new();
-                        let mut reader = response.into_reader();
-                        if reader.read_to_end(&mut bytes).is_ok() {
-                            println!(
-                                "[GeoserverWmtsSource] Read {} bytes for tile {}",
-                                bytes.len(),
-                                key
-                            );
-                            // Decode image using image crate to raw RGBA8
-                            match image::load_from_memory(&bytes) {
-                                Ok(img) => {
-                                    let rgba = img.to_rgba8();
-                                    let width = rgba.width();
-                                    let height = rgba.height();
-                                    let raw_pixels = rgba.into_raw();
-                                    let mut transparent = 0;
-                                    let mut opaque = 0;
-                                    let mut unique_colors = std::collections::HashSet::new();
-                                    let (chunks, _) = raw_pixels.as_chunks::<4>();
-                                    for chunk in chunks {
-                                        if chunk[3] == 0 {
-                                            transparent += 1;
-                                        } else {
-                                            opaque += 1;
-                                            unique_colors.insert((chunk[0], chunk[1], chunk[2]));
-                                        }
-                                    }
-                                    println!("[GeoserverWmtsSource] Decoded image: {}x{}. Transparent pixels: {}, Opaque: {}. Unique opaque colors: {}", 
-                                             width, height, transparent, opaque, unique_colors.len());
-
-                                    // Insert into cache
-                                    let current_generation =
-                                        generation_clone.lock().map(|value| *value).unwrap_or(0);
-                                    if current_generation == request_generation {
-                                        if let Ok(mut c) = cache_clone.lock() {
-                                            c.insert(key.clone(), raw_pixels);
-                                            if let Ok(mut keys) = order_clone.lock() {
-                                                keys.retain(|cached_key| cached_key != &key);
-                                                keys.push_back(key.clone());
-                                                while keys.len() > DEFAULT_WMTS_CACHE_CAPACITY {
-                                                    if let Some(oldest) = keys.pop_front() {
-                                                        c.remove(&oldest);
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    println!(
-                                        "[GeoserverWmtsSource] Failed to decode image: {:?}",
-                                        e
-                                    );
-                                    log::error!("Failed to decode image from GeoServer: {:?}", e);
-                                }
-                            }
-                        } else {
-                            println!(
-                                "[GeoserverWmtsSource] Failed to read response body for tile {}",
-                                key
-                            );
+                match fetch_wmts_tile(&agent, &url) {
+                    Ok(raw_pixels) => {
+                        log::debug!("Decoded 256x256 RGBA WMTS tile {key}");
+                        let current_generation =
+                            generation_clone.lock().map(|value| *value).unwrap_or(0);
+                        if current_generation == request_generation {
+                            insert_cached_tile(&cache_clone, &order_clone, &key, raw_pixels);
                         }
                     }
-                    Err(e) => {
-                        println!(
-                            "[GeoserverWmtsSource] HTTP request failed for URL: {}. Error: {:?}",
-                            url, e
-                        );
-                        log::error!("Failed to fetch tile from GeoServer at {}: {:?}", url, e);
+                    Err(error) => {
+                        log::error!("Failed to load WMTS tile {key}: {error}");
                     }
                 }
 
@@ -416,22 +530,25 @@ impl GeoserverWmtsSource {
     /// Returns `None` if the tile is still loading or failed to load.
     pub fn get_tile_pixels(&self, x: u32, y: u32, z: u32) -> Option<Vec<u8>> {
         let key = format!("{}/{}/{}", z, x, y);
-        let cached = self
-            .cache
-            .lock()
-            .map(|cache| cache.contains_key(&key))
-            .unwrap_or(false);
-        if cached {
-            if let Ok(mut keys) = self.order.lock() {
-                keys.retain(|cached_key| cached_key != &key);
-                keys.push_back(key.clone());
-            }
+        let cache = self.cache.lock().ok()?;
+        let pixels = cache.get(&key).cloned();
+        if pixels.is_some() {
+            touch_cached_key(&self.order, &key);
         }
-        if let Ok(c) = self.cache.lock() {
-            c.get(&key).cloned()
-        } else {
-            None
+        pixels
+    }
+
+    /// Checks whether a tile is cached without cloning its pixel buffer.
+    pub fn has_tile(&self, x: u32, y: u32, z: u32) -> bool {
+        let key = format!("{}/{}/{}", z, x, y);
+        let Ok(cache) = self.cache.lock() else {
+            return false;
+        };
+        let present = cache.contains_key(&key);
+        if present {
+            touch_cached_key(&self.order, &key);
         }
+        present
     }
 
     /// Returns a list of all tile keys currently loaded in the memory cache.
@@ -559,7 +676,10 @@ mod tests {
             cache: 0,
             cleared: false,
         }));
-        assert!(result.is_err());
+        assert!(matches!(
+            result,
+            Err(NativeMapDataError::DuplicateSource(id)) if id == "terrain"
+        ));
     }
 
     #[test]
@@ -695,5 +815,113 @@ mod tests {
         source.clear_cache();
         assert_eq!(source.cache_size(), 0);
         assert!(source.get_tile_pixels(0, 0, 0).is_none());
+    }
+
+    #[test]
+    fn http_response_body_is_bounded() {
+        let within_limit = vec![0; MAX_HTTP_RESPONSE_BYTES];
+        assert_eq!(
+            read_http_body(within_limit.as_slice()).unwrap().len(),
+            MAX_HTTP_RESPONSE_BYTES
+        );
+
+        let over_limit = vec![0; MAX_HTTP_RESPONSE_BYTES + 1];
+        assert!(matches!(
+            read_http_body(over_limit.as_slice()),
+            Err(NativeMapDataError::ResponseTooLarge { .. })
+        ));
+    }
+
+    #[test]
+    fn wmts_decode_requires_a_256_by_256_tile() {
+        let mut valid_png = Vec::new();
+        image::DynamicImage::new_rgba8(WMTS_TILE_SIZE, WMTS_TILE_SIZE)
+            .write_to(
+                &mut std::io::Cursor::new(&mut valid_png),
+                image::ImageOutputFormat::Png,
+            )
+            .unwrap();
+        assert_eq!(
+            decode_wmts_tile(&valid_png).unwrap().len(),
+            WMTS_TILE_RGBA_BYTES
+        );
+
+        let mut invalid_png = Vec::new();
+        image::DynamicImage::new_rgba8(WMTS_TILE_SIZE + 1, WMTS_TILE_SIZE)
+            .write_to(
+                &mut std::io::Cursor::new(&mut invalid_png),
+                image::ImageOutputFormat::Png,
+            )
+            .unwrap();
+        assert!(matches!(
+            decode_wmts_tile(&invalid_png),
+            Err(NativeMapDataError::InvalidTileDimensions {
+                width: 257,
+                height: 256
+            })
+        ));
+    }
+
+    #[test]
+    fn duplicate_terrain_loads_are_tracked_once() {
+        let mut terrain = TerrainDataSource::new("dted");
+        let mock = create_mock_dted();
+        terrain.load_buffer(&mock).unwrap();
+        terrain.load_buffer(&mock).unwrap();
+        assert_eq!(terrain.cache_size(), 1);
+    }
+
+    #[test]
+    fn wmts_cache_insertions_and_existence_queries_preserve_unique_lru_keys() {
+        let source = GeoserverWmtsSource::new(
+            "geo-cache",
+            "http://localhost:8080/geoserver/wmts",
+            "test_layer",
+        );
+        insert_cached_tile(
+            &source.cache,
+            &source.order,
+            "0/0/0",
+            vec![255; WMTS_TILE_RGBA_BYTES],
+        );
+        insert_cached_tile(
+            &source.cache,
+            &source.order,
+            "0/0/0",
+            vec![0; WMTS_TILE_RGBA_BYTES],
+        );
+
+        assert!(source.has_tile(0, 0, 0));
+        assert_eq!(source.get_cached_keys(), vec!["0/0/0".to_string()]);
+        assert_eq!(
+            source.get_tile_pixels(0, 0, 0),
+            Some(vec![0; WMTS_TILE_RGBA_BYTES])
+        );
+        assert!(!source.has_tile(1, 0, 0));
+        assert_eq!(source.order.lock().unwrap().len(), 1);
+
+        for index in 1..DEFAULT_WMTS_CACHE_CAPACITY {
+            let key = format!("0/{index}/0");
+            insert_cached_tile(
+                &source.cache,
+                &source.order,
+                &key,
+                vec![u8::try_from(index).unwrap()],
+            );
+        }
+        assert!(source.has_tile(0, 0, 0));
+        insert_cached_tile(&source.cache, &source.order, "0/999/0", vec![1]);
+        assert_eq!(source.cache_size(), DEFAULT_WMTS_CACHE_CAPACITY);
+        assert!(source.has_tile(0, 0, 0));
+        assert!(!source.has_tile(1, 0, 0));
+        assert_eq!(
+            source.order.lock().unwrap().len(),
+            DEFAULT_WMTS_CACHE_CAPACITY
+        );
+        let lru_keys = source.order.lock().unwrap();
+        assert_eq!(
+            lru_keys.iter().collect::<HashSet<_>>().len(),
+            lru_keys.len()
+        );
     }
 }

@@ -1,18 +1,60 @@
 use olayer_core::geodesy::{
     coords::LatLon,
     ellipsoid::Ellipsoid,
+    errors::GeodesyError,
     magnetic::MagneticModel,
     math::normalize_bearing,
     solvers::{GeodeticSolver, VincentySolver},
 };
 use std::collections::HashMap;
 use std::f64::consts::PI;
+use std::fmt;
 
 /// Conversion constant: 1 Nautical Mile in meters (exact standard).
 pub const METERS_PER_NAUTICAL_MILE: f64 = 1852.0;
 
 /// Standard Rate-One turn rate in degrees per second ($3^\circ/\text{s}$, $180^\circ$ in 1 minute).
 pub const STANDARD_RATE_ONE_TURN_DPS: f64 = 3.0;
+
+/// Maximum generated samples along each half-turn of a holding pattern.
+pub const MAX_HOLDING_PATTERN_POINTS_PER_TURN: usize = 512;
+/// Maximum number of arc intervals in an ILS funnel.
+pub const MAX_ILS_ARC_STEPS: usize = 512;
+/// Maximum number of distance ticks in an ILS centerline.
+pub const MAX_ILS_TICK_MARKS: usize = 256;
+/// Maximum number of range rings generated in one request.
+pub const MAX_RANGE_RINGS: usize = 64;
+/// Maximum sample intervals generated for each range ring.
+pub const MAX_RANGE_RING_POINTS: usize = 720;
+
+/// Errors returned by range-and-bearing measurements.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RblError {
+    /// Both the ellipsoidal and spherical inverse solvers rejected the input.
+    Geodesy(GeodesyError),
+}
+
+impl fmt::Display for RblError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Geodesy(error) => write!(f, "failed to compute geodesic measurement: {error}"),
+        }
+    }
+}
+
+impl std::error::Error for RblError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Geodesy(error) => Some(error),
+        }
+    }
+}
+
+impl From<GeodesyError> for RblError {
+    fn from(error: GeodesyError) -> Self {
+        Self::Geodesy(error)
+    }
+}
 
 /// Range and Bearing Line (RBL / CRSR) measurement result.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -268,6 +310,7 @@ impl SnailTrailManager {
                 dot.opacity = (age_factor * scan_factor).clamp(0.05, 1.0);
             }
         }
+        self.tracks.retain(|_, dots| !dots.is_empty());
     }
 
     /// Returns the active history dots for a specific track.
@@ -301,6 +344,10 @@ impl TacticalToolsManager {
     }
 
     /// Computes Range and Bearing Line (RBL / CRSR) measurement between two geodetic coordinates.
+    ///
+    /// # Errors
+    /// Returns [`RblError::Geodesy`] if either coordinate is invalid or neither
+    /// inverse geodesic solver can produce a measurement.
     pub fn compute_rbl(
         &self,
         from_lat_deg: f64,
@@ -309,19 +356,15 @@ impl TacticalToolsManager {
         to_lon_deg: f64,
         speed_knots: Option<f64>,
         epoch_year: Option<f64>,
-    ) -> RblMeasurement {
+    ) -> Result<RblMeasurement, RblError> {
         let ell = Ellipsoid::wgs84();
         let solver = VincentySolver;
         let from_pt = LatLon::from_degrees(from_lat_deg, from_lon_deg, 0.0);
         let to_pt = LatLon::from_degrees(to_lat_deg, to_lon_deg, 0.0);
 
-        let inv = solver.inverse(&from_pt, &to_pt, &ell).unwrap_or_else(|_| {
-            let p1 = LatLon::from_degrees(from_lat_deg, from_lon_deg, 0.0);
-            let p2 = LatLon::from_degrees(to_lat_deg, to_lon_deg, 0.0);
-            olayer_core::geodesy::solvers::HaversineSolver
-                .inverse(&p1, &p2, &ell)
-                .unwrap()
-        });
+        let inv = solver.inverse(&from_pt, &to_pt, &ell).or_else(|_| {
+            olayer_core::geodesy::solvers::HaversineSolver.inverse(&from_pt, &to_pt, &ell)
+        })?;
 
         let dist_m = inv.distance;
         let dist_nm = dist_m / METERS_PER_NAUTICAL_MILE;
@@ -346,7 +389,7 @@ impl TacticalToolsManager {
             }
         });
 
-        RblMeasurement {
+        Ok(RblMeasurement {
             from_lat_deg,
             from_lon_deg,
             to_lat_deg,
@@ -358,7 +401,7 @@ impl TacticalToolsManager {
             reciprocal_true_bearing_deg: recip_true_deg,
             reciprocal_magnetic_bearing_deg: recip_mag_deg,
             estimated_time_enroute_sec: ete_sec,
-        }
+        })
     }
 
     /// Generates Projected Position Leader (PPL) vectors and time tick marks.
@@ -426,7 +469,9 @@ impl TacticalToolsManager {
             .direct(&fix, bearing_to_turn1_center, turn_radius_m, &ell)
             .unwrap_or(fix);
 
-        let steps = config.points_per_turn.max(4);
+        let steps = config
+            .points_per_turn
+            .clamp(4, MAX_HOLDING_PATTERN_POINTS_PER_TURN);
         let mut polyline = Vec::with_capacity(steps * 2 + 6);
 
         // 1. Fix point
@@ -434,6 +479,7 @@ impl TacticalToolsManager {
 
         // 2. Turn 1 (Outbound turn, 180 degree arc from Fix away to outbound leg)
         let start_angle_1 = normalize_bearing(bearing_to_turn1_center + PI);
+        let mut outbound_start = fix;
         for i in 1..=steps {
             let frac = i as f64 / steps as f64;
             let sweep = if is_right { frac * PI } else { -frac * PI };
@@ -441,15 +487,12 @@ impl TacticalToolsManager {
             let pt = solver
                 .direct(&turn1_center, angle, turn_radius_m, &ell)
                 .unwrap_or(turn1_center);
+            outbound_start = pt;
             let (lat_d, lon_d, _) = pt.to_degrees();
             polyline.push((lat_d, lon_d));
         }
 
         // 3. Outbound leg
-        let outbound_start = {
-            let (lat_d, lon_d) = *polyline.last().unwrap();
-            LatLon::from_degrees(lat_d, lon_d, 0.0)
-        };
         let theta_outbound = normalize_bearing(theta_inbound + PI);
         let outbound_end = solver
             .direct(&outbound_start, theta_outbound, leg_dist_m, &ell)
@@ -508,7 +551,7 @@ impl TacticalToolsManager {
         cone_polygon.push((left_lat, left_lon));
 
         // Arc steps along the far end of the cone
-        let arc_steps = config.arc_steps.max(2);
+        let arc_steps = config.arc_steps.clamp(2, MAX_ILS_ARC_STEPS);
         for i in 1..arc_steps {
             let frac = i as f64 / arc_steps as f64;
             let angle = normalize_bearing(left_bearing + frac * (config.fov_deg.to_radians()));
@@ -545,8 +588,18 @@ impl TacticalToolsManager {
         let perp_left = normalize_bearing(approach_back_rad - PI / 2.0);
         let perp_right = normalize_bearing(approach_back_rad + PI / 2.0);
 
-        let max_nm = config.extended_centerline_nm.floor() as usize;
-        for nm in 1..=max_nm {
+        let max_nm = if config.extended_centerline_nm.is_nan() {
+            0.0
+        } else {
+            config
+                .extended_centerline_nm
+                .floor()
+                .clamp(0.0, MAX_ILS_TICK_MARKS as f64)
+        };
+        for nm in 1..=MAX_ILS_TICK_MARKS {
+            if nm as f64 > max_nm {
+                break;
+            }
             let d_m = nm as f64 * METERS_PER_NAUTICAL_MILE;
             let center_tick = solver
                 .direct(&threshold, approach_back_rad, d_m, &ell)
@@ -591,11 +644,11 @@ impl TacticalToolsManager {
         let ell = Ellipsoid::wgs84();
         let solver = VincentySolver;
         let center = LatLon::from_degrees(config.center_lat_deg, config.center_lon_deg, 0.0);
-        let steps = config.points_per_ring.max(12);
+        let steps = config.points_per_ring.clamp(12, MAX_RANGE_RING_POINTS);
 
-        let mut rings = Vec::with_capacity(config.radii_nm.len());
+        let mut rings = Vec::with_capacity(config.radii_nm.len().min(MAX_RANGE_RINGS));
 
-        for &radius_nm in &config.radii_nm {
+        for &radius_nm in config.radii_nm.iter().take(MAX_RANGE_RINGS) {
             let radius_m = radius_nm * METERS_PER_NAUTICAL_MILE;
             let mut ring = Vec::with_capacity(steps + 1);
 
@@ -670,7 +723,9 @@ mod tests {
         let manager = TacticalToolsManager::new();
 
         // JFK (40.64 N, -73.78 W) to Boston Logan (42.36 N, -71.01 W)
-        let rbl = manager.compute_rbl(40.64, -73.78, 42.36, -71.01, Some(450.0), Some(2025.0));
+        let rbl = manager
+            .compute_rbl(40.64, -73.78, 42.36, -71.01, Some(450.0), Some(2025.0))
+            .unwrap();
 
         // Distance should be ~160 to 175 NM
         assert!(rbl.distance_nm > 150.0 && rbl.distance_nm < 185.0);
@@ -690,6 +745,24 @@ mod tests {
         assert!(rbl.estimated_time_enroute_sec.is_some());
         let ete = rbl.estimated_time_enroute_sec.unwrap();
         assert!(ete > 1100.0 && ete < 1600.0);
+    }
+
+    #[test]
+    fn test_rbl_rejects_nan_coordinates() {
+        let manager = TacticalToolsManager::new();
+        let invalid_coordinates = [
+            (f64::NAN, 0.0, 1.0, 1.0),
+            (0.0, f64::NAN, 1.0, 1.0),
+            (0.0, 0.0, f64::NAN, 1.0),
+            (0.0, 0.0, 1.0, f64::NAN),
+        ];
+
+        for (from_lat, from_lon, to_lat, to_lon) in invalid_coordinates {
+            assert!(matches!(
+                manager.compute_rbl(from_lat, from_lon, to_lat, to_lon, None, None),
+                Err(RblError::Geodesy(_))
+            ));
+        }
     }
 
     #[test]
@@ -739,6 +812,19 @@ mod tests {
     }
 
     #[test]
+    fn test_holding_pattern_caps_points_per_turn() {
+        let manager = TacticalToolsManager::new();
+        let config = HoldingPatternConfig {
+            points_per_turn: usize::MAX,
+            ..HoldingPatternConfig::default()
+        };
+
+        let polyline = manager.generate_holding_pattern(&config);
+
+        assert_eq!(polyline.len(), MAX_HOLDING_PATTERN_POINTS_PER_TURN * 2 + 3);
+    }
+
+    #[test]
     fn test_ils_cone_geometry() {
         let manager = TacticalToolsManager::new();
         let config = IlsConeConfig {
@@ -771,6 +857,21 @@ mod tests {
     }
 
     #[test]
+    fn test_ils_cone_caps_arc_and_tick_counts() {
+        let manager = TacticalToolsManager::new();
+        let config = IlsConeConfig {
+            arc_steps: usize::MAX,
+            extended_centerline_nm: f64::INFINITY,
+            ..IlsConeConfig::default()
+        };
+
+        let geometry = manager.generate_ils_cone(&config);
+
+        assert_eq!(geometry.cone_polygon.len(), MAX_ILS_ARC_STEPS + 3);
+        assert_eq!(geometry.tick_marks.len(), MAX_ILS_TICK_MARKS);
+    }
+
+    #[test]
     fn test_range_rings_and_compass_rose() {
         let manager = TacticalToolsManager::new();
         let rings_cfg = RangeRingsConfig {
@@ -795,6 +896,24 @@ mod tests {
         };
         let spokes = manager.generate_compass_rose_spokes(&rose_cfg);
         assert_eq!(spokes.len(), 8); // 360 / 45 = 8 spokes
+    }
+
+    #[test]
+    fn test_range_rings_caps_ring_and_sample_counts() {
+        let manager = TacticalToolsManager::new();
+        let config = RangeRingsConfig {
+            center_lat_deg: 0.0,
+            center_lon_deg: 0.0,
+            radii_nm: vec![1.0; MAX_RANGE_RINGS + 5],
+            points_per_ring: usize::MAX,
+        };
+
+        let rings = manager.generate_range_rings(&config);
+
+        assert_eq!(rings.len(), MAX_RANGE_RINGS);
+        assert!(rings
+            .iter()
+            .all(|ring| ring.len() == MAX_RANGE_RING_POINTS + 1));
     }
 
     #[test]
@@ -824,5 +943,15 @@ mod tests {
         assert!(!active_dots.is_empty());
         // Newest dot should have higher opacity than oldest dot
         assert!(active_dots.last().unwrap().opacity > active_dots.first().unwrap().opacity);
+    }
+
+    #[test]
+    fn test_decay_removes_tracks_after_all_dots_expire() {
+        let mut trails = SnailTrailManager::new();
+        trails.push_hit("expired", 0.0, 0.0, 0.0, 0.0);
+
+        trails.update_decay(10.0, 1.0, 10);
+
+        assert_eq!(trails.get_track_dots("expired"), None);
     }
 }

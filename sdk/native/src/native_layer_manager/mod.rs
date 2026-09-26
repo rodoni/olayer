@@ -1,4 +1,36 @@
 use std::collections::HashMap;
+use std::fmt;
+
+/// Errors returned when operating on the native layer stack.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LayerManagerError {
+    /// A layer with this identifier is already present.
+    DuplicateId(String),
+    /// The requested layer identifier is not present.
+    LayerNotFound(String),
+    /// The target ordering index is outside the current stack.
+    InvalidIndex {
+        /// Requested index.
+        index: usize,
+        /// Number of layers in the stack.
+        layer_count: usize,
+    },
+}
+
+impl fmt::Display for LayerManagerError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::DuplicateId(id) => write!(f, "layer with id '{id}' already exists"),
+            Self::LayerNotFound(id) => write!(f, "layer '{id}' not found"),
+            Self::InvalidIndex { index, layer_count } => write!(
+                f,
+                "invalid target index {index} for a stack of {layer_count} layers"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for LayerManagerError {}
 
 /// Trait for all visualization layers in the native Olayer framework.
 ///
@@ -78,11 +110,13 @@ impl NativeLayerManager {
 
     /// Adds a new layer to the top of the stack.
     ///
-    /// Returns `Err` if a layer with the same ID already exists.
-    pub fn add_layer(&mut self, layer: Box<dyn Layer>) -> Result<(), String> {
+    /// # Errors
+    /// Returns [`LayerManagerError::DuplicateId`] if a layer with the same ID
+    /// already exists.
+    pub fn add_layer(&mut self, layer: Box<dyn Layer>) -> Result<(), LayerManagerError> {
         let id = layer.id().to_string();
         if self.index.contains_key(&id) {
-            return Err(format!("Layer with id '{}' already exists.", id));
+            return Err(LayerManagerError::DuplicateId(id));
         }
         self.index.insert(id, self.layers.len());
         self.layers.push(layer);
@@ -107,18 +141,19 @@ impl NativeLayerManager {
 
     /// Reorders a layer to a specific index in the stack.
     ///
-    /// Returns `Err` if the layer is not found or the target index is out of bounds.
-    pub fn reorder_layer(&mut self, id: &str, new_index: usize) -> Result<(), String> {
+    /// # Errors
+    /// Returns [`LayerManagerError::LayerNotFound`] when `id` is absent, or
+    /// [`LayerManagerError::InvalidIndex`] when `new_index` is outside the stack.
+    pub fn reorder_layer(&mut self, id: &str, new_index: usize) -> Result<(), LayerManagerError> {
         let current_idx = *self
             .index
             .get(id)
-            .ok_or_else(|| format!("Layer '{}' not found.", id))?;
+            .ok_or_else(|| LayerManagerError::LayerNotFound(id.to_string()))?;
         if new_index >= self.layers.len() {
-            return Err(format!(
-                "Invalid target index: {} (max {})",
-                new_index,
-                self.layers.len().saturating_sub(1)
-            ));
+            return Err(LayerManagerError::InvalidIndex {
+                index: new_index,
+                layer_count: self.layers.len(),
+            });
         }
 
         let layer = self.layers.remove(current_idx);
@@ -159,14 +194,19 @@ impl NativeLayerManager {
 
     /// Toggles visibility for a specific layer.
     ///
-    /// Returns `Err` if the layer is not found.
+    /// # Errors
+    /// Returns [`LayerManagerError::LayerNotFound`] if the layer is absent.
     #[inline]
-    pub fn set_layer_visibility(&mut self, id: &str, visible: bool) -> Result<(), String> {
+    pub fn set_layer_visibility(
+        &mut self,
+        id: &str,
+        visible: bool,
+    ) -> Result<(), LayerManagerError> {
         let idx = self
             .index
             .get(id)
             .copied()
-            .ok_or_else(|| format!("Layer '{}' not found.", id))?;
+            .ok_or_else(|| LayerManagerError::LayerNotFound(id.to_string()))?;
         self.layers[idx].set_visible(visible);
         Ok(())
     }
@@ -245,7 +285,7 @@ mod tests {
             visible: true,
             static_layer: true,
         }));
-        assert!(result.is_err());
+        assert_eq!(result, Err(LayerManagerError::DuplicateId("A".to_string())));
     }
 
     #[test]
@@ -285,8 +325,26 @@ mod tests {
             static_layer: true,
         }))
         .unwrap();
-        assert!(mgr.reorder_layer("A", 5).is_err());
-        assert!(mgr.reorder_layer("Z", 0).is_err());
+        assert_eq!(
+            mgr.reorder_layer("A", 5),
+            Err(LayerManagerError::InvalidIndex {
+                index: 5,
+                layer_count: 1,
+            })
+        );
+        assert_eq!(
+            mgr.reorder_layer("Z", 0),
+            Err(LayerManagerError::LayerNotFound("Z".to_string()))
+        );
+    }
+
+    #[test]
+    fn test_visibility_reports_typed_missing_layer_error() {
+        let mut mgr = NativeLayerManager::new();
+        assert_eq!(
+            mgr.set_layer_visibility("missing", true),
+            Err(LayerManagerError::LayerNotFound("missing".to_string()))
+        );
     }
 
     #[test]

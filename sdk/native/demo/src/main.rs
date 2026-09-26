@@ -1,5 +1,9 @@
 use olayer_core::geodesy::LatLon;
-use olayer_core::projections::{LambertConformalConic, Stereographic, WebMercator};
+use olayer_core::projections::{
+    LambertConformalConic, Projection, ProjectionError, Stereographic, WebMercator,
+};
+use olayer_native::wgpu_cpu_vertex_pipeline::{screen_size_in_points, ProjectionViewport};
+use olayer_native::wgpu_gpu_pipeline::TerrainStyle;
 use olayer_native::{
     project_lla_to_screen, GeoserverWmtsSource, MapDataSource, NativeController,
     NativeLayerManager, NativeMapDataStack, RasterTileUpload, WgpuCpuVertexPipeline,
@@ -18,15 +22,36 @@ mod ui;
 
 use sim::SimulatedTarget;
 
-fn main() {
+fn projection_for_selection(
+    name: &str,
+    center: LatLon,
+) -> Result<Option<Box<dyn Projection + Send + Sync>>, ProjectionError> {
+    let ellipsoid = olayer_core::geodesy::ellipsoid::Ellipsoid::wgs84();
+    match name {
+        "Stereographic" => Ok(Some(Box::new(Stereographic::new(
+            center.lat, center.lon, ellipsoid,
+        )?))),
+        "LCC" => Ok(Some(Box::new(LambertConformalConic::new(
+            -20.0f64.to_radians(),
+            -25.0f64.to_radians(),
+            center.lat,
+            center.lon,
+            ellipsoid,
+        )?))),
+        "Mercator" | "2.5D" => Ok(Some(Box::new(WebMercator::new(ellipsoid)?))),
+        "3D" => Ok(None),
+        _ => Ok(None),
+    }
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
-    let event_loop = EventLoop::new().unwrap();
+    let event_loop = EventLoop::new()?;
     let window = Arc::new(
         WindowBuilder::new()
             .with_title("Olayer GIS ATC - Desktop Demo")
             .with_inner_size(winit::dpi::PhysicalSize::new(1280, 720))
-            .build(&event_loop)
-            .unwrap(),
+            .build(&event_loop)?,
     );
 
     // Setup wgpu - prefer DX12 on Windows to bypass Vulkan overlay hook issues, all backends on non-Windows
@@ -39,13 +64,18 @@ fn main() {
         backends,
         ..Default::default()
     });
-    let surface = instance.create_surface(window.clone()).unwrap();
+    let surface = instance.create_surface(window.clone())?;
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
         power_preference: wgpu::PowerPreference::HighPerformance,
         compatible_surface: Some(&surface),
         force_fallback_adapter: false,
     }))
-    .unwrap();
+    .ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "no compatible WGPU adapter found",
+        )
+    })?;
 
     let (device, queue) = pollster::block_on(adapter.request_device(
         &wgpu::DeviceDescriptor {
@@ -54,13 +84,17 @@ fn main() {
             required_limits: wgpu::Limits::default(),
         },
         None,
-    ))
-    .unwrap();
+    ))?;
 
     let size = window.inner_size();
     let mut config = surface
         .get_default_config(&adapter, size.width, size.height)
-        .unwrap();
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "surface does not support the initial window size",
+            )
+        })?;
     if size.width > 0 && size.height > 0 {
         surface.configure(&device, &config);
     }
@@ -79,8 +113,8 @@ fn main() {
     // Initialize Native SDK Components
     let sp_lat = -23.62f64.to_radians();
     let sp_lon = -46.65f64.to_radians();
-    let mut controller = NativeController::new(sp_lat, sp_lon);
-    controller.camera.aspect_ratio = size.width as f64 / size.height as f64;
+    let mut controller = NativeController::new(sp_lat, sp_lon)?;
+    controller.camera.aspect_ratio = f64::from(size.width) / f64::from(size.height);
     controller.camera.viewport_base_meters = 1000000.0;
 
     let mut layer_manager = NativeLayerManager::new();
@@ -126,7 +160,9 @@ fn main() {
                 offset += col_size;
             }
 
-            let _ = map_data_stack.load_dted_buffer(&data, &mut controller.terrain);
+            map_data_stack
+                .load_dted_buffer(&data, &mut controller.terrain)
+                .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
         }
     }
 
@@ -185,7 +221,9 @@ fn main() {
                             config.width = new_size.width;
                             config.height = new_size.height;
                             surface.configure(&device, &config);
-                            controller.camera.aspect_ratio = new_size.width as f64 / new_size.height as f64;
+                            controller.camera.aspect_ratio =
+                                f64::from(new_size.width) / f64::from(new_size.height);
+                            gpu_pipeline.invalidate_terrain_cache();
                             controller.trigger_active();
                             window.request_redraw();
                         }
@@ -194,6 +232,15 @@ fn main() {
                         if config.width == 0 || config.height == 0 {
                             return;
                         }
+                        let pixels_per_point = egui_ctx.pixels_per_point();
+                        let Some(screen_size) = screen_size_in_points(
+                            config.width,
+                            config.height,
+                            pixels_per_point,
+                        ) else {
+                            log::warn!("Skipping frame because egui returned an invalid DPI scale");
+                            return;
+                        };
                         // FPS meter
                         frame_count += 1;
                         let elapsed = last_fps_calculation.elapsed();
@@ -226,12 +273,13 @@ fn main() {
                         if let Some(ref source) = geoserver_source {
                             let keys = source.get_cached_keys();
                             for key in keys {
-                                if visible_keys.contains(&key) {
+                                if visible_keys.contains(&key) && !gpu_pipeline.has_raster_tile(&key) {
                                     let parts: Vec<&str> = key.split('/').collect();
                                     if parts.len() == 3 {
                                         if let (Ok(z), Ok(x), Ok(y)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>(), parts[2].parse::<u32>()) {
-                                            if let Some(pixels) = source.get_tile_pixels(x, y, z) {
-                                                gpu_pipeline.upload_raster_tile(RasterTileUpload {
+                                            if source.has_tile(x, y, z) {
+                                                if let Some(pixels) = source.get_tile_pixels(x, y, z) {
+                                                    if let Err(error) = gpu_pipeline.upload_raster_tile(RasterTileUpload {
                                                     device: &device,
                                                     queue: &queue,
                                                     key: &key,
@@ -240,37 +288,16 @@ fn main() {
                                                     y,
                                                     z,
                                                     controller: &controller,
-                                                });
+                                                    }) {
+                                                        log::warn!("Skipping invalid raster tile {key}: {error:?}");
+                                                    }
+                                                }
                                             }
                                         }
                                     }
                                 }
                             }
                         }
-
-                        // Update View-Projection Matrix
-                        let view_proj_matrix = if controller.view_mode == "3D" {
-                            controller.camera.get_3d_view_proj_matrix().unwrap_or([0.0; 16])
-                        } else if controller.view_mode == "2.5D" {
-                            controller.camera.get_25d_view_proj_matrix(controller.projection.as_ref()).unwrap_or([0.0; 16])
-                        } else {
-                            controller.camera.get_2d_view_proj_matrix(controller.projection.as_ref()).unwrap_or([0.0; 16])
-                        };
-
-                        // Write uniform buffers
-                        queue.write_buffer(&gpu_pipeline.uniform_buffer, 0, bytemuck::cast_slice(&view_proj_matrix));
-                        // Grid color: Sleek Green (0.0, 0.8, 0.4, 0.8)
-                        queue.write_buffer(&gpu_pipeline.uniform_buffer, 256, bytemuck::cast_slice(&[0.0f32, 0.8f32, 0.4f32, 0.8f32]));
-                        gpu_pipeline.set_terrain_style(
-                            &queue,
-                            terrain_render_mode,
-                            0.0,
-                            2500.0,
-                            terrain_taws_altitude,
-                            terrain_azimuth,
-                            45.0,
-                            terrain_contour_interval,
-                        );
 
                         // egui rendering context
                         let raw_input = egui_state.take_egui_input(&window);
@@ -299,21 +326,29 @@ fn main() {
                                             });
 
                                         if projection_name != old_proj {
-                                            if projection_name == "Stereographic" {
-                                                controller.view_mode = "2D".to_string();
-                                                controller.projection = Box::new(Stereographic::new(controller.camera.center.lat, controller.camera.center.lon, olayer_core::geodesy::ellipsoid::Ellipsoid::wgs84()).expect("valid stereographic projection"));
-                                            } else if projection_name == "LCC" {
-                                                controller.view_mode = "2D".to_string();
-                                                controller.projection = Box::new(LambertConformalConic::new(-20.0f64.to_radians(), -25.0f64.to_radians(), controller.camera.center.lat, controller.camera.center.lon, olayer_core::geodesy::ellipsoid::Ellipsoid::wgs84()).expect("valid LCC projection"));
-                                            } else if projection_name == "Mercator" {
-                                                controller.view_mode = "2D".to_string();
-                                                controller.projection = Box::new(WebMercator::new(olayer_core::geodesy::ellipsoid::Ellipsoid::wgs84()).expect("valid Web Mercator projection"));
-                                            } else if projection_name == "2.5D" {
-                                                controller.view_mode = "2.5D".to_string();
-                                                controller.projection = Box::new(WebMercator::new(olayer_core::geodesy::ellipsoid::Ellipsoid::wgs84()).expect("valid Web Mercator projection"));
-                                            } else if projection_name == "3D" {
-                                                controller.view_mode = "3D".to_string();
+                                            match projection_for_selection(
+                                                &projection_name,
+                                                controller.camera.center,
+                                            ) {
+                                                Ok(Some(projection)) => {
+                                                    controller.projection = projection;
+                                                    controller.view_mode = if projection_name == "2.5D" {
+                                                        "2.5D".to_string()
+                                                    } else {
+                                                        "2D".to_string()
+                                                    };
+                                                }
+                                                Ok(None) if projection_name == "3D" => {
+                                                    controller.view_mode = "3D".to_string();
+                                                }
+                                                Ok(None) => {}
+                                                Err(error) => {
+                                                    log::warn!("Failed to activate projection {projection_name}: {error}");
+                                                    projection_name = old_proj;
+                                                    return;
+                                                }
                                             }
+                                            gpu_pipeline.invalidate_terrain_cache();
                                             gpu_pipeline.rebuild_grid_buffers(&controller, &device, &queue);
                                             gpu_pipeline.rebuild_terrain_buffers(&controller, &device, &queue, terrain_exaggeration);
                                             gpu_pipeline.rebuild_raster_tile_buffers(&device, &controller);
@@ -390,13 +425,15 @@ fn main() {
                                             let (tx, ty) = tiles::latlon_to_tile(center_lat, center_lon, tile_zoom);
 
                                             ui.label("Centered Tile (OSM/WMTS):");
-                                            ui.label(format!("  • Matrix Set: EPSG:900913"));
+                                            ui.label("  • Matrix Set: EPSG:900913");
                                             ui.label(format!("  • TileMatrix: EPSG:900913:{}", tile_zoom));
                                             ui.label(format!("  • TileCol (X): {}", tx));
                                             ui.label(format!("  • TileRow (Y): {}", ty));
                                             ui.checkbox(&mut auto_fetch_tiles, "Auto-Request visible tiles");
 
-                                            let source = geoserver_source.as_ref().unwrap();
+                                             let Some(source) = geoserver_source.as_ref() else {
+                                                 return;
+                                             };
 
                                             if auto_fetch_tiles {
                                                 for key in &visible_keys {
@@ -430,25 +467,32 @@ fn main() {
 
                                             // Check tile status
                                             let tile_key = format!("{}/{}/{}", tile_zoom, tx, ty);
-                                            let is_loaded = source.get_tile_pixels(tx, ty, tile_zoom).is_some();
+                                             let is_loaded = source.has_tile(tx, ty, tile_zoom);
 
-                                            if is_loaded {
-                                                ui.colored_label(egui::Color32::from_rgb(0, 230, 118), "Status: Loaded in Memory");
+                                             if is_loaded {
+                                                 ui.colored_label(egui::Color32::from_rgb(0, 230, 118), "Status: Loaded in Memory");
 
-                                                // Load into egui texture if not already done
-                                                let texture = egui_tile_textures.entry(tile_key.clone()).or_insert_with(|| {
-                                                    let pixels = source.get_tile_pixels(tx, ty, tile_zoom).unwrap();
-                                                    egui_ctx.load_texture(
-                                                        format!("tile_{}", tile_key),
-                                                        egui::ColorImage::from_rgba_unmultiplied([256, 256], &pixels),
-                                                        Default::default()
-                                                    )
-                                                });
+                                                 // Load into egui texture if not already done
+                                                 egui_tile_textures.retain(|key, _| key == &tile_key);
+                                                 if !egui_tile_textures.contains_key(&tile_key) {
+                                                     if let Some(pixels) = source.get_tile_pixels(tx, ty, tile_zoom) {
+                                                         egui_tile_textures.insert(
+                                                             tile_key.clone(),
+                                                             egui_ctx.load_texture(
+                                                                 format!("tile_{tile_key}"),
+                                                                 egui::ColorImage::from_rgba_unmultiplied([256, 256], &pixels),
+                                                                 Default::default(),
+                                                             ),
+                                                         );
+                                                     }
+                                                 }
 
-                                                // Draw the tile preview
-                                                ui.separator();
-                                                ui.label("Preview (256x256):");
-                                                ui.image(&*texture);
+                                                 // Draw the tile preview
+                                                 ui.separator();
+                                                 ui.label("Preview (256x256):");
+                                                 if let Some(texture) = egui_tile_textures.get(&tile_key) {
+                                                     ui.image(texture);
+                                                 }
                                             } else {
                                                 ui.colored_label(egui::Color32::from_rgb(255, 179, 0), "Status: Idle / Loading...");
                                             }
@@ -498,6 +542,48 @@ fn main() {
                                   });
                         }
 
+                        // Recompute after HUD input so a projection selection takes effect immediately.
+                        let view_proj_matrix = if controller.view_mode == "3D" {
+                            controller.camera.get_3d_view_proj_matrix()
+                        } else if controller.view_mode == "2.5D" {
+                            controller
+                                .camera
+                                .get_25d_view_proj_matrix(controller.projection.as_ref())
+                        } else {
+                            controller
+                                .camera
+                                .get_2d_view_proj_matrix(controller.projection.as_ref())
+                        };
+                        let Ok(view_proj_matrix) = view_proj_matrix else {
+                            log::warn!("Skipping frame because the view-projection matrix is invalid");
+                            let _discarded_frame = egui_ctx.end_frame();
+                            window.request_redraw();
+                            return;
+                        };
+
+                        queue.write_buffer(
+                            &gpu_pipeline.uniform_buffer,
+                            0,
+                            bytemuck::cast_slice(&view_proj_matrix),
+                        );
+                        queue.write_buffer(
+                            &gpu_pipeline.uniform_buffer,
+                            256,
+                            bytemuck::cast_slice(&[0.0f32, 0.8f32, 0.4f32, 0.8f32]),
+                        );
+                        gpu_pipeline.set_terrain_style(
+                            &queue,
+                            &TerrainStyle {
+                                mode: terrain_render_mode,
+                                min_elevation: 0.0,
+                                max_elevation: 2500.0,
+                                aircraft_altitude: terrain_taws_altitude,
+                                light_azimuth_deg: terrain_azimuth,
+                                light_altitude_deg: 45.0,
+                                contour_interval: terrain_contour_interval,
+                            },
+                        );
+
                         // Draw aircraft targets on the egui painter
                         let painter = egui_ctx.layer_painter(egui::LayerId::background());
 
@@ -506,15 +592,19 @@ fn main() {
                                 .iter()
                                 .map(|st| (st.id.to_string(), st.speed))
                                 .collect();
+                            let viewport = ProjectionViewport {
+                                view_mode: &controller.view_mode,
+                                camera: &controller.camera,
+                                projection: controller.projection.as_ref(),
+                                view_proj_matrix: &view_proj_matrix,
+                                screen_size,
+                            };
 
                             cpu_pipeline.draw_targets(
                                 &painter,
                                 &interpolated_targets,
                                 &selected_target_id,
-                                &controller,
-                                &view_proj_matrix,
-                                config.width,
-                                config.height,
+                                &viewport,
                                 &simulated_speeds,
                             );
                         }
@@ -538,6 +628,14 @@ fn main() {
                         let full_output = egui_ctx.end_frame();
                         let paint_jobs = egui_ctx.tessellate(full_output.shapes, full_output.pixels_per_point);
 
+                        // The exact camera key rebuilds on pan, zoom, resize, and projection changes.
+                        gpu_pipeline.rebuild_terrain_buffers(
+                            &controller,
+                            &device,
+                            &queue,
+                            terrain_exaggeration,
+                        );
+
                         // Upload egui textures to GPU
                         for (id, image_delta) in &full_output.textures_delta.set {
                             egui_renderer.update_texture(&device, &queue, *id, image_delta);
@@ -559,7 +657,24 @@ fn main() {
                             &screen_descriptor,
                         );
 
-                        let current_texture = surface.get_current_texture().unwrap();
+                        let current_texture = match surface.get_current_texture() {
+                            Ok(texture) => texture,
+                            Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
+                                surface.configure(&device, &config);
+                                window.request_redraw();
+                                return;
+                            }
+                            Err(wgpu::SurfaceError::Timeout) => {
+                                log::warn!("Timed out acquiring the swapchain texture");
+                                window.request_redraw();
+                                return;
+                            }
+                            Err(wgpu::SurfaceError::OutOfMemory) => {
+                                log::error!("GPU is out of memory; closing the demo");
+                                window_target.exit();
+                                return;
+                            }
+                        };
                         let view = current_texture.texture.create_view(&wgpu::TextureViewDescriptor::default());
 
                         // WGPU render pass for background + grid + egui UI
@@ -613,7 +728,11 @@ fn main() {
                         window.request_redraw();
                     }
                     WindowEvent::CursorMoved { position, .. } => {
-                        let current_pos = egui::pos2(position.x as f32, position.y as f32);
+                        let pixels_per_point = egui_ctx.pixels_per_point();
+                        let current_pos = egui::pos2(
+                            position.x as f32 / pixels_per_point,
+                            position.y as f32 / pixels_per_point,
+                        );
                         if is_dragging {
                             let dx = current_pos.x - last_mouse_pos.x;
                             let dy = current_pos.y - last_mouse_pos.y;
@@ -639,8 +758,15 @@ fn main() {
                                     let aspect = controller.camera.aspect_ratio as f32;
                                     let w_meters = (controller.camera.viewport_base_meters / controller.camera.zoom) as f32;
                                     let h_meters = w_meters / aspect;
-                                    let meters_px_x = w_meters / config.width as f32;
-                                    let meters_px_y = h_meters / config.height as f32;
+                                    let Some(screen_size) = screen_size_in_points(
+                                        config.width,
+                                        config.height,
+                                        egui_ctx.pixels_per_point(),
+                                    ) else {
+                                        return;
+                                    };
+                                    let meters_px_x = w_meters / screen_size.x;
+                                    let meters_px_y = h_meters / screen_size.y;
 
                                     let cos_theta = (-controller.camera.rotation).cos() as f32;
                                     let sin_theta = (-controller.camera.rotation).sin() as f32;
@@ -673,13 +799,23 @@ fn main() {
                                 controller.trigger_active();
 
                                 let view_proj_matrix = if controller.view_mode == "3D" {
-                                    controller.camera.get_3d_view_proj_matrix().unwrap_or([0.0; 16])
+                                    controller.camera.get_3d_view_proj_matrix()
                                 } else if controller.view_mode == "2.5D" {
-                                    controller.camera.get_25d_view_proj_matrix(controller.projection.as_ref()).unwrap_or([0.0; 16])
+                                    controller.camera.get_25d_view_proj_matrix(controller.projection.as_ref())
                                 } else {
-                                    controller.camera.get_2d_view_proj_matrix(controller.projection.as_ref()).unwrap_or([0.0; 16])
+                                    controller.camera.get_2d_view_proj_matrix(controller.projection.as_ref())
                                 };
-                                let size = window.inner_size();
+                                let Ok(view_proj_matrix) = view_proj_matrix else {
+                                    log::warn!("Skipping target selection because the projection matrix is invalid");
+                                    return;
+                                };
+                                let Some(screen_size) = screen_size_in_points(
+                                    config.width,
+                                    config.height,
+                                    egui_ctx.pixels_per_point(),
+                                ) else {
+                                    return;
+                                };
 
                                 let mut nearest_target: Option<Arc<str>> = None;
                                 let mut min_dist = 15.0f32;
@@ -688,12 +824,13 @@ fn main() {
                                         t.lat,
                                         t.lon,
                                         t.alt,
-                                        &controller.view_mode,
-                                        &controller.camera,
-                                        controller.projection.as_ref(),
-                                        &view_proj_matrix,
-                                        size.width,
-                                        size.height,
+                                        &ProjectionViewport {
+                                            view_mode: &controller.view_mode,
+                                            camera: &controller.camera,
+                                            projection: controller.projection.as_ref(),
+                                            view_proj_matrix: &view_proj_matrix,
+                                            screen_size,
+                                        },
                                     ) {
                                         let dist = pos.distance(mouse_pos);
                                         if dist < min_dist {
@@ -724,5 +861,6 @@ fn main() {
             }
             _ => {}
         }
-    }).unwrap();
+    })?;
+    Ok(())
 }
