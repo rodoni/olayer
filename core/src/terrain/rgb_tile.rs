@@ -17,7 +17,13 @@ impl SlippyTileKey {
     /// Creates a new Slippy Map tile key.
     #[inline]
     pub const fn new(z: u32, x: u32, y: u32) -> Self {
-        Self { z, x, y }
+        let z = if z > 31 { 31 } else { z };
+        let max_index = (1u32 << z) - 1;
+        Self {
+            z,
+            x: if x > max_index { max_index } else { x },
+            y: if y > max_index { max_index } else { y },
+        }
     }
 
     /// Computes the Slippy tile key for a given geodetic coordinate (lat/lon in radians) at a specified zoom level.
@@ -39,7 +45,7 @@ impl SlippyTileKey {
         let y = y_val.floor().max(0.0) as u32;
         let y = y.min(max_index);
 
-        Self { z: zoom, x, y }
+        Self::new(zoom, x, y)
     }
 
     /// Computes the WGS84 geographic bounding box `(min_lat_rad, min_lon_rad, max_lat_rad, max_lon_rad)`

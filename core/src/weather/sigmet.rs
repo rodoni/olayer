@@ -3,6 +3,37 @@ use crate::geodesy::spatial::GeodesicPolygon;
 use crate::weather::errors::WeatherError;
 use serde::{Deserialize, Serialize};
 
+fn optional_property_f64(
+    properties: &serde_json::Map<String, serde_json::Value>,
+    names: &[&str],
+) -> Result<Option<f64>, WeatherError> {
+    let Some(value) = names.iter().find_map(|name| properties.get(*name)) else {
+        return Ok(None);
+    };
+    if value.is_null() {
+        return Ok(None);
+    }
+    value
+        .as_f64()
+        .map(Some)
+        .ok_or_else(|| WeatherError::ParseError("SIGMET numeric property has invalid type".into()))
+}
+
+fn optional_property_i64(
+    properties: &serde_json::Map<String, serde_json::Value>,
+    names: &[&str],
+) -> Result<Option<i64>, WeatherError> {
+    let Some(value) = names.iter().find_map(|name| properties.get(*name)) else {
+        return Ok(None);
+    };
+    if value.is_null() {
+        return Ok(None);
+    }
+    value.as_i64().map(Some).ok_or_else(|| {
+        WeatherError::ParseError("SIGMET timestamp property has invalid type".into())
+    })
+}
+
 /// Type of meteorological warning / hazard.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -81,7 +112,7 @@ impl SigmetSeverity {
 }
 
 /// An individual SIGMET / AIRMET meteorological warning polygon.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SigmetFeature {
     pub id: String,
     pub name: String,
@@ -136,7 +167,7 @@ impl SigmetFeature {
 }
 
 /// Container dataset for active SIGMET and AIRMET warning features.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct SigmetDataset {
     pub features: Vec<SigmetFeature>,
 }
@@ -190,7 +221,8 @@ impl SigmetDataset {
     ///
     /// # Errors
     /// Returns [`WeatherError::ParseError`] for malformed GeoJSON, unsupported
-    /// geometry, malformed coordinates, or invalid altitude/timestamp values.
+    /// geometry, missing typed properties, malformed coordinates, or invalid
+    /// altitude/timestamp values.
     pub fn from_geojson(geojson_str: &str) -> Result<Self, WeatherError> {
         let parsed: serde_json::Value = serde_json::from_str(geojson_str)
             .map_err(|e| WeatherError::ParseError(format!("Invalid GeoJSON: {e}")))?;
@@ -210,6 +242,11 @@ impl SigmetDataset {
             })?;
 
         for feat in features {
+            if feat.get("type").and_then(|v| v.as_str()) != Some("Feature") {
+                return Err(WeatherError::ParseError(
+                    "SIGMET member must be a Feature".into(),
+                ));
+            }
             let props = feat.get("properties").and_then(|p| p.as_object());
             let geom = feat.get("geometry").and_then(|g| g.as_object());
             let props = props.ok_or_else(|| {
@@ -232,46 +269,46 @@ impl SigmetDataset {
                     .or_else(|| props.get("uid"))
                     .or_else(|| props.get("sigmet_id"))
                     .and_then(|v| v.as_str())
-                    .unwrap_or("SIGMET")
+                    .ok_or_else(|| WeatherError::ParseError("SIGMET id is required".into()))?
                     .to_string();
 
                 let name = props
                     .get("name")
                     .or_else(|| props.get("hazard"))
                     .and_then(|v| v.as_str())
-                    .unwrap_or(&id)
+                    .ok_or_else(|| WeatherError::ParseError("SIGMET name is required".into()))?
                     .to_string();
 
                 let hazard_str = props
                     .get("hazard_type")
                     .or_else(|| props.get("type"))
                     .and_then(|v| v.as_str())
-                    .unwrap_or("OTHER");
+                    .ok_or_else(|| {
+                        WeatherError::ParseError("SIGMET hazard_type is required".into())
+                    })?;
                 let hazard_type = SigmetHazardType::from_str_name(hazard_str);
 
-                let severity_str = props
-                    .get("severity")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("MODERATE");
+                let severity_str =
+                    props
+                        .get("severity")
+                        .and_then(|v| v.as_str())
+                        .ok_or_else(|| {
+                            WeatherError::ParseError("SIGMET severity is required".into())
+                        })?;
                 let severity = SigmetSeverity::from_str_name(severity_str);
+                if !matches!(
+                    severity_str.trim().to_ascii_uppercase().as_str(),
+                    "MODERATE" | "MOD" | "SEVERE" | "SEV"
+                ) {
+                    return Err(WeatherError::ParseError("invalid SIGMET severity".into()));
+                }
 
-                let floor_m = props
-                    .get("lower_limit_m")
-                    .or_else(|| props.get("floor_m"))
-                    .and_then(|v| v.as_f64());
-
-                let ceiling_m = props
-                    .get("upper_limit_m")
-                    .or_else(|| props.get("ceiling_m"))
-                    .and_then(|v| v.as_f64());
-                let valid_from_epoch_s = props
-                    .get("valid_from_epoch_s")
-                    .or_else(|| props.get("valid_from"))
-                    .and_then(|v| v.as_i64());
-                let valid_until_epoch_s = props
-                    .get("valid_until_epoch_s")
-                    .or_else(|| props.get("valid_until"))
-                    .and_then(|v| v.as_i64());
+                let floor_m = optional_property_f64(props, &["lower_limit_m", "floor_m"])?;
+                let ceiling_m = optional_property_f64(props, &["upper_limit_m", "ceiling_m"])?;
+                let valid_from_epoch_s =
+                    optional_property_i64(props, &["valid_from_epoch_s", "valid_from"])?;
+                let valid_until_epoch_s =
+                    optional_property_i64(props, &["valid_until_epoch_s", "valid_until"])?;
                 if floor_m.is_some_and(|v| !v.is_finite())
                     || ceiling_m.is_some_and(|v| !v.is_finite())
                     || matches!((floor_m, ceiling_m), (Some(floor), Some(ceiling)) if floor > ceiling)
@@ -335,6 +372,11 @@ impl SigmetDataset {
                         polygon.push(LatLon::from_degrees(lat_deg, lon_deg, alt_m));
                     }
 
+                    if polygon.first() != polygon.last() {
+                        return Err(WeatherError::ParseError(
+                            "SIGMET polygon ring must be closed".into(),
+                        ));
+                    }
                     let feature = SigmetFeature {
                         id,
                         name,
@@ -356,10 +398,15 @@ impl SigmetDataset {
     }
 
     /// Serializes dataset to a standard GeoJSON FeatureCollection string.
+    ///
+    /// # Errors
+    /// Returns [`WeatherError::ParseError`] when a feature violates the SIGMET
+    /// validation contract or JSON serialization fails.
     pub fn to_geojson(&self) -> Result<String, WeatherError> {
         let mut features_json = Vec::with_capacity(self.features.len());
 
         for feat in &self.features {
+            validate_feature(feat)?;
             let coords: Vec<Vec<f64>> = feat
                 .polygon
                 .iter()
@@ -397,6 +444,11 @@ impl SigmetDataset {
 }
 
 fn validate_feature(feature: &SigmetFeature) -> Result<(), WeatherError> {
+    if feature.id.trim().is_empty() || feature.name.trim().is_empty() {
+        return Err(WeatherError::ParseError(
+            "SIGMET id and name are required".into(),
+        ));
+    }
     if feature.polygon.len() < 4 || feature.polygon.first() != feature.polygon.last() {
         return Err(WeatherError::ParseError(
             "SIGMET polygon must be a closed ring with at least four positions".to_string(),

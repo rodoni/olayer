@@ -248,7 +248,7 @@ impl LocalTangentFrame {
         } else {
             4.0 / 3.0
         };
-        let effective_radius = k_factor * self.ellipsoid.a;
+        let effective_radius = k_factor * self.ellipsoid.a();
         let delta_h = (d_2d * d_2d) / (2.0 * effective_radius);
         let effective_up = enu.up_m - delta_h;
 

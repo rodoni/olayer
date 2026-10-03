@@ -15,7 +15,7 @@ impl Default for HaversineSolver {
 
 impl GeodeticSolver for HaversineSolver {
     const IS_ELLIPSOIDAL: bool = false;
-    const EXPECTED_ACCURACY_METERS: f64 = 1.0;
+    const EXPECTED_ACCURACY_METERS: f64 = 50_000.0;
 
     #[inline]
     fn inverse(
@@ -39,7 +39,7 @@ impl GeodeticSolver for HaversineSolver {
         let a = (dlat / 2.0).sin().powi(2) + lat1.cos() * lat2.cos() * (dlon / 2.0).sin().powi(2);
         let c = 2.0 * a.clamp(0.0, 1.0).sqrt().asin();
 
-        let distance = ellipsoid.authalic_radius * c;
+        let distance = ellipsoid.authalic_radius() * c;
 
         // Initial bearing
         let y = dlon.sin() * lat2.cos();
@@ -51,11 +51,9 @@ impl GeodeticSolver for HaversineSolver {
         let x_final = lat2.cos() * lat1.sin() - lat2.sin() * lat1.cos() * (-dlon).cos();
         let final_bearing = normalize_bearing(y_final.atan2(x_final) + std::f64::consts::PI);
 
-        Ok(GeodeticResult::new(
-            distance,
-            initial_bearing,
-            final_bearing,
-        ))
+        let mut result = GeodeticResult::new(distance, initial_bearing, final_bearing);
+        result.accuracy_meters = Self::EXPECTED_ACCURACY_METERS;
+        Ok(result)
     }
 
     #[inline]
@@ -75,7 +73,7 @@ impl GeodeticSolver for HaversineSolver {
         }
         let lat1 = p1.lat;
         let lon1 = p1.lon;
-        let ad = distance_meters / ellipsoid.authalic_radius; // angular distance
+        let ad = distance_meters / ellipsoid.authalic_radius(); // angular distance
 
         let lat2 = (lat1.sin() * ad.cos() + lat1.cos() * ad.sin() * bearing_rad.cos())
             .clamp(-1.0, 1.0)

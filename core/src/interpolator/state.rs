@@ -76,7 +76,7 @@ pub enum PredictionQuality {
 pub struct SkippedTarget {
     pub id: String,
     pub quality: PredictionQuality,
-    pub age_seconds: f64,
+    pub age_seconds: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -130,6 +130,15 @@ fn test_declarative_provider_from_json() {
 }
 
 #[test]
+fn test_declarative_provider_rejects_malformed_path() {
+    let json = r#"{"library_name":"bad","symbols":{"bad:sym":{"bbox":[0,0,1,1],"anchor":[0,0],"primitives":[{"type":"Path","commands":"M 0 nope"}]}}}"#;
+    assert!(matches!(
+        DeclarativeProvider::from_json(json),
+        Err(SymbologyError::InvalidFormat(_))
+    ));
+}
+
+#[test]
 fn test_registry_chaining_and_errors() {
     let mut registry = SymbolRegistry::new();
     registry.register_provider(Box::new(TestProgProvider));

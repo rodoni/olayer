@@ -229,6 +229,14 @@ fn test_isolines_constant_grid_has_no_degenerate_segments() {
 }
 
 #[test]
+fn sigmet_requires_feature_envelope_and_known_severity() {
+    let invalid_member = r#"{"type":"FeatureCollection","features":[{"type":"Geometry","properties":{},"geometry":{"type":"Polygon","coordinates":[]}}]}"#;
+    assert!(SigmetDataset::from_geojson(invalid_member).is_err());
+    let invalid_severity = r#"{"type":"FeatureCollection","features":[{"type":"Feature","properties":{"id":"x","hazard_type":"TS","severity":"UNKNOWN"},"geometry":{"type":"Polygon","coordinates":[[[0,0],[1,0],[1,1],[0,0]]]}}]}"#;
+    assert!(SigmetDataset::from_geojson(invalid_severity).is_err());
+}
+
+#[test]
 fn test_isolines_saddle_uses_center_decider() {
     let grid = [2.0, 0.0, 0.0, 2.0];
     let segments = generate_isolines_rad(&grid, 2, 2, (0.0, 0.0, 1.0, 1.0), &[1.0]).unwrap();
@@ -261,7 +269,7 @@ fn test_sigmet_parser_requires_feature_collection_and_closed_ring() {
         Err(WeatherError::ParseError(message)) if message.contains("FeatureCollection")
     ));
 
-    let open_ring = r#"{"type":"FeatureCollection","features":[{"type":"Feature","properties":{},"geometry":{"type":"Polygon","coordinates":[[[0,0],[1,0],[1,1]]]}}]}"#;
+    let open_ring = r#"{"type":"FeatureCollection","features":[{"type":"Feature","properties":{"id":"OPEN","name":"Open","hazard_type":"TS","severity":"MODERATE"},"geometry":{"type":"Polygon","coordinates":[[[0,0],[1,0],[1,1]]]}}]}"#;
     assert!(matches!(
         SigmetDataset::from_geojson(open_ring),
         Err(WeatherError::ParseError(message)) if message.contains("closed ring")
@@ -270,7 +278,7 @@ fn test_sigmet_parser_requires_feature_collection_and_closed_ring() {
 
 #[test]
 fn test_sigmet_parser_rejects_reversed_validity_window() {
-    let geojson = r#"{"type":"FeatureCollection","features":[{"type":"Feature","properties":{"valid_from_epoch_s":20,"valid_until_epoch_s":10},"geometry":{"type":"Polygon","coordinates":[[[0,0],[1,0],[1,1],[0,0]]]}}]}"#;
+    let geojson = r#"{"type":"FeatureCollection","features":[{"type":"Feature","properties":{"id":"REV","name":"Reversed","hazard_type":"TS","severity":"MODERATE","valid_from_epoch_s":20,"valid_until_epoch_s":10},"geometry":{"type":"Polygon","coordinates":[[[0,0],[1,0],[1,1],[0,0]]]}}]}"#;
     assert!(matches!(
         SigmetDataset::from_geojson(geojson),
         Err(WeatherError::ParseError(message)) if message.contains("bounds")

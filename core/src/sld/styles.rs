@@ -46,45 +46,45 @@ impl StyleRegistry {
 /// A single SLD rule, grouping scale filters and symbolizers.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RuleStyle {
-    pub(crate) name: String,
-    pub(crate) min_scale: Option<f64>,
-    pub(crate) max_scale: Option<f64>,
-    pub(crate) stroke: Option<StrokeStyle>,
-    pub(crate) fill: Option<FillStyle>,
-    pub(crate) text: Option<TextStyle>,
-    pub(crate) point: Option<PointStyle>,
+    pub name: String,
+    pub min_scale: Option<f64>,
+    pub max_scale: Option<f64>,
+    pub stroke: Option<StrokeStyle>,
+    pub fill: Option<FillStyle>,
+    pub text: Option<TextStyle>,
+    pub point: Option<PointStyle>,
 }
 
 /// Line (stroke) symbolizer properties.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StrokeStyle {
-    pub(crate) color: String,
-    pub(crate) width: f32,
-    pub(crate) dash_array: Option<Vec<f32>>,
+    pub color: String,
+    pub width: f32,
+    pub dash_array: Option<Vec<f32>>,
 }
 
 /// Polygon fill symbolizer properties.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FillStyle {
-    pub(crate) color: String,
-    pub(crate) opacity: f32,
+    pub color: String,
+    pub opacity: f32,
 }
 
 /// Text label symbolizer properties.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TextStyle {
-    pub(crate) label_expression: String,
-    pub(crate) font_family: String,
-    pub(crate) font_size: f32,
-    pub(crate) fill_color: String,
+    pub label_expression: String,
+    pub font_family: String,
+    pub font_size: f32,
+    pub fill_color: String,
 }
 
 /// Point / marker symbolizer properties.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PointStyle {
-    pub(crate) well_known_name: String,
-    pub(crate) size: f32,
-    pub(crate) fill_color: Option<String>,
-    pub(crate) stroke_color: Option<String>,
-    pub(crate) stroke_width: Option<f32>,
+    pub well_known_name: String,
+    pub size: f32,
+    pub fill_color: Option<String>,
+    pub stroke_color: Option<String>,
+    pub stroke_width: Option<f32>,
 }

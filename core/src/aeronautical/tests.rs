@@ -1,8 +1,8 @@
 use crate::aeronautical::aixm_parser::parse_aixm_51_str;
 use crate::aeronautical::geojson_parser::{export_dataset_to_geojson, parse_geojson_aviation_str};
 use crate::aeronautical::types::{
-    AeronauticalAirport, AeronauticalAirway, AeronauticalRunway, AirspaceType, AirwaySegment,
-    AirwayType, AltitudeLimit, AltitudeReference, NavaidType, SegmentDirection,
+    AeronauticalAirport, AeronauticalAirway, AeronauticalNavaid, AeronauticalRunway, AirspaceType,
+    AirwaySegment, AirwayType, AltitudeLimit, AltitudeReference, NavaidType, SegmentDirection,
 };
 use crate::geodesy::coords::LatLon;
 
@@ -298,6 +298,41 @@ fn rejects_invalid_geojson_feature_envelopes_and_empty_airways() {
         );
         assert!(parse_geojson_aviation_str(&input).is_err());
     }
+}
+
+#[test]
+fn validation_rejects_non_positive_frequency_and_discontinuous_airway() {
+    let point = LatLon::from_degrees(50.0, 0.0, 0.0);
+    let navaid = AeronauticalNavaid {
+        ident: "X".into(),
+        name: "X".into(),
+        navaid_type: NavaidType::Vor,
+        coords: point,
+        frequency_mhz: Some(0.0),
+        channel: None,
+        elevation_m: None,
+        magnetic_variation_deg: None,
+    };
+    assert!(navaid.validate().is_err());
+    let segment = |from: &str, to: &str, from_coords: LatLon, to_coords: LatLon| AirwaySegment {
+        from_ident: from.into(),
+        to_ident: to.into(),
+        from_coords,
+        to_coords,
+        mea_m: None,
+        maa_m: None,
+        inbound_bearing_deg: None,
+        direction: SegmentDirection::Bidirectional,
+    };
+    let airway = AeronauticalAirway {
+        ident: "A1".into(),
+        route_type: AirwayType::Conventional,
+        segments: vec![
+            segment("A", "B", point, point),
+            segment("C", "D", point, point),
+        ],
+    };
+    assert!(airway.validate().is_err());
 }
 
 #[test]

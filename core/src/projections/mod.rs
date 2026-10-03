@@ -37,6 +37,27 @@ pub trait Projection {
     #[inline]
     fn update_center(&mut self, _center_lat_rad: f64, _center_lon_rad: f64) {}
 
+    /// Updates the projection center after validating geodetic bounds.
+    ///
+    /// # Errors
+    /// Returns [`ProjectionError::InvalidInput`] when either center coordinate is invalid.
+    fn try_update_center(
+        &mut self,
+        center_lat_rad: f64,
+        center_lon_rad: f64,
+    ) -> Result<(), ProjectionError> {
+        if !center_lat_rad.is_finite()
+            || !center_lon_rad.is_finite()
+            || !(-std::f64::consts::FRAC_PI_2..=std::f64::consts::FRAC_PI_2)
+                .contains(&center_lat_rad)
+            || !(-std::f64::consts::PI..=std::f64::consts::PI).contains(&center_lon_rad)
+        {
+            return Err(ProjectionError::InvalidInput);
+        }
+        self.update_center(center_lat_rad, center_lon_rad);
+        Ok(())
+    }
+
     /// Generates a View-Projection matrix 4x4 (column-major `[f32; 16]`) for the given [`CameraState`].
     ///
     /// This default implementation is valid for all planar projections. Individual
@@ -76,6 +97,9 @@ pub trait Projection {
         let proj = matrix::Matrix4::ortho(-w / 2.0, w / 2.0, -h / 2.0, h / 2.0, -1000.0, 1000.0)?;
         let vp = proj.multiply(&view);
 
+        if !vp.is_finite() {
+            return Err(ProjectionError::InvalidInput);
+        }
         Ok(vp.into_array())
     }
 }

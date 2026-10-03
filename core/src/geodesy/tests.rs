@@ -143,7 +143,7 @@ fn test_lla_enu_roundtrip() {
 
     // The Up component equals the height difference minus the Earth curvature drop
     // over the horizontal ENU distance (≈15.1 km). Drop ≈ d² / (2·a).
-    let expected_up = 200.0 - (enu.distance_2d().powi(2) / (2.0 * ellipsoid.a));
+    let expected_up = 200.0 - (enu.distance_2d().powi(2) / (2.0 * ellipsoid.a()));
     assert!(
         (enu.up - expected_up).abs() < 1.0,
         "ENU up mismatch: expected ~{}, got {}",
@@ -333,7 +333,7 @@ fn test_vincenty_sub_meter_roundtrip() {
 
 #[test]
 fn test_solver_metadata() {
-    assert_eq!(HaversineSolver::EXPECTED_ACCURACY_METERS, 1.0);
+    assert_eq!(HaversineSolver::EXPECTED_ACCURACY_METERS, 50_000.0);
     assert_eq!(VincentySolver::EXPECTED_ACCURACY_METERS, 1e-3);
 }
 

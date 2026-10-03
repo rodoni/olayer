@@ -5,12 +5,12 @@
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Ellipsoid {
-    pub a: f64,               // Semi-major axis in meters
-    pub b: f64,               // Semi-minor axis in meters
-    pub f: f64,               // Flattening
-    pub e_sq: f64,            // First eccentricity squared
-    pub e_prime_sq: f64,      // Second eccentricity squared
-    pub authalic_radius: f64, // Authalic (mean) spherical radius for Haversine approximations
+    a: f64,
+    b: f64,
+    f: f64,
+    e_sq: f64,
+    e_prime_sq: f64,
+    authalic_radius: f64,
 }
 
 impl Ellipsoid {
@@ -34,6 +34,13 @@ impl Ellipsoid {
         // Authalic radius: radius of a sphere with the same surface area as the ellipsoid.
         // Approximation used for spherical distance formulas (Haversine).
         let authalic_radius = (2.0 * a + b) / 3.0;
+        if !b.is_finite()
+            || !e_sq.is_finite()
+            || !e_prime_sq.is_finite()
+            || !authalic_radius.is_finite()
+        {
+            return Err(GeodesyError::InvalidSemiMajorAxis(a));
+        }
         Ok(Self {
             a,
             b,
@@ -67,6 +74,31 @@ impl Ellipsoid {
     pub fn radius_of_curvature_prime_vertical(&self, lat_rad: f64) -> f64 {
         let sin_lat = lat_rad.sin();
         self.a / (1.0 - self.e_sq * sin_lat * sin_lat).sqrt()
+    }
+
+    #[inline]
+    pub const fn a(&self) -> f64 {
+        self.a
+    }
+    #[inline]
+    pub const fn b(&self) -> f64 {
+        self.b
+    }
+    #[inline]
+    pub const fn f(&self) -> f64 {
+        self.f
+    }
+    #[inline]
+    pub const fn e_sq(&self) -> f64 {
+        self.e_sq
+    }
+    #[inline]
+    pub const fn e_prime_sq(&self) -> f64 {
+        self.e_prime_sq
+    }
+    #[inline]
+    pub const fn authalic_radius(&self) -> f64 {
+        self.authalic_radius
     }
 }
 use crate::geodesy::errors::GeodesyError;

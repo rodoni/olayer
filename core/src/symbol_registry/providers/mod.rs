@@ -2,7 +2,7 @@ use crate::sld::StyleRegistry;
 use crate::symbol_registry::errors::SymbologyError;
 use crate::symbol_registry::primitives::ResolvedSymbol;
 
-pub trait SymbologyProvider {
+pub trait SymbologyProvider: Send + Sync {
     /// Returns the provider's stable human-readable name.
     fn name(&self) -> &str;
     /// Returns whether this provider accepts the supplied code.

@@ -73,6 +73,7 @@ impl NavaidType {
 ///
 /// Codes are prefixed with `icao:` (e.g. `icao:vor`, `icao:ndb`, `icao:vordme`,
 /// `icao:airport`, `icao:waypoint`).
+#[derive(Debug, Clone)]
 pub struct IcaoProvider {
     provider_name: &'static str,
 }
@@ -307,7 +308,9 @@ impl SymbologyProvider for IcaoProvider {
 
     #[inline]
     fn can_resolve(&self, code: &str) -> bool {
-        code.starts_with("icao:") && NavaidType::from_code(code).is_some()
+        code.get(..5)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("icao:"))
+            && NavaidType::from_code(code).is_some()
     }
 
     fn resolve(

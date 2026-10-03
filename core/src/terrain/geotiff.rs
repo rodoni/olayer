@@ -85,6 +85,7 @@ impl GeoTiffTile {
         let mut pixel_scale: Option<[f64; 3]> = None;
         let mut tiepoints: Vec<[f64; 6]> = Vec::new();
         let mut nodata_val: Option<f64> = None;
+        let mut samples_per_pixel = 1usize;
 
         let entry_base = entry_count_end;
         for i in 0..num_entries {
@@ -157,6 +158,10 @@ impl GeoTiffTile {
                     sample_format =
                         read_field_val_u32(data, field_type, count, val_or_offset, is_le)? as u16;
                 }
+                277 => {
+                    samples_per_pixel =
+                        read_field_val_u32(data, field_type, count, val_or_offset, is_le)? as usize;
+                }
                 33550 => {
                     // ModelPixelScaleTag [ScaleX, ScaleY, ScaleZ]
                     if count >= 3 {
@@ -204,6 +209,11 @@ impl GeoTiffTile {
                 "too many GeoTIFF raster strips".to_string(),
             ));
         }
+        if samples_per_pixel != 1 {
+            return Err(TerrainError::GeoTiffError(
+                "multi-band GeoTIFF rasters are not supported for elevation".to_string(),
+            ));
+        }
 
         // Calculate geographic bounding box in radians
         let bounds_rad = if let (Some(scale), Some(tp)) = (pixel_scale, tiepoints.first()) {
@@ -233,6 +243,24 @@ impl GeoTiffTile {
                 std::f64::consts::PI,
             )
         };
+        if !bounds_rad.0.is_finite()
+            || !bounds_rad.1.is_finite()
+            || !bounds_rad.2.is_finite()
+            || !bounds_rad.3.is_finite()
+            || pixel_scale.is_some_and(|scale| {
+                !scale[0].is_finite()
+                    || !scale[1].is_finite()
+                    || scale[0] <= 0.0
+                    || scale[1] <= 0.0
+                    || !scale[2].is_finite()
+            })
+            || tiepoints.iter().flatten().any(|value| !value.is_finite())
+            || nodata_val.is_some_and(|value| !value.is_finite())
+        {
+            return Err(TerrainError::GeoTiffError(
+                "GeoTIFF metadata must be finite".to_string(),
+            ));
+        }
 
         // Extract elevation values from raster strips or tiled blocks.
         let is_tiled = tile_width.is_some();
@@ -250,8 +278,14 @@ impl GeoTiffTile {
             ));
         }
         let mut elevations = vec![None; raster_len];
+        let mut decoded_samples = 0usize;
         let tiles_across = tile_width.map(|tile| width.div_ceil(tile)).unwrap_or(0);
         for (strip_index, &strip_offset) in strip_offsets.iter().enumerate() {
+            if !strip_byte_counts.is_empty() && strip_byte_counts.len() != strip_offsets.len() {
+                return Err(TerrainError::GeoTiffError(
+                    "GeoTIFF strip offsets/counts are incomplete".to_string(),
+                ));
+            }
             if strip_offset >= data.len() {
                 return Err(TerrainError::GeoTiffError(
                     "raster strip offset out of bounds".to_string(),
@@ -296,6 +330,9 @@ impl GeoTiffTile {
                 is_le,
                 nodata_val,
             )?;
+            decoded_samples = decoded_samples.checked_add(values.len()).ok_or_else(|| {
+                TerrainError::GeoTiffError("raster sample count overflow".to_string())
+            })?;
             if is_tiled {
                 let tile_width = tile_width
                     .ok_or_else(|| TerrainError::GeoTiffError("missing tile width".to_string()))?;
@@ -327,6 +364,12 @@ impl GeoTiffTile {
                     elevations[target] = value;
                 }
             }
+        }
+
+        if decoded_samples < raster_len {
+            return Err(TerrainError::GeoTiffError(
+                "GeoTIFF raster strips do not cover the complete raster".to_string(),
+            ));
         }
 
         Ok(Self {
@@ -645,9 +688,28 @@ fn read_offset_list(
         ));
     }
     let mut list = Vec::with_capacity(count);
+    let element_size = match field_type {
+        3 => 2,
+        4 => 4,
+        _ => return Ok(list),
+    };
     if count == 1 {
         let val = read_field_val_u32(data, field_type, count, val_offset, is_le)? as usize;
         list.push(val);
+        return Ok(list);
+    }
+    if count
+        .checked_mul(element_size)
+        .is_some_and(|size| size <= 4)
+    {
+        for i in 0..count {
+            let offset = val_offset + i * element_size;
+            list.push(if element_size == 2 {
+                read_u16(&data[offset..offset + 2], is_le) as usize
+            } else {
+                read_u32(&data[offset..offset + 4], is_le) as usize
+            });
+        }
         return Ok(list);
     }
 

@@ -89,9 +89,14 @@ pub fn generate_isolines_rad(
     fn interp(iso: f64, val_a: f64, val_b: f64) -> f64 {
         let diff = val_b - val_a;
         if diff.abs() < 1e-12 {
-            0.0
+            0.5
         } else {
-            ((iso - val_a) / diff).clamp(0.0, 1.0)
+            let t = (iso - val_a) / diff;
+            if t.is_finite() {
+                t.clamp(0.0, 1.0)
+            } else {
+                0.5
+            }
         }
     }
 

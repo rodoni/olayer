@@ -21,7 +21,7 @@ pub fn lla_to_ecef(lla: &LatLon, ellipsoid: &Ellipsoid) -> Ecef {
 
     let x = (n + h) * cos_lat * cos_lon;
     let y = (n + h) * cos_lat * sin_lon;
-    let z = (n * (1.0 - ellipsoid.e_sq) + h) * sin_lat;
+    let z = (n * (1.0 - ellipsoid.e_sq()) + h) * sin_lat;
 
     Ecef::new(x, y, z)
 }
@@ -33,10 +33,10 @@ pub fn ecef_to_lla(ecef: &Ecef, ellipsoid: &Ellipsoid) -> LatLon {
     let x = ecef.x;
     let y = ecef.y;
     let z = ecef.z;
-    let a = ellipsoid.a;
-    let b = ellipsoid.b;
-    let e_sq = ellipsoid.e_sq;
-    let e_prime_sq = ellipsoid.e_prime_sq;
+    let a = ellipsoid.a();
+    let b = ellipsoid.b();
+    let e_sq = ellipsoid.e_sq();
+    let e_prime_sq = ellipsoid.e_prime_sq();
 
     let p = x.hypot(y);
 

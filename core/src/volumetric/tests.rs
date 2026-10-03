@@ -74,6 +74,21 @@ fn test_airspace_volume_mesh_generation() {
 }
 
 #[test]
+fn closed_ring_is_normalized_and_ribbon_v_is_bounded() {
+    let a = LatLon::from_degrees(51.0, -0.5, 0.0);
+    let b = LatLon::from_degrees(51.0, 0.5, 0.0);
+    let c = LatLon::from_degrees(51.5, 0.5, 0.0);
+    let d = LatLon::from_degrees(51.5, -0.5, 0.0);
+    let mesh = generate_airspace_volume_mesh(&[a, b, c, d, a], 100.0, 200.0).unwrap();
+    assert_eq!(mesh.indices.len(), 36);
+    let ribbon = generate_trajectory_ribbon_mesh(&[a, b, c], 10.0, None).unwrap();
+    assert!(ribbon
+        .vertices
+        .iter()
+        .all(|v| v.uv[1].is_finite() && (0.0..=1.0).contains(&v.uv[1])));
+}
+
+#[test]
 fn test_trajectory_ribbon_mesh_generation() {
     let waypoints = vec![
         LatLon::from_degrees(40.0, -74.0, 1000.0),

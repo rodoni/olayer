@@ -5,6 +5,8 @@ use crate::geodesy::solvers::{GeodeticSolver, HaversineSolver, VincentySolver};
 use serde::{Deserialize, Serialize};
 use std::f64::consts::PI;
 
+const MAX_BUFFER_SEGMENTS: usize = 4096;
+
 /// Result of a cross-track error and along-track distance calculation.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct RouteDeviation {
@@ -29,28 +31,36 @@ pub fn compute_route_deviation(
     segment_end: &LatLon,
     pos: &LatLon,
 ) -> RouteDeviation {
+    compute_route_deviation_checked(segment_start, segment_end, pos).unwrap_or(RouteDeviation {
+        cross_track_error_meters: f64::NAN,
+        along_track_distance_meters: f64::NAN,
+        nearest_point_on_route: *segment_start,
+    })
+}
+
+/// Computes route deviation while preserving solver failures for callers that need diagnostics.
+///
+/// # Errors
+/// Returns the underlying geodesy error when both ellipsoidal and spherical solving fail.
+pub fn compute_route_deviation_checked(
+    segment_start: &LatLon,
+    segment_end: &LatLon,
+    pos: &LatLon,
+) -> Result<RouteDeviation, crate::geodesy::errors::GeodesyError> {
     let ell = Ellipsoid::wgs84();
     let solver = VincentySolver;
-    let earth_radius = ell.a;
+    let earth_radius = ell.a();
 
     // Segment bearing theta12 and distance
     let seg_res = solver
         .inverse(segment_start, segment_end, &ell)
-        .unwrap_or_else(|_| {
-            HaversineSolver
-                .inverse(segment_start, segment_end, &ell)
-                .unwrap_or_else(|_| crate::geodesy::solvers::GeodeticResult::new(0.0, 0.0, 0.0))
-        });
+        .or_else(|_| HaversineSolver.inverse(segment_start, segment_end, &ell))?;
     let theta12 = seg_res.initial_bearing;
 
     // Bearing and distance from start to position pos
     let pos_res = solver
         .inverse(segment_start, pos, &ell)
-        .unwrap_or_else(|_| {
-            HaversineSolver
-                .inverse(segment_start, pos, &ell)
-                .unwrap_or_else(|_| crate::geodesy::solvers::GeodeticResult::new(0.0, 0.0, 0.0))
-        });
+        .or_else(|_| HaversineSolver.inverse(segment_start, pos, &ell))?;
     let d13 = pos_res.distance;
     let theta13 = pos_res.initial_bearing;
 
@@ -89,11 +99,11 @@ pub fn compute_route_deviation(
             .unwrap_or(*segment_start)
     };
 
-    RouteDeviation {
+    Ok(RouteDeviation {
         cross_track_error_meters: xtk_meters,
         along_track_distance_meters: atd_meters,
         nearest_point_on_route: nearest_point,
-    }
+    })
 }
 
 /// Computes the intersection coordinate of two geodesic segments $(P_1 \rightarrow P_2)$ and $(P_3 \rightarrow P_4)$,
@@ -273,13 +283,14 @@ impl GeodesicPolygon {
 
         let ell = Ellipsoid::wgs84();
         let solver = VincentySolver;
-        let segs = num_segments.max(1);
+        let segs = num_segments.clamp(1, MAX_BUFFER_SEGMENTS);
 
         // Determine polygon orientation via spherical excess / winding
         let is_ccw = self.is_counter_clockwise();
         let offset_angle = if is_ccw { PI / 2.0 } else { -PI / 2.0 };
 
-        let mut buffered_vertices = Vec::with_capacity(n * (segs + 1));
+        let capacity = n.saturating_mul(segs.saturating_add(1));
+        let mut buffered_vertices = Vec::with_capacity(capacity);
 
         for i in 0..n {
             let prev_idx = if i == 0 { n - 1 } else { i - 1 };

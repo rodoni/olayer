@@ -328,6 +328,14 @@ impl AeronauticalAirspace {
                 "ground cannot be an airspace upper limit".into(),
             ));
         }
+        let comparable_limits = self.lower_limit.reference() == self.upper_limit.reference()
+            || (self.lower_limit.reference() == AltitudeReference::Ground
+                && self.upper_limit.reference() == AltitudeReference::Amsl);
+        if comparable_limits && self.lower_limit.value_m() > self.upper_limit.value_m() {
+            return Err(AeronauticalError::InvalidAltitude(
+                "lower limit exceeds upper limit".into(),
+            ));
+        }
         if self.boundary.len() < 4 || self.boundary.first() != self.boundary.last() {
             return Err(AeronauticalError::FormatError(
                 "airspace boundary must be a closed ring".into(),
@@ -395,9 +403,14 @@ impl AeronauticalNavaid {
             (self.magnetic_variation_deg, "magnetic_variation_deg"),
         ] {
             if let Some(value) = value {
-                if !value.is_finite() {
+                if !value.is_finite() || (field == "frequency_mhz" && value <= 0.0) {
                     return Err(AeronauticalError::FormatError(format!(
-                        "{field} must be finite"
+                        "{field} must be finite{}",
+                        if field == "frequency_mhz" {
+                            " and positive"
+                        } else {
+                            ""
+                        }
                     )));
                 }
             }
@@ -533,7 +546,23 @@ impl AeronauticalAirway {
                 "airway segments".into(),
             ));
         }
-        self.segments.iter().try_for_each(AirwaySegment::validate)
+        self.segments.iter().try_for_each(AirwaySegment::validate)?;
+        for pair in self.segments.windows(2) {
+            let [first, second] = pair else { continue };
+            let coordinates_match = |a: &LatLon, b: &LatLon| {
+                (a.lat - b.lat).abs() <= 1e-12
+                    && (a.lon - b.lon).abs() <= 1e-12
+                    && (a.height - b.height).abs() <= 1e-6
+            };
+            if first.to_ident != second.from_ident
+                || !coordinates_match(&first.to_coords, &second.from_coords)
+            {
+                return Err(AeronauticalError::FormatError(
+                    "airway segments must be continuous".into(),
+                ));
+            }
+        }
+        Ok(())
     }
 }
 

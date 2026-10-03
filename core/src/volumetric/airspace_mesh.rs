@@ -25,7 +25,11 @@ pub fn generate_airspace_volume_mesh(
     floor_m: f64,
     ceiling_m: f64,
 ) -> Result<VolumetricMesh, VolumetricError> {
-    let n = polygon.len();
+    let mut normalized = polygon.to_vec();
+    if normalized.first() == normalized.last() {
+        normalized.pop();
+    }
+    let n = normalized.len();
     if n < 3 {
         return Err(VolumetricError::InsufficientVertices {
             expected: 3,
@@ -42,7 +46,7 @@ pub fn generate_airspace_volume_mesh(
     // Compute polygon centroid for local tangent plane projection
     let mut sum_lat = 0.0;
     let mut sum_lon = 0.0;
-    for pt in polygon {
+    for pt in &normalized {
         if !pt.lat.is_finite()
             || !pt.lon.is_finite()
             || !pt.height.is_finite()
@@ -54,7 +58,7 @@ pub fn generate_airspace_volume_mesh(
             ));
         }
         sum_lat += pt.lat;
-        let reference = polygon[0].lon;
+        let reference = normalized[0].lon;
         let mut lon = pt.lon;
         while lon - reference > std::f64::consts::PI {
             lon -= 2.0 * std::f64::consts::PI;
@@ -72,7 +76,7 @@ pub fn generate_airspace_volume_mesh(
     let mut floor_ecef = Vec::with_capacity(n);
     let mut ceil_ecef = Vec::with_capacity(n);
 
-    for pt in polygon {
+    for pt in &normalized {
         let enu = frame.lla_to_enu(&LatLon::new(pt.lat, pt.lon, 0.0));
         local_2d.push([enu.east_m, enu.north_m]);
 
@@ -196,6 +200,11 @@ pub fn generate_airspace_volume_mesh(
             ny /= len;
             nz /= len;
         }
+        if nx * p0[0] + ny * p0[1] + nz * p0[2] < 0.0 {
+            nx = -nx;
+            ny = -ny;
+            nz = -nz;
+        }
         let normal_top = [nx as f32, ny as f32, nz as f32];
 
         let base_idx = vertices.len() as u32;
@@ -244,6 +253,11 @@ pub fn generate_airspace_volume_mesh(
             nx /= len;
             ny /= len;
             nz /= len;
+        }
+        if nx * p0[0] + ny * p0[1] + nz * p0[2] > 0.0 {
+            nx = -nx;
+            ny = -ny;
+            nz = -nz;
         }
         let normal_bottom = [nx as f32, ny as f32, nz as f32];
 

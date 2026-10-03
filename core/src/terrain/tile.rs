@@ -46,7 +46,13 @@ impl DtedTile {
 
         let origin_lon = parsed_lon.floor() as i32;
         let origin_lat = parsed_lat.floor() as i32;
-        if parsed_lon.fract() != 0.0 || parsed_lat.fract() != 0.0 {
+        if !parsed_lon.is_finite()
+            || !parsed_lat.is_finite()
+            || !(-180.0..=180.0).contains(&parsed_lon)
+            || !(-90.0..=90.0).contains(&parsed_lat)
+            || parsed_lon.fract() != 0.0
+            || parsed_lat.fract() != 0.0
+        {
             return Err(TerrainError::InvalidHeader(
                 "DTED origins must be whole degrees".to_string(),
             ));
@@ -115,6 +121,20 @@ impl DtedTile {
                 let val_bytes = [data[idx], data[idx + 1]];
                 let elev = i16::from_be_bytes(val_bytes);
                 elevations[c * num_rows + r] = elev;
+            }
+
+            let checksum_end = offset + 7 + num_rows * 2;
+            let expected =
+                u32::from_be_bytes(data[checksum_end..checksum_end + 4].try_into().map_err(
+                    |_| TerrainError::MalformedData("invalid DTED checksum".to_string()),
+                )?);
+            let actual = data[offset..checksum_end]
+                .iter()
+                .fold(0u32, |sum, byte| sum.wrapping_add(u32::from(*byte)));
+            if expected != 0 && expected != actual {
+                return Err(TerrainError::MalformedData(format!(
+                    "DTED checksum mismatch in column {c}"
+                )));
             }
 
             offset += col_size;

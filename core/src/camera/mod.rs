@@ -133,6 +133,9 @@ impl CameraState {
 
         let proj = Matrix4::ortho(-w / 2.0, w / 2.0, -h / 2.0, h / 2.0, -1000.0, 1000.0)?;
         let vp = proj.multiply(&view);
+        if !vp.is_finite() {
+            return Err(CameraError::InvalidProjectionValue { name: "matrix" });
+        }
 
         Ok(vp.into_array())
     }
@@ -190,6 +193,9 @@ impl CameraState {
         let proj_mat = Matrix4::perspective(fovy, aspect, near, far)?;
 
         let vp = proj_mat.multiply(&view);
+        if !vp.is_finite() {
+            return Err(CameraError::InvalidProjectionValue { name: "matrix" });
+        }
         Ok(vp.into_array())
     }
 
@@ -202,7 +208,7 @@ impl CameraState {
     /// This method does not panic.
     pub fn get_3d_view_proj_matrix(&self) -> Result<[f32; 16], CameraError> {
         self.validate()?;
-        let earth_radius = crate::geodesy::ellipsoid::Ellipsoid::wgs84().a;
+        let earth_radius = crate::geodesy::ellipsoid::Ellipsoid::wgs84().a();
         let base_distance = 15000000.0_f64;
         let distance = positive_f32(
             earth_radius + (base_distance / self.zoom),
@@ -238,6 +244,9 @@ impl CameraState {
         let proj = Matrix4::perspective(fovy, aspect, near, far)?;
 
         let vp = proj.multiply(&view);
+        if !vp.is_finite() {
+            return Err(CameraError::InvalidProjectionValue { name: "matrix" });
+        }
         Ok(vp.into_array())
     }
 }

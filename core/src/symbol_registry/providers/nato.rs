@@ -105,6 +105,7 @@ fn strip_prefix_case_insensitive<'a>(s: &'a str, prefix: &str) -> Option<&'a str
 /// The provider generates the standard frame shape (circle for unknown, rectangle
 /// for friend, diamond for hostile, square for neutral) plus a simple icon based on
 /// the battle dimension.
+#[derive(Debug, Clone)]
 pub struct NatoProvider {
     provider_name: &'static str,
 }
@@ -333,7 +334,11 @@ impl SymbologyProvider for NatoProvider {
         let Some(payload) = payload else {
             return false;
         };
-        if payload.len() == 15 && payload.bytes().all(|byte| byte.is_ascii_alphanumeric()) {
+        if (15..=16).contains(&payload.len())
+            && payload
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        {
             return true;
         }
         let mut parts = payload.split(':');
@@ -361,6 +366,7 @@ impl SymbologyProvider for NatoProvider {
                 | "subsurface"
                 | "satellite"
                 | "space"
+                | "air"
         )
     }
 
@@ -372,7 +378,10 @@ impl SymbologyProvider for NatoProvider {
         let affiliation = Self::parse_affiliation(code);
         let dimension = Self::parse_dimension(code);
 
-        let (frame_path, bbox) = Self::build_frame(affiliation);
+        if !self.can_resolve(code) {
+            return Err(SymbologyError::SymbolNotFound(code.to_string()));
+        }
+        let (frame_path, mut bbox) = Self::build_frame(affiliation);
         let frame_color = affiliation.frame_color();
         let fill_color = affiliation.fill_color();
 
@@ -387,6 +396,7 @@ impl SymbologyProvider for NatoProvider {
 
         // For hostile units, add a direction-of-movement indicator line
         if affiliation == Affiliation::Hostile {
+            bbox.3 = bbox.3.max(22.0);
             primitives.push(SymbolPrimitive::Path {
                 commands: "M 0,16 L 0,22".to_string(),
                 fill: None,

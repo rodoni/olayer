@@ -30,12 +30,12 @@ impl Stereographic {
             || !(-std::f64::consts::FRAC_PI_2..=std::f64::consts::FRAC_PI_2)
                 .contains(&center_lat_rad)
             || !(-std::f64::consts::PI..=std::f64::consts::PI).contains(&center_lon_rad)
-            || ellipsoid.a <= 0.0
+            || ellipsoid.a() <= 0.0
         {
             return Err(ProjectionError::InvalidInput);
         }
-        let a = ellipsoid.a;
-        let e_sq = ellipsoid.e_sq;
+        let a = ellipsoid.a();
+        let e_sq = ellipsoid.e_sq();
         let e = e_sq.sqrt();
 
         let phi_c = center_lat_rad;
@@ -63,8 +63,15 @@ impl Stereographic {
 impl Projection for Stereographic {
     #[inline]
     fn update_center(&mut self, center_lat_rad: f64, center_lon_rad: f64) {
-        let a = self.ellipsoid.a;
-        let e_sq = self.ellipsoid.e_sq;
+        if !center_lat_rad.is_finite()
+            || !center_lon_rad.is_finite()
+            || center_lat_rad.abs() > std::f64::consts::FRAC_PI_2
+            || center_lon_rad.abs() > std::f64::consts::PI
+        {
+            return;
+        }
+        let a = self.ellipsoid.a();
+        let e_sq = self.ellipsoid.e_sq();
         let e = self.e;
 
         let phi_c = center_lat_rad;

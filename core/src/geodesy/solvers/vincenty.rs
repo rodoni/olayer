@@ -45,12 +45,14 @@ impl GeodeticSolver for VincentySolver {
                 distance: 0.0,
                 initial_bearing: 0.0,
                 final_bearing: 0.0,
+                accuracy_meters: Self::EXPECTED_ACCURACY_METERS,
+                used_fallback: false,
             });
         }
 
-        let f = ellipsoid.f;
-        let a = ellipsoid.a;
-        let b = ellipsoid.b;
+        let f = ellipsoid.f();
+        let a = ellipsoid.a();
+        let b = ellipsoid.b();
 
         // Reduced latitudes (guard against tan(pi/2) blow-up at poles)
         let u1 = if lat1.abs() >= std::f64::consts::FRAC_PI_2 - 1e-12 {
@@ -128,7 +130,9 @@ impl GeodeticSolver for VincentySolver {
 
         if !converged || lambda.is_nan() {
             // Fallback to Haversine for antipodal points or non-convergence
-            return HaversineSolver.inverse(p1, p2, ellipsoid);
+            let mut result = HaversineSolver.inverse(p1, p2, ellipsoid)?;
+            result.used_fallback = true;
+            return Ok(result);
         }
 
         let u_sq = cos2_alpha * (a * a - b * b) / (b * b);
@@ -161,11 +165,9 @@ impl GeodeticSolver for VincentySolver {
                 .atan2(-sin_u1 * cos_u2 + cos_u1 * sin_u2 * final_cos_lambda),
         );
 
-        Ok(GeodeticResult::new(
-            distance,
-            initial_bearing,
-            final_bearing,
-        ))
+        let mut result = GeodeticResult::new(distance, initial_bearing, final_bearing);
+        result.accuracy_meters = Self::EXPECTED_ACCURACY_METERS;
+        Ok(result)
     }
 
     #[inline]
@@ -188,9 +190,9 @@ impl GeodeticSolver for VincentySolver {
             return Ok(*p1);
         }
 
-        let f = ellipsoid.f;
-        let a = ellipsoid.a;
-        let b = ellipsoid.b;
+        let f = ellipsoid.f();
+        let a = ellipsoid.a();
+        let b = ellipsoid.b();
 
         let alpha1 = bearing_rad;
         let sin_alpha1 = alpha1.sin();

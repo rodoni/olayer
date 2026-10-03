@@ -424,6 +424,12 @@ fn test_scale_boundary_inclusion() {
 }
 
 #[test]
+fn rejects_reversed_scale_range() {
+    let xml = r#"<StyledLayerDescriptor><NamedLayer><Name>roads</Name><UserStyle><FeatureTypeStyle><Rule><Name>bad</Name><MinScaleDenominator>5000</MinScaleDenominator><MaxScaleDenominator>1000</MaxScaleDenominator></Rule></FeatureTypeStyle></UserStyle></NamedLayer></StyledLayerDescriptor>"#;
+    assert!(parse(xml).is_err());
+}
+
+#[test]
 fn test_missing_layer_returns_empty() {
     let xml = r#"
 <StyledLayerDescriptor>

@@ -96,6 +96,22 @@ pub fn generate_trajectory_ribbon_mesh(
     let half_width = ribbon_width_m * 0.5;
     let mut vertices = Vec::with_capacity(n * 2);
     let mut cumulative_dist = 0.0;
+    let total_dist = ecef_points
+        .windows(2)
+        .map(|pair| {
+            let d = [
+                pair[1][0] - pair[0][0],
+                pair[1][1] - pair[0][1],
+                pair[1][2] - pair[0][2],
+            ];
+            (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()
+        })
+        .sum::<f64>();
+    if !total_dist.is_finite() || total_dist <= 0.0 {
+        return Err(VolumetricError::DegenerateGeometry(
+            "trajectory length must be finite and positive".into(),
+        ));
+    }
 
     // Helper vector math
     let normalize3 = |v: [f64; 3]| -> [f64; 3] {
@@ -195,7 +211,7 @@ pub fn generate_trajectory_ribbon_mesh(
             ((waypoints[i].height - min_alt) / alt_span).clamp(0.0, 1.0) as f32
         };
 
-        let v_coord = cumulative_dist as f32;
+        let v_coord = (cumulative_dist / total_dist).clamp(0.0, 1.0) as f32;
 
         // Left vertex (u = 0.0)
         let p_left = [

@@ -20,6 +20,7 @@ struct DeclarativeSymbolDto {
 }
 
 /// A provider that loads symbols from a JSON declaration.
+#[derive(Debug, Clone)]
 pub struct DeclarativeProvider {
     library_name: String,
     symbols: AHashMap<String, ResolvedSymbol>,
@@ -82,7 +83,7 @@ fn validate_symbol(code: &str, symbol: &DeclarativeSymbolDto) -> Result<(), Symb
             SymbolPrimitive::Path {
                 commands, stroke, ..
             } => {
-                if commands.trim().is_empty() || stroke.as_ref().is_some_and(|s| !valid_stroke(s)) {
+                if !valid_path(commands) || stroke.as_ref().is_some_and(|s| !valid_stroke(s)) {
                     return Err(SymbologyError::InvalidFormat(format!(
                         "invalid path for symbol '{code}'"
                     )));
@@ -96,6 +97,10 @@ fn validate_symbol(code: &str, symbol: &DeclarativeSymbolDto) -> Result<(), Symb
                     || !r.is_finite()
                     || *r < 0.0
                     || stroke.as_ref().is_some_and(|s| !valid_stroke(s))
+                    || *cx - *r < symbol.bbox.0
+                    || *cx + *r > symbol.bbox.2
+                    || *cy - *r < symbol.bbox.1
+                    || *cy + *r > symbol.bbox.3
                 {
                     return Err(SymbologyError::InvalidFormat(format!(
                         "invalid circle for symbol '{code}'"
@@ -123,6 +128,38 @@ fn validate_symbol(code: &str, symbol: &DeclarativeSymbolDto) -> Result<(), Symb
         }
     }
     Ok(())
+}
+
+fn valid_path(commands: &str) -> bool {
+    let normalized = commands.replace(',', " ");
+    let mut tokens = normalized.split_whitespace();
+    let mut saw_draw = false;
+    while let Some(token) = tokens.next() {
+        let bytes = token.as_bytes();
+        if bytes.len() != 1 || !bytes[0].is_ascii_alphabetic() {
+            return false;
+        }
+        let command = bytes[0].to_ascii_uppercase();
+        let arity = match command {
+            b'M' | b'L' | b'T' => 2,
+            b'H' | b'V' => 1,
+            b'C' => 6,
+            b'S' | b'Q' => 4,
+            b'A' => 7,
+            b'Z' => 0,
+            _ => return false,
+        };
+        saw_draw |= command != b'Z';
+        for _ in 0..arity {
+            let Some(number) = tokens.next() else {
+                return false;
+            };
+            if number.parse::<f64>().ok().is_none_or(|v| !v.is_finite()) {
+                return false;
+            }
+        }
+    }
+    saw_draw
 }
 
 fn valid_stroke(stroke: &crate::symbol_registry::primitives::Stroke) -> bool {

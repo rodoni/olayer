@@ -10,10 +10,13 @@ use crate::terrain::tile::DtedTile;
 use lru::LruCache;
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
+use std::collections::VecDeque;
 use std::num::NonZeroUsize;
 
 /// Default maximum number of DTED and RGB tiles kept in memory.
 const DEFAULT_TILE_CAPACITY: usize = 64;
+const MAX_GEOTIFF_CACHE: usize = 64;
+const MAX_PROFILE_SAMPLES: usize = 1_000_000;
 
 /// Tile lookup key based on integer degrees.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -67,7 +70,7 @@ pub struct ClearanceResult {
 pub struct TerrainEngine {
     tiles: RefCell<LruCache<TileKey, DtedTile>>,
     rgb_tiles: RefCell<LruCache<SlippyTileKey, RgbElevationTile>>,
-    geotiff_tiles: RefCell<Vec<GeoTiffTile>>,
+    geotiff_tiles: RefCell<VecDeque<GeoTiffTile>>,
 }
 
 impl TerrainEngine {
@@ -86,7 +89,7 @@ impl TerrainEngine {
         Self {
             tiles: RefCell::new(LruCache::new(cap)),
             rgb_tiles: RefCell::new(LruCache::new(cap)),
-            geotiff_tiles: RefCell::new(Vec::new()),
+            geotiff_tiles: RefCell::new(VecDeque::new()),
         }
     }
 
@@ -191,7 +194,11 @@ impl TerrainEngine {
     pub fn load_geotiff_tile(&self, data: &[u8]) -> Result<(f64, f64, f64, f64), TerrainError> {
         let tile = GeoTiffTile::from_bytes(data)?;
         let bounds = tile.bounds_rad;
-        self.geotiff_tiles.borrow_mut().push(tile);
+        let mut cache = self.geotiff_tiles.borrow_mut();
+        if cache.len() == MAX_GEOTIFF_CACHE {
+            cache.pop_front();
+        }
+        cache.push_back(tile);
         Ok(bounds)
     }
 
@@ -450,6 +457,11 @@ impl TerrainEngine {
                 ));
             }
             let num_steps = steps_f as usize;
+            if profile.len().saturating_add(num_steps) > MAX_PROFILE_SAMPLES {
+                return Err(TerrainError::MalformedData(
+                    "Profile contains too many samples".to_string(),
+                ));
+            }
             for s in 0..num_steps {
                 let d = s as f64 * step_meters;
                 let pt = solver
@@ -564,6 +576,11 @@ impl TerrainEngine {
                 ));
             }
             let num_steps = steps_f as usize;
+            if profile.len().saturating_add(num_steps) > MAX_PROFILE_SAMPLES {
+                return Err(TerrainError::MalformedData(
+                    "Profile contains too many samples".to_string(),
+                ));
+            }
 
             for s in 0..num_steps {
                 let d = s as f64 * step_meters;

@@ -17,6 +17,8 @@ pub struct GeodeticResult {
     pub initial_bearing: f64,
     /// Final azimuth/bearing in radians, normalized to `[0, 2π)`.
     pub final_bearing: f64,
+    pub accuracy_meters: f64,
+    pub used_fallback: bool,
 }
 
 impl GeodeticResult {
@@ -27,6 +29,8 @@ impl GeodeticResult {
             distance,
             initial_bearing,
             final_bearing,
+            accuracy_meters: 0.0,
+            used_fallback: false,
         }
     }
 }

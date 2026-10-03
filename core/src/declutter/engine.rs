@@ -60,10 +60,13 @@ impl DeclutterEngine {
     fn compute_heading_conflict(octant: OctantDirection, heading_rad: Option<f32>) -> f32 {
         if let Some(hdg) = heading_rad {
             let octant_rad = octant.angle_rad();
-            let mut diff = (octant_rad - hdg).abs();
-            while diff > std::f32::consts::PI {
-                diff = (2.0 * std::f32::consts::PI - diff).abs();
+            if !hdg.is_finite() {
+                return f32::MAX;
             }
+            let diff = (octant_rad - hdg)
+                .abs()
+                .rem_euclid(2.0 * std::f32::consts::PI);
+            let diff = diff.min(2.0 * std::f32::consts::PI - diff);
             // Heavily penalize if within +/- 45 deg of aircraft heading
             if diff < std::f32::consts::FRAC_PI_4 {
                 (std::f32::consts::FRAC_PI_4 - diff) / std::f32::consts::FRAC_PI_4
@@ -80,6 +83,9 @@ impl DeclutterEngine {
     /// # Panics
     /// This function does not panic for valid Rust inputs.
     pub fn solve(&self, targets: &[LabelTarget]) -> Vec<LabelPlacement> {
+        if self.config.validate().is_err() {
+            return Vec::new();
+        }
         let n = targets.len();
         if n == 0 {
             return Vec::new();
@@ -99,6 +105,9 @@ impl DeclutterEngine {
         // ====================================================================
         for &idx in &sorted_indices {
             let target = &targets[idx];
+            if target.validate().is_err() {
+                continue;
+            }
             let mut best_octant = OctantDirection::NorthEast;
             let mut best_cost = f32::MAX;
             let mut best_rect = Rect2D::new(0.0, 0.0, 0.0, 0.0);
@@ -246,6 +255,12 @@ impl DeclutterEngine {
                     cost: best_cost,
                     visible: true,
                 });
+                grid.clear();
+                for (placement_idx, placement) in placements.iter().enumerate() {
+                    if let Some(placement) = placement {
+                        grid.insert(placement_idx, &placement.rect);
+                    }
+                }
             }
 
             if !improved {

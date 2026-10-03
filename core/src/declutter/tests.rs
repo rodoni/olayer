@@ -53,6 +53,26 @@ fn test_spatial_grid_uses_fallback_for_non_positive_cell_size() {
 }
 
 #[test]
+fn test_declutter_validation_rejects_non_finite_inputs() {
+    assert!(DeclutterConfig {
+        leader_length_px: -1.0,
+        ..Default::default()
+    }
+    .validate()
+    .is_err());
+    let target = LabelTarget {
+        id: "x".into(),
+        x: 0.0,
+        y: 0.0,
+        heading_rad: Some(f32::NAN),
+        width: 1.0,
+        height: 1.0,
+        priority: 0,
+    };
+    assert!(target.validate().is_err());
+}
+
+#[test]
 fn test_line_segments_intersect() {
     // Intersecting X
     let p1 = [0.0, 0.0];

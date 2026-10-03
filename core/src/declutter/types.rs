@@ -143,6 +143,19 @@ impl Rect2D {
             height: self.height + 2.0 * margin,
         }
     }
+
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if [self.x, self.y, self.width, self.height]
+            .iter()
+            .all(|v| v.is_finite())
+            && self.width >= 0.0
+            && self.height >= 0.0
+        {
+            Ok(())
+        } else {
+            Err("invalid rectangle")
+        }
+    }
 }
 
 /// Target input descriptor for label deconfliction.
@@ -162,6 +175,24 @@ pub struct LabelTarget {
     pub height: f32,
     /// Priority level (higher priority targets are placed first, 0 = highest).
     pub priority: u8,
+}
+
+impl LabelTarget {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if self.id.as_str().trim().is_empty()
+            || !self.x.is_finite()
+            || !self.y.is_finite()
+            || !self.width.is_finite()
+            || !self.height.is_finite()
+            || self.width < 0.0
+            || self.height < 0.0
+            || self.heading_rad.is_some_and(|h| !h.is_finite())
+        {
+            Err("invalid target")
+        } else {
+            Ok(())
+        }
+    }
 }
 
 /// Solved optimal placement for a target's label.
@@ -205,6 +236,29 @@ impl Default for DeclutterConfig {
             weight_leader_crossing: 80.0,
             weight_preference: 10.0,
             max_iterations: 3,
+        }
+    }
+}
+
+impl DeclutterConfig {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if self.leader_length_px.is_finite()
+            && self.leader_length_px >= 0.0
+            && self.safety_margin_px.is_finite()
+            && self.safety_margin_px >= 0.0
+            && self.weight_overlap.is_finite()
+            && self.weight_overlap >= 0.0
+            && self.weight_heading.is_finite()
+            && self.weight_heading >= 0.0
+            && self.weight_leader_crossing.is_finite()
+            && self.weight_leader_crossing >= 0.0
+            && self.weight_preference.is_finite()
+            && self.weight_preference >= 0.0
+            && self.max_iterations <= 10_000
+        {
+            Ok(())
+        } else {
+            Err("invalid declutter configuration")
         }
     }
 }

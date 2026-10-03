@@ -50,8 +50,8 @@ impl LambertConformalConic {
         {
             return Err(ProjectionError::InvalidInput);
         }
-        let a = ellipsoid.a;
-        let e_sq = ellipsoid.e_sq;
+        let a = ellipsoid.a();
+        let e_sq = ellipsoid.e_sq();
         let e = e_sq.sqrt();
 
         let phi1 = std_parallel_1_rad;
@@ -103,6 +103,13 @@ impl LambertConformalConic {
 impl Projection for LambertConformalConic {
     #[inline]
     fn update_center(&mut self, center_lat_rad: f64, center_lon_rad: f64) {
+        if !center_lat_rad.is_finite()
+            || !center_lon_rad.is_finite()
+            || center_lat_rad.abs() >= std::f64::consts::FRAC_PI_2
+            || center_lon_rad.abs() > std::f64::consts::PI
+        {
+            return;
+        }
         self.origin_lat = center_lat_rad;
         self.origin_lon = center_lon_rad;
 
@@ -113,7 +120,7 @@ impl Projection for LambertConformalConic {
         let t0 = (std::f64::consts::FRAC_PI_4 - phi0 / 2.0).tan()
             * ((1.0 + e * sin_phi0) / (1.0 - e * sin_phi0)).powf(self.e / 2.0);
 
-        self.rho_0 = self.ellipsoid.a * self.f_c * t0.powf(self.n);
+        self.rho_0 = self.ellipsoid.a() * self.f_c * t0.powf(self.n);
     }
 
     #[inline]
@@ -133,7 +140,7 @@ impl Projection for LambertConformalConic {
         let t = (std::f64::consts::FRAC_PI_4 - lat / 2.0).tan()
             * ((1.0 + self.e * sin_clamped) / (1.0 - self.e * sin_clamped)).powf(self.e / 2.0);
 
-        let rho = self.ellipsoid.a * self.f_c * t.powf(self.n);
+        let rho = self.ellipsoid.a() * self.f_c * t.powf(self.n);
         let theta = self.n * (lon - self.origin_lon);
 
         let x = rho * theta.sin();
@@ -170,7 +177,7 @@ impl Projection for LambertConformalConic {
                 0.0,
             ));
         } else {
-            (rho / (self.ellipsoid.a * self.f_c)).powf(1.0 / self.n)
+            (rho / (self.ellipsoid.a() * self.f_c)).powf(1.0 / self.n)
         };
         if !t.is_finite() || t < 0.0 {
             return Err(ProjectionError::InvalidInput);

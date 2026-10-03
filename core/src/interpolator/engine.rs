@@ -112,6 +112,8 @@ impl InterpolationEngine {
     /// Returns [`InterpolatorError::GeodesyFailure`] when both geodetic
     /// interpolation methods fail for a target.
     #[inline]
+    /// Returns valid predictions and explicit statuses for stale, clock-skewed,
+    /// or unavailable targets. Unavailable timestamps never use non-finite ages.
     pub fn interpolate_all_with_status(
         &self,
         current_time: f64,
@@ -125,7 +127,7 @@ impl InterpolationEngine {
                 skipped.push(SkippedTarget {
                     id: id.clone(),
                     quality: PredictionQuality::Unavailable,
-                    age_seconds: f64::NAN,
+                    age_seconds: None,
                 });
                 continue;
             }
@@ -136,7 +138,7 @@ impl InterpolationEngine {
                 skipped.push(SkippedTarget {
                     id: id.clone(),
                     quality: PredictionQuality::ClockSkewed,
-                    age_seconds: dt,
+                    age_seconds: Some(dt),
                 });
                 continue;
             }
@@ -146,7 +148,7 @@ impl InterpolationEngine {
                 skipped.push(SkippedTarget {
                     id: id.clone(),
                     quality: PredictionQuality::Stale,
-                    age_seconds: dt,
+                    age_seconds: Some(dt),
                 });
                 continue;
             }

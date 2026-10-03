@@ -1114,9 +1114,9 @@ impl MagneticModel {
         let sin_lat_sq = sin_lat * sin_lat;
 
         // Radius of curvature in prime vertical
-        let n = ell.a / (1.0 - ell.e_sq * sin_lat_sq).sqrt();
+        let n = ell.a() / (1.0 - ell.e_sq() * sin_lat_sq).sqrt();
         let p = (n + point.height) * cos_lat;
-        let z = (n * (1.0 - ell.e_sq) + point.height) * sin_lat;
+        let z = (n * (1.0 - ell.e_sq()) + point.height) * sin_lat;
         let r = p.hypot(z);
 
         // Geocentric latitude and colatitude

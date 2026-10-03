@@ -217,6 +217,11 @@ impl SldParser {
                         "Scale denominator must be finite and non-negative: '{text_val}'"
                     )));
                 }
+                if rule.max_scale.is_some_and(|max| val > max) {
+                    return Err(SldError::InvalidValue(
+                        "minimum scale exceeds maximum scale".into(),
+                    ));
+                }
                 rule.min_scale = Some(val);
             }
         } else if path_matches(&self.path, &["Rule", "MaxScaleDenominator"], false) {
@@ -230,6 +235,11 @@ impl SldParser {
                     return Err(SldError::InvalidValue(format!(
                         "Scale denominator must be finite and non-negative: '{text_val}'"
                     )));
+                }
+                if rule.min_scale.is_some_and(|min| min > val) {
+                    return Err(SldError::InvalidValue(
+                        "minimum scale exceeds maximum scale".into(),
+                    ));
                 }
                 rule.max_scale = Some(val);
             }

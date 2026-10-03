@@ -166,6 +166,11 @@ impl Matrix4 {
         self.m
     }
 
+    #[inline]
+    pub fn is_finite(&self) -> bool {
+        self.m.iter().all(|value| value.is_finite())
+    }
+
     /// Multiplies this matrix with another Matrix4 (Self * Other).
     #[inline]
     pub fn multiply(&self, other: &Self) -> Self {

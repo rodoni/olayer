@@ -31,8 +31,8 @@ impl WebMercator {
     /// Creates a new Web Mercator projection.
     #[inline]
     pub fn new(ellipsoid: Ellipsoid) -> Result<Self, ProjectionError> {
-        if !((ellipsoid.a - 6378137.0).abs() < 1e-3
-            && (ellipsoid.f - 1.0 / 298.257223563).abs() < 1e-12)
+        if !((ellipsoid.a() - 6378137.0).abs() < 1e-3
+            && (ellipsoid.f() - 1.0 / 298.257223563).abs() < 1e-12)
         {
             return Err(ProjectionError::InvalidParameters);
         }
@@ -47,7 +47,7 @@ impl Projection for WebMercator {
 
         let lat = lla.lat;
         let lon = lla.lon;
-        let a = self.ellipsoid.a;
+        let a = self.ellipsoid.a();
 
         // Clamp latitude to standard Web Mercator limits to avoid infinite y values at the poles.
         let clamped_lat = lat.clamp(-WEB_MERCATOR_LIMIT, WEB_MERCATOR_LIMIT);
@@ -63,7 +63,7 @@ impl Projection for WebMercator {
         if !x.is_finite() || !y.is_finite() {
             return Err(ProjectionError::InvalidInput);
         }
-        let a = self.ellipsoid.a;
+        let a = self.ellipsoid.a();
 
         let lon = x / a;
         let lat = 2.0 * (y / a).exp().atan() - std::f64::consts::FRAC_PI_2;
