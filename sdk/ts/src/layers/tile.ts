@@ -4,6 +4,70 @@ import type { OlayerController } from "../controller";
 import { RasterTileSource } from "../providers/raster";
 import { WasmProjection, lla_to_ecef } from "olayer-wasm";
 
+const TILE_SUBDIVISION = 16;
+
+export interface GlobeTileCoordinate {
+  readonly x: number;
+  readonly y: number;
+}
+
+/**
+ * Selects XYZ tiles whose geographic cells intersect the camera-facing hemisphere.
+ *
+ * @param centerLatRad - Camera center latitude in radians.
+ * @param centerLonRad - Camera center longitude in radians.
+ * @param zoom - Integer XYZ zoom level from 1 through 5.
+ * @returns Tile coordinates intersecting the camera-facing hemisphere.
+ * @throws {RangeError} If the center is non-finite or zoom is outside 1..=5.
+ */
+export function getGlobeTileCoordinates(
+  centerLatRad: number,
+  centerLonRad: number,
+  zoom: number,
+): readonly GlobeTileCoordinate[] {
+  if (!Number.isFinite(centerLatRad) || !Number.isFinite(centerLonRad)) {
+    throw new RangeError("Globe tile center must be finite");
+  }
+  if (!Number.isInteger(zoom) || zoom < 1 || zoom > 5) {
+    throw new RangeError("Globe tile zoom must be an integer from 1 to 5");
+  }
+
+  const tileCount = 2 ** zoom;
+  const halfTileLon = Math.PI / tileCount;
+  const visible: GlobeTileCoordinate[] = [];
+  const sinCenterLat = Math.sin(centerLatRad);
+  const cosCenterLat = Math.cos(centerLatRad);
+
+  for (let y = 0; y < tileCount; y++) {
+    const latTop = Math.atan(Math.sinh(Math.PI - (2 * Math.PI * y) / tileCount));
+    const latBottom = Math.atan(Math.sinh(Math.PI - (2 * Math.PI * (y + 1)) / tileCount));
+    const lat = (latTop + latBottom) / 2;
+    const sinLat = Math.sin(lat);
+    const cosLat = Math.cos(lat);
+    let minCornerDot = 1;
+    for (const cornerLat of [latTop, latBottom]) {
+      for (const cornerLonOffset of [-halfTileLon, halfTileLon]) {
+        const cornerDot =
+          Math.sin(lat) * Math.sin(cornerLat) +
+          Math.cos(lat) * Math.cos(cornerLat) * Math.cos(cornerLonOffset);
+        minCornerDot = Math.min(minCornerDot, cornerDot);
+      }
+    }
+    const tileAngularRadius = Math.acos(Math.max(-1, Math.min(1, minCornerDot)));
+    const edgeMargin = Math.sin(tileAngularRadius);
+
+    for (let x = 0; x < tileCount; x++) {
+      const lon = ((x + 0.5) / tileCount) * 2 * Math.PI - Math.PI;
+      const angularDot =
+        sinCenterLat * sinLat +
+        cosCenterLat * cosLat * Math.cos(lon - centerLonRad);
+      if (angularDot >= -edgeMargin) visible.push({ x, y });
+    }
+  }
+
+  return visible;
+}
+
 /**
  * Capa de renderizado para tiles ráster baseados em imagem (como OSM ou WMTS).
  * Desenha os blocos do mapa projetados dinamicamente na GPU usando WebGL2.
@@ -91,7 +155,7 @@ export class TileLayer extends Layer {
     this.indexBuffer = gl.createBuffer();
 
     // Calcula os índices de triangulação estáticos uma vez
-    const subdivision = 4;
+    const subdivision = TILE_SUBDIVISION;
     const indexData: number[] = [];
     for (let r = 0; r < subdivision; r++) {
       for (let c = 0; c < subdivision; c++) {
@@ -121,6 +185,10 @@ export class TileLayer extends Layer {
     // Escala logarítmica para nível de zoom de tile OSM (tipicamente entre 1 e 18)
     const z = Math.floor(Math.log2(zoom) + 11.5);
     return Math.max(1, Math.min(18, z));
+  }
+
+  private getGlobeTileZoom(zoom: number): number {
+    return Math.max(2, Math.min(3, Math.floor(Math.log2(Math.max(zoom, 0.5)) + 3)));
   }
 
   /**
@@ -307,9 +375,20 @@ export class TileLayer extends Layer {
       this.lastViewMode = viewMode;
     }
 
-    const z = this.getTileZoom(zoom);
-    const bounds = this.getVisibleTileBounds(controller, z);
-    controller.logger.debug("Tile bounds calculated", { zoom: z, ...bounds });
+    const z = viewMode === "3D" ? this.getGlobeTileZoom(zoom) : this.getTileZoom(zoom);
+    const globeTiles = viewMode === "3D"
+      ? getGlobeTileCoordinates(controller.getCenterLat(), controller.getCenterLon(), z)
+      : null;
+    const globeTileKeys = globeTiles === null
+      ? null
+      : new Set(globeTiles.map(({ x, y }) => `${z}/${x}/${y}`));
+    const bounds = globeTiles === null ? this.getVisibleTileBounds(controller, z) : null;
+    controller.logger.debug("Tile coverage calculated", {
+      zoom: z,
+      viewMode,
+      tileCount: globeTiles?.length,
+      bounds,
+    });
 
     // Limpeza seletiva do cache para evitar vazamento de recursos sem destruir tiles visíveis
     if (this.tileGeometries.size > 300) {
@@ -321,13 +400,16 @@ export class TileLayer extends Layer {
         const tx = parseInt(txStr, 10);
         const ty = parseInt(tyStr, 10);
 
-        if (
-          tz !== z ||
-          tx < bounds.minX ||
-          tx > bounds.maxX ||
-          ty < bounds.minY ||
-          ty > bounds.maxY
-        ) {
+        const outsideCurrentCoverage = globeTiles !== null
+          ? !globeTileKeys?.has(key)
+          : bounds !== null && (
+            tz !== z ||
+            tx < bounds.minX ||
+            tx > bounds.maxX ||
+            ty < bounds.minY ||
+            ty > bounds.maxY
+          );
+        if (outsideCurrentCoverage) {
           gl.deleteVertexArray(geom.vao);
           gl.deleteBuffer(geom.vertexBuffer);
           keysToDelete.push(key);
@@ -342,17 +424,24 @@ export class TileLayer extends Layer {
     // Recompila os buffers de geometria se a câmera ou zoom se alterou fisicamente
     const tilesToDraw: { x: number; y: number; texture: WebGLTexture }[] = [];
 
-    for (let ty = bounds.minY; ty <= bounds.maxY; ty++) {
-      for (let tx = bounds.minX; tx <= bounds.maxX; tx++) {
-        // Dispara o carregamento assíncrono (se não estiver no cache)
-        void this.rasterSource.loadTile(tx, ty, z).catch((error: unknown) => {
-          controller.logger.error("Raster tile loading failed", { tx, ty, z, error });
-        });
-        
-        const texture = this.rasterSource.getTileTexture(tx, ty, z);
-        if (texture) {
-          tilesToDraw.push({ x: tx, y: ty, texture });
+    const tileCoordinates = globeTiles ?? (() => {
+      const coordinates: GlobeTileCoordinate[] = [];
+      if (bounds) {
+        for (let ty = bounds.minY; ty <= bounds.maxY; ty++) {
+          for (let tx = bounds.minX; tx <= bounds.maxX; tx++) coordinates.push({ x: tx, y: ty });
         }
+      }
+      return coordinates;
+    })();
+
+    for (const { x: tx, y: ty } of tileCoordinates) {
+      void this.rasterSource.loadTile(tx, ty, z).catch((error: unknown) => {
+        controller.logger.error("Raster tile loading failed", { tx, ty, z, error });
+      });
+
+      const texture = this.rasterSource.getTileTexture(tx, ty, z);
+      if (texture) {
+        tilesToDraw.push({ x: tx, y: ty, texture });
       }
     }
 
@@ -370,8 +459,15 @@ export class TileLayer extends Layer {
     // Ativa transparência para mesclagem de bordas
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    if (viewMode === "3D") {
+      gl.enable(gl.DEPTH_TEST);
+      gl.depthFunc(gl.LEQUAL);
+      gl.depthMask(true);
+    } else {
+      gl.disable(gl.DEPTH_TEST);
+    }
 
-    const subdivision = 4;
+    const subdivision = TILE_SUBDIVISION;
     const vertexCount = (subdivision + 1) * (subdivision + 1);
     const attribsPerVertex = 5; // X, Y, Z, U, V
 
@@ -389,7 +485,13 @@ export class TileLayer extends Layer {
         for (let r = 0; r <= subdivision; r++) {
           const v = r / subdivision; // 0.0 to 1.0 (vertical tile coord)
           const tileY = tile.y + v;
-          const latDeg = this.tileYToLat(tileY, z);
+          // Web Mercator ends at about 85 degrees; pinch its boundary row to
+          // each geographic pole so the map does not leave a square cap hole.
+          const latDeg = viewMode === "3D" && tile.y === 0 && r === 0
+            ? 90
+            : viewMode === "3D" && tile.y === 2 ** z - 1 && r === subdivision
+              ? -90
+              : this.tileYToLat(tileY, z);
           const latRad = latDeg * (Math.PI / 180);
 
           for (let c = 0; c <= subdivision; c++) {

@@ -1,10 +1,9 @@
 import { describe, it, expect, vi, beforeAll } from "vitest";
-import { initSync } from "olayer-wasm";
+import { initSync, lla_to_ecef, WasmCameraState, WasmProjection } from "olayer-wasm";
 import { readFileSync } from "fs";
 import { resolve } from "path";
 import { CPURenderer } from "./cpu";
 import { LabelAntiClutterEngine, OctantDirection } from "./declutter";
-import type { WasmProjection } from "olayer-wasm";
 
 const wasmPath = resolve(__dirname, "../../wasm/pkg/olayer_wasm_bg.wasm");
 
@@ -115,6 +114,54 @@ describe("CPURenderer & LabelAntiClutterEngine (GIS-PROP-008)", () => {
         proj, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 100000.0, 800, 600, "2D"
       );
       expect(pos).toBeNull();
+    });
+
+    it("projects 3D targets in the same absolute ECEF space as the GPU camera matrix", () => {
+      const renderer = new CPURenderer(createMockCtx());
+      const lat = -23.62 * Math.PI / 180;
+      const lon = -46.65 * Math.PI / 180;
+      const projection = WasmProjection.new_web_mercator();
+      const camera = new WasmCameraState(lat, lon, 0, 1, 0, 0, 0, 800 / 600, 250_000);
+      const matrix = Float32Array.from(projection.get_3d_view_proj_matrix(camera));
+      const centerEcef = lla_to_ecef(lat, lon, 0);
+      const centerClipW = matrix[3]! * Number(centerEcef[0]) + matrix[7]! * Number(centerEcef[1]) + matrix[11]! * Number(centerEcef[2]) + matrix[15]!;
+      const centerClipX = matrix[0]! * Number(centerEcef[0]) + matrix[4]! * Number(centerEcef[1]) + matrix[8]! * Number(centerEcef[2]) + matrix[12]!;
+      const centerClipY = matrix[1]! * Number(centerEcef[0]) + matrix[5]! * Number(centerEcef[1]) + matrix[9]! * Number(centerEcef[2]) + matrix[13]!;
+      expect((centerClipX / centerClipW + 1) * 400).toBeGreaterThan(399);
+      expect((centerClipX / centerClipW + 1) * 400).toBeLessThan(401);
+      expect((1 - centerClipY / centerClipW) * 300).toBeGreaterThan(299);
+      expect((1 - centerClipY / centerClipW) * 300).toBeLessThan(301);
+      const targetLat = lat + 0.25 * Math.PI / 180;
+      const targetLon = lon + 0.2 * Math.PI / 180;
+      const ecef = lla_to_ecef(targetLat, targetLon, 5_000);
+      const component = (index: number): number => Number(ecef[index]);
+      const clipW = matrix[3]! * component(0) + matrix[7]! * component(1) + matrix[11]! * component(2) + matrix[15]!;
+      const clipX = matrix[0]! * component(0) + matrix[4]! * component(1) + matrix[8]! * component(2) + matrix[12]!;
+      const clipY = matrix[1]! * component(0) + matrix[5]! * component(1) + matrix[9]! * component(2) + matrix[13]!;
+      const expected = {
+        x: (clipX / clipW + 1) * 400,
+        y: (1 - clipY / clipW) * 300,
+      };
+
+      const actual = renderer.projectToScreen(
+        projection,
+        targetLat,
+        targetLon,
+        5_000,
+        0,
+        0,
+        1,
+        0,
+        250_000,
+        800,
+        600,
+        "3D",
+        matrix,
+        lat,
+        lon,
+      );
+
+      expect(actual).toEqual(expected);
     });
 
     it("should draw a target without atlas", () => {

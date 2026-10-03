@@ -180,10 +180,16 @@ export class WebGLRenderer {
   /**
    * Renders the grid using the active projection matrix.
    */
-  public renderGrid(viewProjMatrix: Float32Array): void {
+  public renderGrid(viewProjMatrix: Float32Array, depthTest = false): void {
     if (!this.program || this.gridLineCount === 0) return;
 
     const gl = this.gl;
+    if (depthTest) {
+      gl.enable(gl.DEPTH_TEST);
+      gl.depthFunc(gl.LEQUAL);
+    } else {
+      gl.disable(gl.DEPTH_TEST);
+    }
     gl.useProgram(this.program);
 
     // Bind buffer
@@ -208,6 +214,7 @@ export class WebGLRenderer {
     gl.drawArrays(gl.LINES, 0, this.gridLineCount);
 
     gl.disable(gl.BLEND);
+    if (depthTest) gl.disable(gl.DEPTH_TEST);
   }
 
   /**

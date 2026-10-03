@@ -355,7 +355,7 @@ class GridLayer extends Layer {
       this.renderer.rebuildGrid(this.projection, this.viewMode);
       this.lastVersion = version;
     }
-    this.renderer.renderGrid(viewProjMatrix);
+    this.renderer.renderGrid(viewProjMatrix, this.viewMode === "3D");
   }
 
   public renderDynamic(ctx: CanvasRenderingContext2D, currentTime: number): void {
@@ -770,6 +770,7 @@ function updateMapLayers(): void {
   // 2. Read values from GUI
   const mapSourceSelect = document.getElementById("mapSourceSelect") as HTMLSelectElement;
   const mapSource = mapSourceSelect ? mapSourceSelect.value : "osm";
+  const baseMapOpacity = controller.getViewMode() === "3D" ? 0.95 : 0.35;
 
   const hostInput = document.getElementById("geoserverHostInput") as HTMLInputElement;
   let host = hostInput ? hostInput.value.trim() : "http://localhost:8080/geoserver";
@@ -814,7 +815,7 @@ function updateMapLayers(): void {
     );
     controller.dataManager.registerSource(osmSource);
     tileLayer = new TileLayer("osm_base_map", osmSource);
-    tileLayer.opacity = 0.35;
+    tileLayer.opacity = baseMapOpacity;
   } else if (mapSource === "geoserver_wms") {
     const wmsSource = new RasterTileSource(
       controller.gl,
@@ -833,7 +834,7 @@ function updateMapLayers(): void {
     );
     controller.dataManager.registerSource(wmsSource);
     tileLayer = new TileLayer("geoserver_base_map", wmsSource);
-    tileLayer.opacity = 0.35;
+    tileLayer.opacity = baseMapOpacity;
   } else if (mapSource === "geoserver_tms") {
     const tmsSource = new RasterTileSource(
       controller.gl,
@@ -845,7 +846,7 @@ function updateMapLayers(): void {
     );
     controller.dataManager.registerSource(tmsSource);
     tileLayer = new TileLayer("geoserver_base_map", tmsSource);
-    tileLayer.opacity = 0.35;
+    tileLayer.opacity = baseMapOpacity;
   }
 
   // 4. Rebuild Vector Layer if configured
@@ -1251,6 +1252,7 @@ async function start() {
     }
 
     controller.setViewMode(viewMode);
+    if (tileLayer) tileLayer.opacity = viewMode === "3D" ? 0.95 : 0.35;
     Object.defineProperty(controller, "projection", { value: activeProjection, writable: false });
     gridLayer.updateProjection(activeProjection, viewMode);
     updateTerrainControlsVisibility(viewMode);

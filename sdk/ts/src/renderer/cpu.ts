@@ -54,26 +54,24 @@ export class CPURenderer {
     canvasHeight: number,
     viewMode: string = "2D",
     viewProjMatrix?: Float32Array,
-    centerLat?: number,
-    centerLon?: number
+    _centerLat?: number,
+    _centerLon?: number
   ): { x: number; y: number } | null {
-    if (viewMode === "3D" && viewProjMatrix && centerLat !== undefined && centerLon !== undefined) {
+    if (viewMode === "3D" && viewProjMatrix) {
       try {
         const ecef = lla_to_ecef(latRad, lonRad, height);
-        const centerEcef = lla_to_ecef(centerLat, centerLon, 0.0);
-
-        const relX = readNumber(ecef, 0) - readNumber(centerEcef, 0);
-        const relY = readNumber(ecef, 1) - readNumber(centerEcef, 1);
-        const relZ = readNumber(ecef, 2) - readNumber(centerEcef, 2);
+        const x = readNumber(ecef, 0);
+        const y = readNumber(ecef, 1);
+        const z = readNumber(ecef, 2);
 
         const m = viewProjMatrix;
-        const wNdc = readNumber(m, 3) * relX + readNumber(m, 7) * relY + readNumber(m, 11) * relZ + readNumber(m, 15);
+        const wNdc = readNumber(m, 3) * x + readNumber(m, 7) * y + readNumber(m, 11) * z + readNumber(m, 15);
         if (wNdc <= 0.0) {
           return null;
         }
 
-        const xNdc = readNumber(m, 0) * relX + readNumber(m, 4) * relY + readNumber(m, 8) * relZ + readNumber(m, 12);
-        const yNdc = readNumber(m, 1) * relX + readNumber(m, 5) * relY + readNumber(m, 9) * relZ + readNumber(m, 13);
+        const xNdc = readNumber(m, 0) * x + readNumber(m, 4) * y + readNumber(m, 8) * z + readNumber(m, 12);
+        const yNdc = readNumber(m, 1) * x + readNumber(m, 5) * y + readNumber(m, 9) * z + readNumber(m, 13);
 
         const screenX = (xNdc / wNdc + 1) * 0.5 * canvasWidth;
         const screenY = (1 - yNdc / wNdc) * 0.5 * canvasHeight;
