@@ -74,6 +74,8 @@ export { MapDataStack } from "./map_provider/stack";
 export type { MapDataSource, TileCacheStats, TileRequestOptions } from "./map_provider/datasource";
 export { buildWmtsTileUrl } from "./map_provider/wmts";
 export type { WmtsTile, WmtsTileRequestOptions } from "./map_provider/wmts";
+export { buildWcsGetCoverageUrl, buildWfsGetFeatureUrl, buildWmsGetMapUrl } from "./map_provider/ogc";
+export type { OgcBounds, WcsCoverageRequestOptions, WfsFeatureRequestOptions, WmsMapRequestOptions } from "./map_provider/ogc";
 
 
 // Export Renderers and Texture Atlas
