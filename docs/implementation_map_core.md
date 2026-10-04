@@ -50,7 +50,7 @@ Status reflects the implementation committed through this work cycle, including 
 | Phase | Status | Delivered in repository | Remaining |
 |---|---|---|---|
 | 0 — Specification gate | **Complete** | Workspace member/dependencies in root `Cargo.toml`; contract boundaries and non-goals documented | Formal API review record |
-| 1 — Map Core foundation | **Partial** | `map-core/src/{crs,bounds,tile,dimensions,format,request,errors}.rs`; `TileAddress`; validated matrices; `MapImage`, `FeatureCollection` and `Coverage`; `cargo test -p olayer-map-core` (5 tests) | Property-based tests and broader matrix/tile-size policy coverage |
+| 1 — Map Core foundation | **Complete** | `map-core/src/{crs,bounds,tile,dimensions,format,request,errors}.rs`; `TileAddress`; validated matrices; checked pixel dimensions; `MapImage`, `FeatureCollection` and `Coverage`; property-based tile tests; CRS/bounds tests; `cargo test -p olayer-map-core` (10 tests) | No Phase 1 deliverables remaining |
 | 2 — Pure OGC builders | **Partial** | `map-core/src/{wms,wmts,wfs,wcs}.rs`; deterministic query escaping; stable error codes; capability model; Rust clippy gate | Capabilities document parsers and broader fixtures/snapshots |
 | 3 — Native provider migration | **Partial** | `GeoserverWmtsSource` uses `olayer-map-core::wmts`; `NativeOgcClient<T>`, `OgcTransport`, `UreqTransport`; bounded responses; WMS image and WFS GeoJSON decoders; 82 native tests | WCS decoder and request-specific WMS/WFS/WCS source adapters |
 | 4 — TypeScript provider migration | **Partial** | `map_provider/{wmts,ogc}.ts`; WMS/WMTS/WFS/WCS URL builders; structured WMTS `RasterTileSource`; 16 Vitest files/83 tests and typecheck | WFS/WCS execution/decoders, response limits, coded error mapping and remaining source migrations |
@@ -270,11 +270,11 @@ The map provider returns data; renderers choose the dimension-specific represent
 - Add `[workspace.dependencies]` entries at the workspace root.
 - Gate: review API signatures before code.
 
-### Phase 1 — Map Core foundation — **Partial**
+### Phase 1 — Map Core foundation — **Complete**
 
 - Add crate and module skeleton.
 - Implement `ErrorCode`, `MapError`, CRS, bounds, tile keys and formats.
-- Add property tests for tile bounds and matrix limits.
+- Add property tests for tile bounds and matrix limits. **Complete with invariant, CRS and bounds coverage.**
 - Gate: `cargo check -p olayer-map-core` and `cargo test -p olayer-map-core`.
 
 ### Phase 2 — Pure OGC builders — **Partial**

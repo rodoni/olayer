@@ -37,3 +37,26 @@ impl BoundingBox {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_non_finite_and_inverted_bounds() {
+        let crs = CoordinateReferenceSystem::epsg(4326).unwrap();
+        for values in [
+            [f64::NAN, 0.0, 1.0, 1.0],
+            [0.0, f64::INFINITY, 1.0, 1.0],
+            [1.0, 0.0, 0.0, 1.0],
+            [0.0, 1.0, 1.0, 0.0],
+        ] {
+            assert_eq!(
+                BoundingBox::new(values[0], values[1], values[2], values[3], crs)
+                    .unwrap_err()
+                    .code,
+                INVALID_BOUNDS
+            );
+        }
+    }
+}

@@ -26,6 +26,8 @@ pub struct TileMatrix {
     pub tile_height: NonZeroU32,
 }
 impl TileMatrix {
+    const MAX_TILE_DIMENSION: u32 = 16_384;
+
     pub fn new(
         identifier: impl Into<String>,
         crs: CoordinateReferenceSystem,
@@ -41,7 +43,9 @@ impl TileMatrix {
                 "matrix identifier is empty",
             ));
         }
-        if tile_width.get() > 16_384 || tile_height.get() > 16_384 {
+        if tile_width.get() > Self::MAX_TILE_DIMENSION
+            || tile_height.get() > Self::MAX_TILE_DIMENSION
+        {
             return Err(MapError::new(
                 INVALID_TILE_KEY,
                 "tile dimensions exceed the supported limit",
@@ -58,16 +62,40 @@ impl TileMatrix {
     }
 
     pub fn validate(&self, tile: TileKey) -> Result<(), MapError> {
-        if self.identifier.is_empty() {
+        self.validate_matrix()?;
+        if tile.x >= self.matrix_width.get() || tile.y >= self.matrix_height.get() {
+            return Err(MapError::new(TILE_OUTSIDE_MATRIX, "tile is outside matrix"));
+        }
+        Ok(())
+    }
+
+    pub fn validate_matrix(&self) -> Result<(), MapError> {
+        if self.identifier.trim().is_empty() {
             return Err(MapError::new(
                 INVALID_TILE_KEY,
                 "matrix identifier is empty",
             ));
         }
-        if tile.x >= self.matrix_width.get() || tile.y >= self.matrix_height.get() {
-            return Err(MapError::new(TILE_OUTSIDE_MATRIX, "tile is outside matrix"));
+        if self.tile_width.get() > Self::MAX_TILE_DIMENSION
+            || self.tile_height.get() > Self::MAX_TILE_DIMENSION
+        {
+            return Err(MapError::new(
+                INVALID_TILE_KEY,
+                "tile dimensions exceed the supported limit",
+            ));
         }
         Ok(())
+    }
+
+    pub fn pixel_dimensions(&self) -> Result<(u64, u64), MapError> {
+        self.validate_matrix()?;
+        let width = u64::from(self.matrix_width.get())
+            .checked_mul(u64::from(self.tile_width.get()))
+            .ok_or_else(|| MapError::new(INVALID_TILE_KEY, "matrix width overflows"))?;
+        let height = u64::from(self.matrix_height.get())
+            .checked_mul(u64::from(self.tile_height.get()))
+            .ok_or_else(|| MapError::new(INVALID_TILE_KEY, "matrix height overflows"))?;
+        Ok((width, height))
     }
 
     pub fn address(&self, tile: TileKey) -> Result<TileAddress, MapError> {
@@ -82,6 +110,7 @@ impl TileMatrix {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
 
     fn matrix() -> TileMatrix {
         TileMatrix::new(
@@ -143,5 +172,29 @@ mod tests {
             NonZeroU32::new(256).unwrap(),
         );
         assert_eq!(result.unwrap_err().code, INVALID_TILE_KEY);
+    }
+
+    proptest! {
+        #[test]
+        fn valid_coordinates_always_round_trip(x in 0_u32..32, y in 0_u32..32) {
+            let width = NonZeroU32::new(32).unwrap();
+            let height = NonZeroU32::new(32).unwrap();
+            let matrix = TileMatrix::new(
+                "property",
+                CoordinateReferenceSystem::epsg(3857).unwrap(),
+                width,
+                height,
+                NonZeroU32::new(256).unwrap(),
+                NonZeroU32::new(256).unwrap(),
+            ).unwrap();
+            let address = matrix.address(TileKey { x, y, z: 5 }).unwrap();
+            prop_assert_eq!(address.tile, TileKey { x, y, z: 5 });
+        }
+
+        #[test]
+        fn coordinates_at_or_beyond_matrix_are_rejected(x in 32_u32..=u32::MAX, y in 0_u32..32) {
+            let matrix = matrix();
+            prop_assert_eq!(matrix.address(TileKey { x, y, z: 0 }).unwrap_err().code, TILE_OUTSIDE_MATRIX);
+        }
     }
 }

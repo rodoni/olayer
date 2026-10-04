@@ -32,3 +32,30 @@ impl CoordinateReferenceSystem {
         format!("EPSG:{}", self.code)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn accepts_all_supported_epsg_codes() {
+        for code in [4326, 3857, 4978, 900913] {
+            assert_eq!(
+                CoordinateReferenceSystem::epsg(code).unwrap().epsg_code(),
+                code
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_zero_and_unknown_epsg_codes() {
+        assert_eq!(
+            CoordinateReferenceSystem::epsg(0).unwrap_err().code,
+            INVALID_CRS
+        );
+        assert_eq!(
+            CoordinateReferenceSystem::epsg(1).unwrap_err().code,
+            INVALID_CRS
+        );
+    }
+}
