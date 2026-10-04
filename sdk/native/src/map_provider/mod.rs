@@ -9,6 +9,7 @@ use std::io::{Cursor, Read};
 use std::sync::mpsc::{channel, Sender};
 use std::sync::{Arc, Mutex};
 
+pub mod decoders;
 pub mod ogc;
 
 const MAX_HTTP_RESPONSE_BYTES: usize = 1024 * 1024;
@@ -37,6 +38,8 @@ pub enum NativeMapDataError {
     ImageDecode(String),
     /// A transport adapter could not execute an OGC request.
     OgcTransport(String),
+    /// An OGC response could not be decoded into a Map Core model.
+    OgcDecode(String),
 }
 
 impl fmt::Display for NativeMapDataError {
@@ -58,6 +61,7 @@ impl fmt::Display for NativeMapDataError {
             ),
             Self::ImageDecode(message) => write!(formatter, "WMTS image decode failed: {message}"),
             Self::OgcTransport(message) => write!(formatter, "OGC transport failed: {message}"),
+            Self::OgcDecode(message) => write!(formatter, "OGC response decode failed: {message}"),
         }
     }
 }

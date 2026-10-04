@@ -41,19 +41,23 @@ sdk/native/src/map_provider/  # Native HTTP/filesystem execution adapters
 
 ## Current implementation status
 
-Status is tracked against the atomic phases below:
+Status reflects the implementation committed through this work cycle, including the native WMS/WFS decoder increment. The labels mean:
 
-| Phase | Status | Delivered | Remaining |
+- **Complete** — the planned deliverables and their verification gate are present;
+- **Partial** — the foundational slice is present, but explicit remaining work is listed;
+- **Pending** — implementation has not started beyond existing unrelated functionality.
+
+| Phase | Status | Delivered in repository | Remaining |
 |---|---|---|---|
-| 0 — Specification gate | **Complete** | Workspace crate decision, centralized dependencies and public contract baseline | Formal API review record |
-| 1 — Map Core foundation | **Partial** | `olayer-map-core`, CRS, bounds, `TileAddress`, validated tile matrix, dimensions, formats, errors and response value types | Property-based tests and broader matrix/tile-size policy coverage |
-| 2 — Pure OGC builders | **Partial** | WMS/WMTS/WFS/WCS builders, deterministic query serialization and capability model | Capabilities document parsers and broader fixtures/snapshots |
-| 3 — Native provider migration | **Partial** | `GeoserverWmtsSource` uses `olayer-map-core::wmts`; injectable `NativeOgcClient`/`OgcTransport`; bounded response gate | Native WMS/WFS/WCS decoders and request-specific source adapters |
-| 4 — TypeScript provider migration | **Partial** | WMTS and WMS/WFS/WCS request adapters; `RasterTileSource` accepts structured WMTS options | WFS/WCS execution/decoders, response limits, coded error mapping and remaining source migrations |
+| 0 — Specification gate | **Complete** | Workspace member/dependencies in root `Cargo.toml`; contract boundaries and non-goals documented | Formal API review record |
+| 1 — Map Core foundation | **Partial** | `map-core/src/{crs,bounds,tile,dimensions,format,request,errors}.rs`; `TileAddress`; validated matrices; `MapImage`, `FeatureCollection` and `Coverage`; `cargo test -p olayer-map-core` (5 tests) | Property-based tests and broader matrix/tile-size policy coverage |
+| 2 — Pure OGC builders | **Partial** | `map-core/src/{wms,wmts,wfs,wcs}.rs`; deterministic query escaping; stable error codes; capability model; Rust clippy gate | Capabilities document parsers and broader fixtures/snapshots |
+| 3 — Native provider migration | **Partial** | `GeoserverWmtsSource` uses `olayer-map-core::wmts`; `NativeOgcClient<T>`, `OgcTransport`, `UreqTransport`; bounded responses; WMS image and WFS GeoJSON decoders; 82 native tests | WCS decoder and request-specific WMS/WFS/WCS source adapters |
+| 4 — TypeScript provider migration | **Partial** | `map_provider/{wmts,ogc}.ts`; WMS/WMTS/WFS/WCS URL builders; structured WMTS `RasterTileSource`; 16 Vitest files/83 tests and typecheck | WFS/WCS execution/decoders, response limits, coded error mapping and remaining source migrations |
 | 5 — 2D/2.5D/3D integration | **Pending** | Existing renderer coverage remains independent of OGC providers | Shared OGC fixtures and end-to-end dimension-specific integration |
-| 6 — Publication and compatibility | **Pending** | No publication changes in this increment | WASM/C-FFI mappings, generated artifacts, changelog and release gates |
+| 6 — Publication and compatibility | **Pending** | No WASM/C-FFI publication mapping for Map Core yet | Error mappings, generated artifacts, changelog and release gates |
 
-The status table is intentionally conservative: request construction is not counted as transport execution, and existing renderer tests are not counted as OGC integration tests.
+The status table is intentionally conservative: request construction is not counted as transport execution, and existing renderer tests are not counted as OGC integration tests. The test counts above are the latest local gates, not a claim of CI coverage.
 
 ## 3. Domain contracts
 
@@ -284,7 +288,7 @@ The map provider returns data; renderers choose the dimension-specific represent
 
 - Add provider interfaces and transport adapter.
 - Migrate `GeoserverWmtsSource` without changing cache behavior.
-- Add WMS/WFS/WCS adapters incrementally.
+- Add WMS/WFS/WCS adapters incrementally. **WMS image and WFS GeoJSON decoders are complete; WCS remains pending.**
 - Gate: native unit/integration tests and bounded-response tests.
 
 ### Phase 4 — TypeScript provider migration — **Partial**
