@@ -122,7 +122,8 @@ describe("Meteorological GIS Overlays (GIS-PROP-006)", () => {
           type: "Feature",
           properties: {
             id: "SIG_CONVECTIVE_01",
-            hazard: "THUNDERSTORM",
+            name: "Convective thunderstorm",
+            hazard_type: "THUNDERSTORM",
             severity: "SEVERE",
             floor_m: 1500,
             ceiling_m: 11000,

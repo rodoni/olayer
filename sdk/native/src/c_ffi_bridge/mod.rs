@@ -3751,7 +3751,12 @@ mod tests {
                 "features": [
                     {
                         "type": "Feature",
-                        "properties": { "id": "SIG1", "hazard": "TS", "severity": "SEV" },
+                        "properties": {
+                            "id": "SIG1",
+                            "name": "Test thunderstorm SIGMET",
+                            "hazard_type": "TS",
+                            "severity": "SEV"
+                        },
                         "geometry": {
                             "type": "Polygon",
                             "coordinates": [[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 0.0]]]
