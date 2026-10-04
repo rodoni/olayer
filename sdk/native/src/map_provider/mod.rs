@@ -9,6 +9,8 @@ use std::io::{Cursor, Read};
 use std::sync::mpsc::{channel, Sender};
 use std::sync::{Arc, Mutex};
 
+pub mod ogc;
+
 const MAX_HTTP_RESPONSE_BYTES: usize = 1024 * 1024;
 const WMTS_TILE_SIZE: u32 = 256;
 const WMTS_TILE_RGBA_BYTES: usize = 256 * 256 * 4;
@@ -33,6 +35,8 @@ pub enum NativeMapDataError {
     InvalidTileDimensions { width: u32, height: u32 },
     /// An image could not be identified or decoded.
     ImageDecode(String),
+    /// A transport adapter could not execute an OGC request.
+    OgcTransport(String),
 }
 
 impl fmt::Display for NativeMapDataError {
@@ -53,6 +57,7 @@ impl fmt::Display for NativeMapDataError {
                 "WMTS tile dimensions are {width}x{height}; expected 256x256"
             ),
             Self::ImageDecode(message) => write!(formatter, "WMTS image decode failed: {message}"),
+            Self::OgcTransport(message) => write!(formatter, "OGC transport failed: {message}"),
         }
     }
 }

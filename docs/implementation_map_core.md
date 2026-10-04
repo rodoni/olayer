@@ -48,7 +48,7 @@ Status is tracked against the atomic phases below:
 | 0 — Specification gate | **Complete** | Workspace crate decision, centralized dependencies and public contract baseline | Formal API review record |
 | 1 — Map Core foundation | **Partial** | `olayer-map-core`, CRS, bounds, `TileAddress`, validated tile matrix, dimensions, formats, errors and response value types | Property-based tests and broader matrix/tile-size policy coverage |
 | 2 — Pure OGC builders | **Partial** | WMS/WMTS/WFS/WCS builders, deterministic query serialization and capability model | Capabilities document parsers and broader fixtures/snapshots |
-| 3 — Native provider migration | **Partial** | `GeoserverWmtsSource` uses `olayer-map-core::wmts`; existing cache/decoder gates preserved | Native WMS/WFS/WCS adapters and transport abstraction |
+| 3 — Native provider migration | **Partial** | `GeoserverWmtsSource` uses `olayer-map-core::wmts`; injectable `NativeOgcClient`/`OgcTransport`; bounded response gate | Native WMS/WFS/WCS decoders and request-specific source adapters |
 | 4 — TypeScript provider migration | **Partial** | WMTS and WMS/WFS/WCS request adapters; `RasterTileSource` accepts structured WMTS options | WFS/WCS execution/decoders, response limits, coded error mapping and remaining source migrations |
 | 5 — 2D/2.5D/3D integration | **Pending** | Existing renderer coverage remains independent of OGC providers | Shared OGC fixtures and end-to-end dimension-specific integration |
 | 6 — Publication and compatibility | **Pending** | No publication changes in this increment | WASM/C-FFI mappings, generated artifacts, changelog and release gates |
