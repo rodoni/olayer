@@ -8,6 +8,7 @@ crate-type = ["rlib", "staticlib", "cdylib"]
 
 [dependencies]
 olayer-core = { path = "../../core" }
+olayer-map-core.workspace = true
 wgpu = "0.19"
 bytemuck = { version = "1.16", features = ["derive"] }
 egui = "0.27"

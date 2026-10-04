@@ -109,8 +109,8 @@ impl NativeController {
         id: &str,
         base_url: &str,
         layer_name: &str,
-    ) -> crate::native_map_data_stack::GeoserverWmtsSource {
-        crate::native_map_data_stack::GeoserverWmtsSource::new(id, base_url, layer_name)
+    ) -> crate::map_provider::GeoserverWmtsSource {
+        crate::map_provider::GeoserverWmtsSource::new(id, base_url, layer_name)
     }
 
     /// Resolves a geodetic object height using the native terrain engine.

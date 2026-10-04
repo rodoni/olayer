@@ -6,11 +6,16 @@ This document details the architectural design and technical specification of th
 
 ## 1. Overview
 
-The **Native Map Data Stack** is the data infrastructure layer of the Native SDK. Its responsibility is to provide, decode, and manage memory buffers containing geospatial information (DTED terrain data) and dynamic operational target data (radar/ADS-B), feeding the respective mathematical engines of the Core.
+The **Native Map Provider layer** is the I/O and caching adapter of the Native SDK. It executes requests produced by transport-independent `olayer-map-core` contracts and provides decoded WMS, WMTS, WFS, WCS, terrain and operational data to the renderers and `olayer-core`.
+
+The provider owns HTTP/filesystem access, worker lifecycle, decoding, retries and bounded caches. CRS mathematics, tile-matrix validation and OGC request construction remain outside this layer.
 
 ```mermaid
 graph LR
-    Disk[(Local Disk)] -->|DTED Loading| TE[TerrainEngine]
+    MC[Map Core / OGC Requests] -->|Typed requests| MP[Native Map Provider]
+    HTTP[(HTTP / GeoServer)] -->|WMS / WMTS / WFS / WCS| MP
+    Disk[(Local Disk)] -->|DTED / GeoTIFF| MP
+    MP -->|Decoded data| TE[TerrainEngine / Renderers]
     Feed[1Hz Radar Feed] -->|Target Ingestion| IE[InterpolationEngine]
 ```
 
@@ -36,7 +41,20 @@ pub trait MapDataSource {
 
 ---
 
-## 3. Terrain Ingestion (DTED)
+## 3. OGC Provider Responsibilities
+
+The native provider uses separate adapters over shared request contracts:
+
+| Adapter | Result | 2D | 2.5D | 3D |
+|---|---|---|---|---|
+| WMS | decoded image | plane | draped texture | globe texture |
+| WMTS | decoded tile | tile mesh | terrain texture | ECEF tile mesh |
+| WFS | feature collection | projected vectors | terrain vectors | ECEF/billboards |
+| WCS | raster coverage | overlay | elevation/grid | elevation/volume |
+
+The current `GeoserverWmtsSource` is the first concrete adapter. Future adapters must not duplicate URL, CRS or tile-matrix rules; those belong to Map Core/OGC request builders.
+
+## 4. Terrain Ingestion (DTED)
 
 Unlike the WebAssembly version (which consumes elevation tiles via HTTP requests managed by TypeScript), the Native SDK performs local and direct disk readings:
 * **Format:** Supports reading of standard binary DTED files (Level 0, 1, or 2).
@@ -56,7 +74,7 @@ Unlike the WebAssembly version (which consumes elevation tiles via HTTP requests
 
 ---
 
-## 4. Dynamic Target Ingestion (Radar Feed)
+## 5. Dynamic Target Ingestion (Radar Feed)
 
 Aircraft telemetry packets in the airspace (usually received from radar or ADS-B feeds at a frequency of 1 Hz) are injected into the system:
 * **Dead Reckoning Setup:** The current state (latitude, longitude, height, speed, heading, and timestamp) is sent to the `InterpolationEngine` via [update_target](../../../../core/src/interpolator).
@@ -64,7 +82,7 @@ Aircraft telemetry packets in the airspace (usually received from radar or ADS-B
 
 ---
 
-## 5. C-FFI Integration for Host Systems
+## 6. C-FFI Integration for Host Systems
 
 For C/C++ host applications, the loading and manipulation of these data are exposed through safe FFI functions located in [c_ffi_bridge/mod.rs](../../../../sdk/native/src/c_ffi_bridge/mod.rs):
 

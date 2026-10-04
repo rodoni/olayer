@@ -1,7 +1,7 @@
 import { Layer } from "./layer";
 import type { LayerRenderContext } from "./layer";
 import type { OlayerController } from "../controller";
-import { VectorTileSource, VectorFeature } from "../providers/vector";
+import { VectorTileSource, VectorFeature } from "../map_provider/vector";
 import { WasmProjection, lla_to_ecef } from "olayer-wasm";
 
 type Position = [number, number];

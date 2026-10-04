@@ -1,17 +1,15 @@
 pub mod c_ffi_bridge;
+pub mod map_provider;
 pub mod native_controller;
 pub mod native_layer_manager;
-pub mod native_map_data_stack;
 pub mod tools;
 pub mod wgpu_cpu_vertex_pipeline;
 pub mod wgpu_gpu_pipeline;
 pub mod wgpu_volumetric_pipeline;
 
+pub use map_provider::{GeoserverWmtsSource, MapDataSource, NativeMapDataStack, TerrainDataSource};
 pub use native_controller::NativeController;
 pub use native_layer_manager::{Layer, NativeLayerManager};
-pub use native_map_data_stack::{
-    GeoserverWmtsSource, MapDataSource, NativeMapDataStack, TerrainDataSource,
-};
 pub use tools::{
     CompassRoseConfig, HistoryDot, HoldingPatternConfig, IlsConeConfig, IlsGeometry, IlsTickMark,
     PplLeader, PplTick, RangeRingsConfig, RblMeasurement, SnailTrailManager, TacticalToolsManager,

@@ -1,5 +1,9 @@
 use olayer_core::terrain::TerrainEngine;
+use olayer_map_core::{
+    CoordinateReferenceSystem, ImageFormat, TileKey, TileMatrix, UrlParts, WmtsRequestBuilder,
+};
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::convert::TryFrom;
 use std::fmt;
 use std::io::{Cursor, Read};
 use std::sync::mpsc::{channel, Sender};
@@ -366,6 +370,41 @@ fn fetch_wmts_tile(agent: &ureq::Agent, url: &str) -> Result<Vec<u8>, NativeMapD
     decode_wmts_tile(&bytes)
 }
 
+fn build_wmts_tile_url(
+    endpoint: &str,
+    layer: &str,
+    z: u32,
+    x: u32,
+    y: u32,
+) -> Result<String, NativeMapDataError> {
+    let zoom = u8::try_from(z).map_err(|_| NativeMapDataError::HttpRequestFailed)?;
+    let dimension = 1_u32
+        .checked_shl(zoom.into())
+        .ok_or(NativeMapDataError::HttpRequestFailed)?;
+    let matrix = TileMatrix {
+        identifier: format!("EPSG:900913:{z}"),
+        crs: CoordinateReferenceSystem::epsg(900913)
+            .map_err(|_| NativeMapDataError::HttpRequestFailed)?,
+        matrix_width: std::num::NonZeroU32::new(dimension)
+            .ok_or(NativeMapDataError::HttpRequestFailed)?,
+        matrix_height: std::num::NonZeroU32::new(dimension)
+            .ok_or(NativeMapDataError::HttpRequestFailed)?,
+        tile_width: std::num::NonZeroU32::new(WMTS_TILE_SIZE)
+            .ok_or(NativeMapDataError::HttpRequestFailed)?,
+        tile_height: std::num::NonZeroU32::new(WMTS_TILE_SIZE)
+            .ok_or(NativeMapDataError::HttpRequestFailed)?,
+    };
+    let request = WmtsRequestBuilder::new(UrlParts::new(endpoint, ""), layer)
+        .style("")
+        .matrix_set("EPSG:900913")
+        .matrix(matrix)
+        .tile(TileKey { x, y, z: zoom })
+        .format(ImageFormat::Png)
+        .get_tile()
+        .map_err(|_| NativeMapDataError::HttpRequestFailed)?;
+    Ok(request.url())
+}
+
 fn insert_cached_tile(
     cache: &Mutex<HashMap<String, Vec<u8>>>,
     order: &Mutex<VecDeque<String>>,
@@ -445,11 +484,15 @@ impl GeoserverWmtsSource {
                 let x: u32 = parts[1].parse().unwrap_or(0);
                 let y: u32 = parts[2].parse().unwrap_or(0);
 
-                // Build GeoServer WMTS request URL (EPSG:900913 is the standard Web Mercator MatrixSet)
-                let url = if base_url_for_thread.contains('?') {
-                    format!("{}&service=WMTS&request=GetTile&version=1.0.0&layer={}&style=&tilematrixset=EPSG:900913&TileMatrix=EPSG:900913:{}&TileRow={}&TileCol={}&format=image/png", base_url_for_thread, layer_name_for_thread, z, y, x)
-                } else {
-                    format!("{}?service=WMTS&request=GetTile&version=1.0.0&layer={}&style=&tilematrixset=EPSG:900913&TileMatrix=EPSG:900913:{}&TileRow={}&TileCol={}&format=image/png", base_url_for_thread, layer_name_for_thread, z, y, x)
+                // Build the canonical WMTS request through the transport-independent
+                // map-core contract. Authentication and HTTP execution stay native.
+                let Ok(url) =
+                    build_wmts_tile_url(&base_url_for_thread, &layer_name_for_thread, z, x, y)
+                else {
+                    if let Ok(mut p) = pending_clone.lock() {
+                        p.remove(&key);
+                    }
+                    continue;
                 };
 
                 log::debug!("Fetching WMTS tile {key}");
@@ -815,6 +858,23 @@ mod tests {
         source.clear_cache();
         assert_eq!(source.cache_size(), 0);
         assert!(source.get_tile_pixels(0, 0, 0).is_none());
+    }
+
+    #[test]
+    fn geoserver_wmts_url_uses_shared_map_core_contract() {
+        let url = build_wmts_tile_url(
+            "https://example.test/geoserver/wmts",
+            "roads & water",
+            3,
+            4,
+            5,
+        )
+        .unwrap();
+        assert!(url.starts_with("https://example.test/geoserver/wmts?SERVICE=WMTS"));
+        assert!(url.contains("LAYER=roads%20%26%20water"));
+        assert!(url.contains("TILEMATRIX=EPSG%3A900913%3A3"));
+        assert!(url.contains("TILEROW=5"));
+        assert!(url.contains("TILECOL=4"));
     }
 
     #[test]

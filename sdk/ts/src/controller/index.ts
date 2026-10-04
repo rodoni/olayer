@@ -7,7 +7,7 @@ import {
   WasmStyleRegistry,
 } from "olayer-wasm";
 import { LayerManager } from "../layers";
-import { MapDataStack, TerrainTileSource } from "../providers";
+import { MapDataStack, TerrainTileSource } from "../map_provider";
 import { TextureAtlasManager } from "../renderer/atlas";
 import type { AltitudeMode, AltitudeUnknownPolicy } from "../types/altitude";
 

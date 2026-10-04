@@ -1,15 +1,18 @@
-# SDK TS Component: Map Data Stack (`sdk/ts/src/providers`)
+# SDK TS Component: Map Data Stack (`sdk/ts/src/map_provider`)
 
-The **TS Map Data Stack** manages all ingestion and caching of cartographic data (raster and vector MVT) from GeoServer/GeoWebCache and terrain elevations (DTED, RGB terrain, and COG/GeoTIFF), decoupling network I/O operations from real-time main rendering.
+The **TS Map Provider layer** executes browser I/O for cartographic data while consuming transport-independent request contracts from `olayer-map-core`. It supports raster and vector data from GeoServer/GeoWebCache, terrain elevations and WMS/WMTS/WFS/WCS adapters, decoupling network I/O from real-time rendering.
+
+The provider owns `fetch`, browser decoding, cancellation, retries, cache eviction and WebGL/WASM upload. CRS mathematics and OGC request semantics belong to the shared Map Core/OGC crates.
 
 ---
 
 ## 1. Responsibilities
-* **Data Source Management (`MapDataSource`):** Abstract the network under static and dynamic map providers.
+* **Data Source Management (`MapDataSource`):** Executes requests produced by Map Core under static and dynamic map providers.
+* **OGC Runtime Adapters:** Execute WMS images, WMTS tiles, WFS features and WCS coverages in browser APIs.
 * **Terrain Paging and Loading (DTED):** Asynchronously download terrain elevation tiles based on camera geographic coordinates.
 * **COG/GeoTIFF Injection:** Fetch local or remote elevation rasters and pass their bytes to `WasmTerrainEngine.load_geotiff_tile`.
 * **Limited Cache Management (LRU Cache):** Maintain strict memory buffer limits (avoiding memory leaks in WebAssembly) with algorithms for evicting oldest blocks (*Least Recently Used*).
-* **Parallel asynchronous consumption:** Control HTTP request queues and delegate heavy MVT/DTED file processing to background threads using Web Workers.
+* **Parallel asynchronous consumption:** Control HTTP request queues and delegate heavy MVT/DTED/WCS processing to background workers where available.
 
 ---
 
@@ -105,7 +108,21 @@ export class RasterTileSource implements MapDataSource {
 
 ---
 
-## 3. Memory Management Flow (LRU Eviction)
+## 3. OGC and Display-Mode Boundary
+
+```mermaid
+graph LR
+    MC[Map Core / OGC Requests] --> TS[TS Map Provider]
+    TS --> HTTP[Browser fetch / Image]
+    HTTP --> OGC[WMS / WMTS / WFS / WCS Server]
+    TS --> R2[2D renderer]
+    TS --> R25[2.5D terrain renderer]
+    TS --> R3[3D ECEF globe renderer]
+```
+
+The same request contract is used in 2D, 2.5D and 3D. Only tessellation, coordinate conversion, visibility and rendering differ.
+
+## 4. Memory Management Flow (LRU Eviction)
 
 ```mermaid
 sequenceDiagram

@@ -37,7 +37,7 @@ The project is structured as a monorepo containing the following components:
 │       │   ├── c_ffi_bridge/  # C-FFI export layer (cbindgen)
 │       │   ├── native_controller/   # Native camera / interaction controller
 │       │   ├── native_layer_manager/# Native layer stack
-│       │   ├── native_map_data_stack/# Native tile/data source management
+│       │   ├── map_provider/         # Native tile/data source management
 │       │   ├── wgpu_cpu_vertex_pipeline/# CPU-side target projection (WGPU)
 │       │   └── wgpu_gpu_pipeline/    # GPU-side background/grid/volumetric rendering (WGPU)
 │       └── demo/              # Native desktop demo application

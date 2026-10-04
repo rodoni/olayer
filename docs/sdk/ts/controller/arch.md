@@ -25,7 +25,7 @@ import {
   WasmCameraState,
 } from "olayer-wasm";
 import { LayerManager } from "../layers";
-import { MapDataStack } from "../providers";
+import { MapDataStack } from "../map_provider";
 
 export type ViewMode = "2D" | "2.5D" | "3D";
 export type AltitudeMode = "absolute" | "clamp-to-ground" | "relative-to-ground" | "relative-to-mesh";

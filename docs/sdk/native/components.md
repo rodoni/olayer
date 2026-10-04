@@ -72,13 +72,13 @@ As implemented in the event loop in [main.rs](../../../sdk/native/demo/src/main.
 
 ---
 
-## 3. Native Map Data Stack
+## 3. Native Map Provider / Data Stack
 
 ### Responsibility
-The `Native Map Data Stack` manages the ingestion and local caching of static and dynamic cartographic and operational data resources for the desktop application. Unlike the Web ecosystem (which consumes data via browser network), in the desktop environment this component can access the local file system asynchronously, performing quick loading of DTED terrain files on disk and decoding them directly into the Rust Core's linear memory.
+The `Native Map Provider` manages the ingestion and local caching of static and dynamic cartographic and operational data resources for the desktop application. It consumes request contracts from `olayer-map-core` and executes HTTP/filesystem I/O. It supports the WMS, WMTS, WFS and WCS provider families while preserving separate rendering paths for 2D, 2.5D and 3D.
 
 ### Key Data Structures
-* `MapDataSource` trait (defined in [mod.rs](../../../sdk/native/src/native_map_data_stack/mod.rs)):
+* `MapDataSource` trait (defined in [mod.rs](../../../sdk/native/src/map_provider/mod.rs)):
   * `id(&self) -> &str` — Unique identifier for the data source.
   * `clear_cache(&mut self)` — Clears the local provider cache.
   * `cache_size(&self) -> usize` — Returns the number of cached items.
@@ -96,7 +96,18 @@ The `Native Map Data Stack` manages the ingestion and local caching of static an
   * `load_file(path: &str) -> Result<(), String>` — Loads a DTED tile from disk.
   * `load_buffer(buffer: &[u8]) -> Result<(), String>` — Loads a DTED tile from a raw buffer.
   * `unload_tile(lat_deg: i32, lon_deg: i32) -> bool` — Unloads a specific tile by its coordinate degrees.
-  * `get_elevation(lat_deg: f64, lon_deg: f64) -> Result<f64, String>` — Queries elevation at the given coordinate degrees.
+   * `get_elevation(lat_deg: f64, lon_deg: f64) -> Result<f64, String>` — Queries elevation at the given coordinate degrees.
+
+### OGC Provider Boundary
+
+| Service | Provider result | Renderer usage |
+|---|---|---|
+| WMS | Decoded image | Plane, draped terrain or globe texture |
+| WMTS | Decoded raster tile | Projected tile mesh or ECEF tile mesh |
+| WFS | Validated feature collection | Projected vectors, terrain features or ECEF billboards |
+| WCS | Validated raster coverage | Elevation, weather, analysis or volumetric data |
+
+The provider performs transport and decoding. CRS, tile matrices, bounds and request construction belong to the shared Map Core/OGC contracts.
 
 ---
 

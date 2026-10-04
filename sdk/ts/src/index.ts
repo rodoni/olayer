@@ -65,13 +65,13 @@ export type {
 } from "./layers";
 
 // Export Data Managers and Providers
-export { DataManager, TerrainTileSource, RgbTerrainSource, CogTerrainSource } from "./providers";
-export type { RgbTerrainEncoding, RgbTerrainSourceOptions } from "./providers";
-export { RasterTileSource } from "./providers/raster";
-export { VectorTileSource } from "./providers/vector";
-export type { VectorFeature, VectorGeometryType, VectorCoordinates, VectorTileSourceOptions } from "./providers/vector";
-export { MapDataStack } from "./providers/stack";
-export type { MapDataSource, TileCacheStats, TileRequestOptions } from "./providers/datasource";
+export { DataManager, TerrainTileSource, RgbTerrainSource, CogTerrainSource } from "./map_provider";
+export type { RgbTerrainEncoding, RgbTerrainSourceOptions } from "./map_provider";
+export { RasterTileSource } from "./map_provider/raster";
+export { VectorTileSource } from "./map_provider/vector";
+export type { VectorFeature, VectorGeometryType, VectorCoordinates, VectorTileSourceOptions } from "./map_provider/vector";
+export { MapDataStack } from "./map_provider/stack";
+export type { MapDataSource, TileCacheStats, TileRequestOptions } from "./map_provider/datasource";
 
 
 // Export Renderers and Texture Atlas

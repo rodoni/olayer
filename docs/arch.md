@@ -70,13 +70,16 @@ graph TB
         host_web["📱 Host App Web<br>[TypeScript/React/Vue]"]:::host
         ts_sdk["📦 Olayer TS SDK<br>[TypeScript Container]<br>Manages the WebGL pipeline, inputs, and rendering loop."]:::container
         wasm_bind["🔗 WASM Bindings<br>[Rust/JS Bridge]<br>wasm-bindgen exports and memory buffer management."]:::container
-        wasm_core["⚙️ Olayer Core (Rust WASM)<br>[WASM Module]<br>Logic engine compiled to WebAssembly. Geodesy, projections, and DTED indexing."]:::container
+        wasm_core["⚙️ Olayer Core (Rust WASM)<br>[WASM Module]<br>Geodesy, projections, terrain and domain logic."]:::container
+        map_core_web["🗺️ Map Core / OGC Requests<br>[Rust/WASM]<br>Pure WMS, WMTS, WFS and WCS request models."]:::container
     end
     
     subgraph Desktop_OS ["Native Desktop Environment"]
         host_rust["🖥️ Native Host App<br>[Rust / C++]"]:::host
         native_sdk["📦 Olayer Native SDK<br>[Rust Container]<br>Native wrapper exposing local APIs and wgpu/Vulkan pipeline."]:::container
-        rust_core["⚙️ Olayer Core (Native)<br>[Rust Library]<br>Native compilation of the core for the target architecture (x86_64/ARM)."]:::container
+        rust_core["⚙️ Olayer Core (Native)<br>[Rust Library]<br>Native compilation of domain and projection logic."]:::container
+        map_core_native["🗺️ Map Core / OGC Requests<br>[Rust Library]<br>Shared protocol and CRS contracts."]:::container
+        native_map_provider["🌐 Native Map Provider<br>[Rust I/O]<br>HTTP, filesystem, decode and cache adapters."]:::container
         local_disk["💽 Local DTED Storage<br>[File System]<br>DTED terrain files on local disk."]:::external
     end
     
@@ -90,13 +93,16 @@ graph TB
     host_web -->|Instantiates and initializes| ts_sdk
     ts_sdk -->|Calls via JS| wasm_bind
     wasm_bind -->|Executes core routines| wasm_core
-    ts_sdk -->|Consumes MVT/WMTS and SLD via HTTP| geoserver
+    ts_sdk -->|Uses map-provider adapters| map_core_web
+    map_core_web -->|Builds WMS/WMTS/WFS/WCS requests| geoserver
     ts_sdk -->|Downloads terrain/GeoTIFF data via HTTP| terrain_repo
     
     %% Native Flows
     host_rust -->|Imports and initializes| native_sdk
     native_sdk -->|Direct static function call| rust_core
-    native_sdk -->|Consumes MVT/WMTS and SLD via HTTP| geoserver
+    native_sdk -->|Uses native map provider| native_map_provider
+    native_map_provider -->|Uses shared request contracts| map_core_native
+    map_core_native -->|Builds WMS/WMTS/WFS/WCS requests| geoserver
     native_sdk -->|Reads terrain data from disk| local_disk
 
     %% Data Infrastructure
@@ -110,13 +116,16 @@ graph TB
 1. **Olayer Core (Rust - compilable to WASM and Native):**
    * **Responsibility:** All mission-critical mathematical engine. Has no direct I/O access to files or network in the WASM version (passive), processing only memory structures provided by the host layer.
    * **Technology:** Pure Rust (`f64`).
-2. **WASM Bindings (wasm-bindgen):**
+2. **Map Core / OGC Request Contracts:**
+   * **Responsibility:** Pure models, CRS negotiation, tile matrices, bounding boxes and WMS/WMTS/WFS/WCS request construction. It performs no network or filesystem I/O.
+   * **Technology:** Dedicated Rust workspace crate, consumable natively and through WASM.
+3. **WASM Bindings (wasm-bindgen):**
    * **Responsibility:** Memory transition bridge between the JS virtual machine and the WASM linear memory. Minimizes copies using direct buffer references (`ArrayBuffer` for DTED/MVT).
    * **Technology:** `wasm-bindgen`, `js-sys`, `web-sys`.
-3. **Olayer TS SDK (TypeScript):**
+4. **Olayer TS SDK (TypeScript):**
    * **Responsibility:** Client SDK/Framework consumed by web applications. Manages the visual `<canvas>` element lifecycle, orchestrates WebGL/WebGPU shaders, and handles anti-overlapping label calculations (anti-cluttering) on the CPU.
    * **Technology:** TypeScript, WebGL 2.0 / WebGPU, Canvas 2D API.
-4. **Olayer Native SDK (Rust):**
+5. **Olayer Native SDK (Rust):**
    * **Responsibility:** Wrapper for native desktop applications. Facilitates Core usage with local rendering engines.
    * **Technology:** Rust, optionally C/C++ bindings (`cbindgen`).
 
@@ -136,7 +145,7 @@ graph TB
     subgraph TS_SDK_Comp ["TypeScript SDK (Web)"]
         ts_controller["🎮 TS Controller<br>Loop (15/60 FPS) & Events"]:::component
         ts_layer_manager["🥞 TS Layer Manager<br>Composition and layer control"]:::component
-        ts_map_data_stack["📥 TS Map Data Stack<br>Sources & Cache Manager (MVT/WMTS/DTED)"]:::component
+        ts_map_data_stack["🌐 TS Map Provider<br>WMS/WMTS/WFS/WCS + cache"]:::component
         ts_tools["🛠️ TS Tactical Tools<br>RBL, PPL, Holding, ILS, Range Rings, Snail Trails"]:::component
         ts_gpu_pipe["🎨 WebGL/WebGPU Pipe<br>Static base map drawing"]:::component
         ts_cpu_pipe["🎯 WebGL/Canvas 2D Pipe<br>Symbols (Atlas) & Anti-clutter"]:::component
@@ -149,7 +158,7 @@ graph TB
     subgraph Native_SDK_Comp ["Native SDK (Desktop)"]
         native_controller["🎮 Native Controller<br>Native loop & Window (winit)"]:::nativeComponent
         native_layer_manager["🥞 Native Layer Manager<br>Native layer composition and control"]:::nativeComponent
-        native_map_data_stack["📥 Native Map Data Stack<br>Native Sources & Cache Manager"]:::nativeComponent
+        map_provider_native["🌐 Native Map Provider<br>WMS/WMTS/WFS/WCS + cache"]:::nativeComponent
         native_tools["🛠️ Native Tactical Tools<br>RBL, PPL, Holding, ILS, Range Rings, Snail Trails"]:::nativeComponent
         native_gpu_pipe["🎨 wgpu Pipe (Matrix)<br>Terrain/background rendering (Vulkan/Metal/DX)"]:::nativeComponent
         native_cpu_pipe["🎯 wgpu Pipe (Vertex)<br>Symbols (Atlas) & Native anti-clutter"]:::nativeComponent
@@ -183,7 +192,7 @@ graph TB
     native_controller --> native_layer_manager
     native_layer_manager --> native_gpu_pipe
     native_layer_manager --> native_cpu_pipe
-    native_map_data_stack --> native_controller
+        map_provider_native --> native_controller
     native_tools --> geodesy
     ffi_bridge --> native_tools
 
@@ -213,11 +222,12 @@ graph TB
 * **[SLD Parser](../core/src/sld):** Syntactic parser (Parser) of XML that converts the OGC SLD (Styled Layer Descriptor) standard into structured style metadata.
 * **[Symbol Registry](../core/src/symbol_registry):** Unified and agnostic symbology registry that resolves symbol codes (such as VOR or fighter jets) using simplified vector primitives generated from consolidated JSON library files.
 * **[Target Interpolator](../core/src/interpolator):** Maintains the state table of dynamic targets in 3D geodetic space. For each target, records the last known state vector. Computes interpolated positions via 3D Dead Reckoning based on system time (WGS84 LatLon and heading), completely decoupled from screen projection.
+* **[Map Core / OGC Contracts](../map-core):** Defines transport-independent WMS, WMTS, WFS and WCS request models, tile matrices, CRS metadata, coverage/feature contracts, validation and stable map error IDs. It performs no I/O.
 
 #### 2. TypeScript SDK Components (Web Client)
 * **TS Controller:** Controls the screen animation loop in the browser using `requestAnimationFrame` and manages dynamic FPS modulation (15 FPS idle / 60 FPS active).
 * **TS Layer Manager:** Coordinates the layer stack (Layer Stack) on the Web, managing the optimized paint cycle with isolation of static and dynamic layers.
-* **TS Map Data Stack:** Manages the web map data infrastructure. Implements the `MapDataSource` abstractions and manages sub-providers such as `VectorTileSource` (for MVT/GeoServer), `RasterTileSource` (WMTS/OpenStreetMap), and `TerrainTileSource` (dynamic terrain paging).
+* **TS Map Provider:** Executes browser `fetch`, `Image`/`createImageBitmap`, abort/retry, cache and WebGL uploads for WMS, WMTS, WFS, WCS and terrain sources. It consumes request contracts from Map Core.
 * **TS Tactical Tools:** Aviation controller measurement tools and procedural geometry generators: Range and Bearing Line (RBL / CRSR), Projected Position Leader (PPL) vectors with time ticks, racetrack holding patterns, ILS approach funnel cones, concentric range rings, and radar snail trails.
 * **WebGL/WebGPU GPU Pipeline:** Binds static vertex buffers and renders on the GPU from $4 \times 4$ matrices sent by the WASM bridge.
 * **WebGL/Canvas 2D CPU Pipeline:** Renders dynamic targets by resolving sprites in the GPU *Texture Atlas* and calculating label anti-overlapping.
@@ -225,7 +235,7 @@ graph TB
 #### 3. Native SDK Components (Desktop Client)
 * **Native Controller:** Controls the native frame loop and manages local desktop window creation (using the `winit` crate or the host application's message loop).
 * **Native Layer Manager:** Manages the native layer stack for visibility, blending, and repainting at the native level.
-* **Native Map Data Stack:** Desktop equivalent of data infrastructure. Manages background WMTS fetching, bounded decoded-pixel caching, worker shutdown, tactical format decoding, and efficient local disk I/O for DTED files.
+* **Native Map Provider:** Desktop equivalent of data infrastructure. Executes HTTP/filesystem I/O, WMTS/WMS/WFS/WCS decoding, bounded caches and worker lifecycle while consuming Map Core request contracts.
 * **Native Tactical Tools:** Native Rust implementation of tactical measurement tools and procedural geometry generation (`olayer_native::tools`) with C-FFI interoperability.
 * **wgpu GPU Pipeline:** Compiles pipelines and renders on the GPU (Vulkan, Metal, or DirectX 12) through the Rust `wgpu` library to draw 3D terrain and vector background maps.
 * **wgpu CPU/Vertex Pipeline:** Renders dynamic targets on the desktop using instanced calls and *billboards* from a local texture atlas.
@@ -383,13 +393,20 @@ olayer/
 │       ├── symbol_registry/      # Pluggable Symbology Resolver (NATO / ICAO)
 │       └── interpolator/         # Dead Reckoning Logic for Target Tracking
 │
+├── map-core/                     # [C4 Component: Shared map contracts]
+│   ├── Cargo.toml
+│   └── src/                      # CRS, tiles, bounds and OGC request models
+├── map-ogc/                      # [C4 Component: Pure OGC builders]
+│   ├── Cargo.toml
+│   └── src/                      # WMS, WMTS, WFS, WCS and capabilities
+
 sdk/
 ├── ts/                       # [C4 Component: Olayer TS SDK]
 │   ├── package.json
 │   ├── src/
 │   │   ├── controller/       # Loop Management, FPS Throttler, and Events
 │   │   ├── layers/           # Web Layer Stack Composition (Tile, Vector)
-│   │   ├── providers/        # WMTS, MVT, SLD network calls, and DTED injection
+│   │   ├── map_provider/     # Browser execution and source-specific WMS/WMTS/WFS/WCS adapters
 │   │   ├── tools/            # Tactical Tools (RBL, PPL, Holding, ILS, Range Rings, Snail Trails)
 │   │   ├── renderer/         # WebGL Renderer (GPU) and Canvas (CPU)
 │   │   └── index.ts          # Public TypeScript SDK API
@@ -409,7 +426,7 @@ sdk/
     │   ├── c_ffi_bridge/     # [C4 Component: C-FFI Bridge] FFI function exports
     │   ├── native_controller/# Native facade / loop & FPS throttler
     │   ├── native_layer_manager/ # Native layer composition and control
-    │   ├── native_map_data_stack/ # Native data sources & cache manager
+     │   ├── map_provider/          # Native HTTP/filesystem OGC adapters and cache manager
     │   ├── tools/            # [C4 Component: Native Tactical Tools]
     │   ├── wgpu_gpu_pipeline/# WGPU grid & raster tile rendering pipeline
     │   └── wgpu_cpu_vertex_pipeline/ # CPU-side projection & targets drawing pipeline

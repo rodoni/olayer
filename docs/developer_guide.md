@@ -107,14 +107,14 @@ olayer/
 ├── sdk/ts/                   # Browser TypeScript SDK (npm: olayer-sdk)
 │   ├── src/controller/       #   Animation loop, FPS throttling, camera input
 │   ├── src/layers/           #   Layer, LayerManager, TileLayer, VectorTileLayer, AeronauticalLayer, Weather layers, Volumetric layers
-│   ├── src/providers/        #   TerrainTileSource, RgbTerrainSource, CogTerrainSource, RasterTileSource, VectorTileSource
+│   ├── src/map_provider/     #   TerrainTileSource, RgbTerrainSource, CogTerrainSource, RasterTileSource, VectorTileSource
 │   ├── src/tools/            #   TacticalToolsManager (RBL, PPL, Holding, ILS, Rings), SnailTrailTracker
 │   ├── src/renderer/         #   WebGLRenderer (GPU), CPURenderer (Canvas 2D), LabelAntiClutterEngine, TextureAtlas
 │   └── wasm/                 #   WASM bindings crate (crate: olayer-wasm)
 ├── sdk/native/               # Desktop Native SDK (crate: olayer-native)
 │   ├── src/native_controller/#   Facade with FPS throttler
 │   ├── src/native_layer_manager/# Layer stack with Layer trait
-│   ├── src/native_map_data_stack/# Generic MapDataSource registry + TerrainDataSource
+│   ├── src/map_provider/     # Generic MapDataSource registry + TerrainDataSource
 │   ├── src/wgpu_gpu_pipeline/#    WGSL grid/volumetric shader + vertex generation
 │   ├── src/wgpu_cpu_vertex_pipeline/# CPU LLA→screen projection + SVG raster
 │   ├── src/c_ffi_bridge/     #   C ABI exports + cbindgen header
@@ -745,7 +745,7 @@ let dynamic_layers: Vec<&dyn Layer> = mgr.visible_dynamic_layers();
 ### 6.3 Map Data Stack
 
 ```rust
-use olayer_native::native_map_data_stack::{
+use olayer_native::map_provider::{
     NativeMapDataStack, TerrainDataSource, GeoserverWmtsSource, MapDataSource,
 };
 
@@ -1299,7 +1299,7 @@ int main() {
 
 ```rust
 use olayer_native::native_controller::NativeController;
-use olayer_native::native_map_data_stack::TerrainDataSource;
+use olayer_native::map_provider::TerrainDataSource;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut controller = NativeController::new(0.0, 0.0);

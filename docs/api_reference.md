@@ -1258,7 +1258,7 @@ class LabelAntiClutterEngine {
 ```rust
 pub use native_controller::NativeController;
 pub use native_layer_manager::{Layer, NativeLayerManager};
-pub use native_map_data_stack::{MapDataSource, NativeMapDataStack, TerrainDataSource, GeoserverWmtsSource};
+pub use map_provider::{MapDataSource, NativeMapDataStack, TerrainDataSource, GeoserverWmtsSource};
 pub use wgpu_gpu_pipeline::{RasterTileUpload, WgpuGpuPipeline, RasterVertex, WgpuRasterTile};
 pub use wgpu_cpu_vertex_pipeline::{WgpuCpuVertexPipeline, project_lla_to_screen, rasterize_svg};
 ```

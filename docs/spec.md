@@ -14,7 +14,8 @@ The framework must be **strictly focused on the GIS domain** (geographic process
 
 To guarantee memory safety, portability, and near-native performance in both web and local environments, the project will adopt a multi-language approach:
 
-* **Agnostic Core (Rust):** All geodetic calculation engines, projection algorithms, SLD style parsers, and DTED file indexing will be written in pure Rust.
+* **Agnostic Core (Rust):** All geodetic calculation engines, projection algorithms, SLD style parsers, and terrain indexing will be written in pure Rust. Map protocol contracts will live in a separate pure-Rust Map Core crate.
+* **Map Protocol Core:** A transport-independent crate will model WMS, WMTS, WFS and WCS requests, CRS metadata, tile matrices, vector features and raster coverages. It will never perform network or filesystem I/O.
 * **Hybrid Distribution (WebAssembly + Native):** * **Browsers:** The Rust Core will be compiled to **WebAssembly (WASM)**, providing a binding layer to be consumed via **TypeScript**.
 * **Local Systems:** The Core will be consumed directly as a native dependency in Rust.
 
@@ -86,6 +87,19 @@ The framework must support dynamic runtime switching between the following carto
 * **Mercator / Web Mercator:** Standard macro compatibility.
 * **2.5D View (Tilted Flat Perspective Map):** Three-dimensional perspective projection overlaid on a projected plane. Uses a standard tilt (pitch/tilt) of **35 degrees** (declined top/bird's-eye perspective, improving target and relief visualization compared to the old static angle of 55 degrees).
 * **3D View (Virtual Globe):** Direct transformation of ellipsoidal coordinates to Cartesian ECEF.
+
+### 5.1.1 OGC Map Services and Display Modes
+
+The framework supports four OGC service families through shared request contracts and separate runtime providers:
+
+| Service | Payload | 2D | 2.5D | 3D |
+|---|---|---|---|---|
+| WMS | Rendered image | Plane texture | Draped texture | Globe texture |
+| WMTS | Raster tile | Tile mesh | Terrain texture | ECEF tile mesh |
+| WFS | Vector features | Projected vectors | Terrain-attached vectors | ECEF features/billboards |
+| WCS | Raster coverage | Analysis/overlay | Elevation and grids | Elevation, weather and volumetric data |
+
+The Map Core constructs and validates requests. `sdk/ts` and `sdk/native` execute them through browser or native providers. The rendering mode never changes the transport contract; it changes only coordinate transformation, tessellation, depth handling and layer composition.
 
 #### Dynamic Camera Control (Zoom, Bearing, Pitch, Roll)
 The **Camera Engine** (`core::camera`) of the Olayer Core provides unified control over camera attitude in radians, integrated with the following View-Projection matrices:
@@ -191,5 +205,4 @@ To isolate the network and file management from WebGL rendering and radar calcul
 ```
 
 ---
-
 

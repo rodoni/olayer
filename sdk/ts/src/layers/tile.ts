@@ -1,7 +1,7 @@
 import { Layer } from "./layer";
 import type { LayerRenderContext } from "./layer";
 import type { OlayerController } from "../controller";
-import { RasterTileSource } from "../providers/raster";
+import { RasterTileSource } from "../map_provider/raster";
 import { WasmProjection, lla_to_ecef } from "olayer-wasm";
 
 const TILE_SUBDIVISION = 16;
