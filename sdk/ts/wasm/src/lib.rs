@@ -1,6 +1,7 @@
 #![allow(clippy::missing_safety_doc)]
 #![allow(clippy::too_many_arguments)]
 
+use olayer_core::error_code::ErrorCode;
 use olayer_core::geodesy::ellipsoid::Ellipsoid;
 use olayer_core::geodesy::{GeodeticSolver, LatLon};
 use olayer_core::interpolator::{InterpolationEngine, TargetState};
@@ -10,7 +11,16 @@ use olayer_core::projections::{
 use olayer_core::sld::StyleRegistry;
 use olayer_core::symbol_registry::{providers::DeclarativeProvider, SymbolRegistry};
 use olayer_core::terrain::TerrainEngine;
+use std::fmt::Display;
 use wasm_bindgen::prelude::*;
+
+fn coded_js_error(code: ErrorCode, message: impl Display) -> JsValue {
+    let js_error = js_sys::Error::new(&format!("{code}: {message}"));
+    let value: JsValue = js_error.into();
+    let _ = js_sys::Reflect::set(&value, &"code".into(), &code.as_str().into());
+    let _ = js_sys::Reflect::set(&value, &"module".into(), &code.module().into());
+    value
+}
 
 /// WASM compatible wrapper for LatLon geodetic coordinates.
 #[wasm_bindgen]
@@ -67,7 +77,7 @@ impl WasmTerrainEngine {
                 lat_deg: key.lat_deg,
                 lon_deg: key.lon_deg,
             })
-            .map_err(|e| JsValue::from_str(&e.to_string()))
+            .map_err(|error| coded_js_error(error.code(), error))
     }
 
     /// Unloads a tile by its coordinate degrees.
@@ -80,14 +90,14 @@ impl WasmTerrainEngine {
     pub fn get_elevation(&self, lat_deg: f64, lon_deg: f64) -> Result<f64, JsValue> {
         self.inner
             .get_elevation(lat_deg, lon_deg)
-            .map_err(|e| JsValue::from_str(&e.to_string()))
+            .map_err(|error| coded_js_error(error.code(), error))
     }
 
     /// Returns the interpolated elevation at coordinate radians.
     pub fn get_elevation_rad(&self, lat_rad: f64, lon_rad: f64) -> Result<f64, JsValue> {
         self.inner
             .get_elevation_rad(lat_rad, lon_rad)
-            .map_err(|e| JsValue::from_str(&e.to_string()))
+            .map_err(|error| coded_js_error(error.code(), error))
     }
 
     /// Resolves an object height against terrain using an explicit altitude mode.
@@ -106,7 +116,7 @@ impl WasmTerrainEngine {
         let policy = parse_altitude_unknown_policy(unknown_policy)?;
         self.inner
             .resolve_altitude(lat_rad, lon_rad, input_height, mode, policy, mesh_height)
-            .map_err(|error| JsValue::from_str(&error.to_string()))
+            .map_err(|error| coded_js_error(error.code(), error))
     }
 
     /// Returns `{ elevation_meters: number | null }`, preserving DTED null samples.
@@ -114,7 +124,7 @@ impl WasmTerrainEngine {
         let sample = self
             .inner
             .get_elevation_status(lat_rad, lon_rad)
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+            .map_err(|error| coded_js_error(error.code(), error))?;
         serde_wasm_bindgen::to_value(&sample).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
@@ -137,7 +147,7 @@ impl WasmTerrainEngine {
         let profile = self
             .inner
             .get_vertical_profile_status(&route, step_meters, policy)
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+            .map_err(|error| coded_js_error(error.code(), error))?;
         serde_wasm_bindgen::to_value(&profile).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
@@ -164,7 +174,7 @@ impl WasmTerrainEngine {
                 minimum_clearance_meters,
                 policy,
             )
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+            .map_err(|error| coded_js_error(error.code(), error))?;
         serde_wasm_bindgen::to_value(&result).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
@@ -184,7 +194,7 @@ impl WasmTerrainEngine {
         let profile = self
             .inner
             .get_vertical_profile(&route, step_meters)
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+            .map_err(|error| coded_js_error(error.code(), error))?;
 
         // Flatten the result: 5 elements per point (distance, elevation, lat, lon, height)
         let mut flat = Vec::with_capacity(profile.len() * 5);
@@ -240,7 +250,7 @@ impl WasmTerrainEngine {
         self.inner
             .load_rgb_tile(z, x, y, width, height, rgba_bytes, enc)
             .map(|_| ())
-            .map_err(|e| JsValue::from_str(&e.to_string()))
+            .map_err(|error| coded_js_error(error.code(), error))
     }
 
     /// Unloads an RGB elevation tile by its $(Z, X, Y)$ key.
@@ -265,7 +275,7 @@ impl WasmTerrainEngine {
         let bounds_rad = self
             .inner
             .load_geotiff_tile(data)
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+            .map_err(|error| coded_js_error(error.code(), error))?;
         let bounds_deg = [
             bounds_rad.0.to_degrees(),
             bounds_rad.1.to_degrees(),
@@ -369,7 +379,7 @@ impl WasmInterpolationEngine {
     pub fn with_stale_threshold(stale_threshold: f64) -> Result<WasmInterpolationEngine, JsValue> {
         Ok(WasmInterpolationEngine {
             inner: InterpolationEngine::with_stale_threshold(stale_threshold)
-                .map_err(|error| JsValue::from_str(&error.to_string()))?,
+                .map_err(|error| coded_js_error(error.code(), error))?,
         })
     }
 
@@ -396,7 +406,7 @@ impl WasmInterpolationEngine {
         };
         self.inner
             .update_target(state)
-            .map_err(|e| JsValue::from_str(&e.to_string()))
+            .map_err(|error| coded_js_error(error.code(), error))
     }
 
     /// Removes a target by its identifier.
@@ -409,7 +419,7 @@ impl WasmInterpolationEngine {
         let targets = self
             .inner
             .interpolate_all(current_time)
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+            .map_err(|error| coded_js_error(error.code(), error))?;
 
         serde_wasm_bindgen::to_value(&targets).map_err(|e| JsValue::from_str(&e.to_string()))
     }
@@ -419,7 +429,7 @@ impl WasmInterpolationEngine {
         let batch = self
             .inner
             .interpolate_all_with_status(current_time)
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+            .map_err(|error| coded_js_error(error.code(), error))?;
         serde_wasm_bindgen::to_value(&batch).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 }
@@ -587,7 +597,7 @@ impl WasmProjection {
         let lla = LatLon::new(lat_rad, lon_rad, height);
         proj.project(&lla)
             .map(|(x, y)| vec![x, y])
-            .map_err(|e| JsValue::from_str(&e.to_string()))
+            .map_err(|error| coded_js_error(error.code(), error))
     }
 
     /// Unprojects planar meters (x, y) to geodetic coordinates.
@@ -599,7 +609,7 @@ impl WasmProjection {
                 lon: lla.lon,
                 height: lla.height,
             })
-            .map_err(|e| JsValue::from_str(&e.to_string()))
+            .map_err(|error| coded_js_error(error.code(), error))
     }
 
     /// Generates a flat 4x4 View-Projection matrix [f32; 16].
@@ -616,7 +626,7 @@ impl WasmProjection {
         );
         cam.get_2d_view_proj_matrix(proj.as_ref())
             .map(|m| m.to_vec())
-            .map_err(|e| JsValue::from_str(&e.to_string()))
+            .map_err(|error| coded_js_error(error.code(), error))
     }
 
     /// Generates a flat 4x4 Perspective View-Projection matrix for 3D globe visualization.
@@ -632,7 +642,7 @@ impl WasmProjection {
         );
         cam.get_3d_view_proj_matrix()
             .map(|m| m.to_vec())
-            .map_err(|e| JsValue::from_str(&e.to_string()))
+            .map_err(|error| coded_js_error(error.code(), error))
     }
 
     /// Generates a flat 4x4 Perspective View-Projection matrix for a 2.5D tilted flat map.
@@ -649,7 +659,7 @@ impl WasmProjection {
         );
         cam.get_25d_view_proj_matrix(proj.as_ref())
             .map(|m| m.to_vec())
-            .map_err(|e| JsValue::from_str(&e.to_string()))
+            .map_err(|error| coded_js_error(error.code(), error))
     }
 }
 
@@ -684,7 +694,7 @@ impl WasmStyleRegistry {
     pub fn parse(xml: &str) -> Result<WasmStyleRegistry, JsValue> {
         olayer_core::sld::parser::parse(xml)
             .map(|inner| WasmStyleRegistry { inner })
-            .map_err(|e| JsValue::from_str(&e.to_string()))
+            .map_err(|error| coded_js_error(error.code(), error))
     }
 }
 
@@ -705,7 +715,7 @@ impl WasmSymbolRegistry {
     #[wasm_bindgen]
     pub fn register_declarative_provider(&mut self, json_content: &str) -> Result<(), JsValue> {
         let provider = DeclarativeProvider::from_json(json_content)
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+            .map_err(|error| coded_js_error(error.code(), error))?;
         self.inner.register_provider(Box::new(provider));
         Ok(())
     }
@@ -719,7 +729,7 @@ impl WasmSymbolRegistry {
         let resolved = self
             .inner
             .resolve_symbol(code, &style.inner)
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+            .map_err(|error| coded_js_error(error.code(), error))?;
         serde_wasm_bindgen::to_value(&resolved).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 }
@@ -849,7 +859,7 @@ impl WasmMagneticModel {
     /// Loads a magnetic model from a `WMM.COF` formatted string.
     pub fn from_cof(cof_content: &str) -> Result<WasmMagneticModel, JsValue> {
         let model = olayer_core::geodesy::MagneticModel::from_cof_str(cof_content)
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+            .map_err(|error| coded_js_error(error.code(), error))?;
         Ok(WasmMagneticModel { inner: model })
     }
 
@@ -1357,21 +1367,21 @@ impl WasmAeronauticalDataset {
     /// Parses an AIXM 5.1 formatted XML string.
     pub fn from_aixm_51(xml_content: &str) -> Result<WasmAeronauticalDataset, JsValue> {
         let ds = olayer_core::aeronautical::parse_aixm_51_str(xml_content)
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+            .map_err(|error| coded_js_error(error.code(), error))?;
         Ok(WasmAeronauticalDataset { inner: ds })
     }
 
     /// Parses a GeoJSON-Aviation formatted JSON string.
     pub fn from_geojson(json_content: &str) -> Result<WasmAeronauticalDataset, JsValue> {
         let ds = olayer_core::aeronautical::parse_geojson_aviation_str(json_content)
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+            .map_err(|error| coded_js_error(error.code(), error))?;
         Ok(WasmAeronauticalDataset { inner: ds })
     }
 
     /// Serializes the dataset into a standard GeoJSON FeatureCollection string.
     pub fn to_geojson(&self) -> Result<String, JsValue> {
         olayer_core::aeronautical::export_dataset_to_geojson(&self.inner)
-            .map_err(|e| JsValue::from_str(&e.to_string()))
+            .map_err(|error| coded_js_error(error.code(), error))
     }
 
     /// Number of airspaces in the dataset.
@@ -1416,7 +1426,7 @@ impl WasmAeronauticalDataset {
         let navaids = self
             .inner
             .find_navaids_within_radius(&center, radius_meters)
-            .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            .map_err(|error| coded_js_error(error.code(), error))?;
         serde_wasm_bindgen::to_value(&navaids).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
@@ -1473,14 +1483,14 @@ impl WasmSigmetDataset {
     pub fn from_geojson(geojson_str: &str) -> Result<WasmSigmetDataset, JsValue> {
         olayer_core::weather::SigmetDataset::from_geojson(geojson_str)
             .map(|ds| WasmSigmetDataset { inner: ds })
-            .map_err(|e| JsValue::from_str(&e.to_string()))
+            .map_err(|error| coded_js_error(error.code(), error))
     }
 
     /// Serializes warning features to a GeoJSON FeatureCollection string.
     pub fn to_geojson(&self) -> Result<String, JsValue> {
         self.inner
             .to_geojson()
-            .map_err(|e| JsValue::from_str(&e.to_string()))
+            .map_err(|error| coded_js_error(error.code(), error))
     }
 
     /// Returns the total number of warning features in the dataset.
@@ -1528,7 +1538,7 @@ pub fn generate_wind_barb_geometry(
         staff_length_meters,
         is_southern_hemisphere,
     )
-    .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    .map_err(|error| coded_js_error(error.code(), error))?;
 
     Ok(olayer_core::weather::wind_barb_to_flat_lines_deg(&geom))
 }
@@ -1552,7 +1562,7 @@ pub fn colorize_dbz_grid(
     let pal = olayer_core::weather::RadarColorPalette::from_str_name(palette)
         .unwrap_or(olayer_core::weather::RadarColorPalette::Nexrad);
     olayer_core::weather::colorize_dbz_grid(grid, width, height, pal)
-        .map_err(|e| JsValue::from_str(&e.to_string()))
+        .map_err(|error| coded_js_error(error.code(), error))
 }
 
 /// Generates 2D isolines / contour lines from a scalar grid using Marching Squares.
@@ -1576,7 +1586,7 @@ pub fn generate_isolines(
     );
     let segments =
         olayer_core::weather::generate_isolines_rad(grid, width, height, bounds_rad, isovalues)
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+            .map_err(|error| coded_js_error(error.code(), error))?;
     Ok(olayer_core::weather::isolines_to_flat_array_deg(&segments))
 }
 
@@ -1668,7 +1678,7 @@ pub fn generate_airspace_volume_mesh(
     }
 
     let mesh = olayer_core::volumetric::generate_airspace_volume_mesh(&polygon, floor_m, ceiling_m)
-        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        .map_err(|error| coded_js_error(error.code(), error))?;
 
     Ok(WasmVolumetricMesh { inner: mesh })
 }
@@ -1700,7 +1710,7 @@ pub fn generate_trajectory_ribbon_mesh(
         ribbon_width_m,
         scalars.as_deref(),
     )
-    .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    .map_err(|error| coded_js_error(error.code(), error))?;
 
     Ok(WasmRibbonMesh { inner: mesh })
 }

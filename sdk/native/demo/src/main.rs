@@ -157,6 +157,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     data[idx] = be[0];
                     data[idx + 1] = be[1];
                 }
+                let checksum_end = offset + 7 + 100 * 2;
+                let checksum = data[offset..checksum_end]
+                    .iter()
+                    .fold(0u32, |sum, byte| sum.wrapping_add(u32::from(*byte)));
+                data[checksum_end..checksum_end + 4].copy_from_slice(&checksum.to_be_bytes());
                 offset += col_size;
             }
 

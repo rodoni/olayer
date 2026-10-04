@@ -1,3 +1,4 @@
+use crate::error_code::ErrorCode;
 use thiserror::Error;
 
 /// Errors that can occur during aeronautical data parsing or processing.
@@ -24,4 +25,54 @@ pub enum AeronauticalError {
     /// General format error.
     #[error("Aeronautical format error: {0}")]
     FormatError(String),
+}
+
+impl AeronauticalError {
+    /// Returns the stable machine-readable code for this error variant.
+    pub const fn code(&self) -> ErrorCode {
+        match self {
+            Self::XmlParseError(_) => ErrorCode::new("OL-CORE-AER-0001"),
+            Self::JsonParseError(_) => ErrorCode::new("OL-CORE-AER-0002"),
+            Self::MissingRequiredField(_) => ErrorCode::new("OL-CORE-AER-0003"),
+            Self::InvalidCoordinateString(_) => ErrorCode::new("OL-CORE-AER-0004"),
+            Self::InvalidAltitude(_) => ErrorCode::new("OL-CORE-AER-0005"),
+            Self::EmptyDataset(_) => ErrorCode::new("OL-CORE-AER-0006"),
+            Self::FormatError(_) => ErrorCode::new("OL-CORE-AER-0007"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AeronauticalError;
+
+    #[test]
+    fn codes_are_stable_and_unique_for_every_variant() {
+        let errors = [
+            AeronauticalError::XmlParseError(String::new()),
+            AeronauticalError::JsonParseError(String::new()),
+            AeronauticalError::MissingRequiredField(String::new()),
+            AeronauticalError::InvalidCoordinateString(String::new()),
+            AeronauticalError::InvalidAltitude(String::new()),
+            AeronauticalError::EmptyDataset(String::new()),
+            AeronauticalError::FormatError(String::new()),
+        ];
+        let codes = errors.map(|error| error.code().as_str());
+
+        assert_eq!(
+            codes,
+            [
+                "OL-CORE-AER-0001",
+                "OL-CORE-AER-0002",
+                "OL-CORE-AER-0003",
+                "OL-CORE-AER-0004",
+                "OL-CORE-AER-0005",
+                "OL-CORE-AER-0006",
+                "OL-CORE-AER-0007",
+            ]
+        );
+        for (index, code) in codes.iter().enumerate() {
+            assert!(!codes[..index].contains(code));
+        }
+    }
 }

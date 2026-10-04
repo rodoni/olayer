@@ -22,6 +22,7 @@
 pub mod aeronautical;
 pub mod camera;
 pub mod declutter;
+pub mod error_code;
 pub mod geodesy;
 pub mod interpolator;
 pub mod projections;

@@ -1,3 +1,4 @@
+use crate::error_code::ErrorCode;
 use std::fmt;
 
 /// Errors that can occur during projection operations.
@@ -14,6 +15,20 @@ pub enum ProjectionError {
     InvalidParameters,
 }
 
+impl ProjectionError {
+    /// Returns the stable machine-readable code for this error.
+    #[must_use]
+    pub const fn code(&self) -> ErrorCode {
+        match self {
+            Self::InvalidCameraState => ErrorCode::new("OL-CORE-PRJ-0001"),
+            Self::Singularity => ErrorCode::new("OL-CORE-PRJ-0002"),
+            Self::ConvergenceFailed => ErrorCode::new("OL-CORE-PRJ-0003"),
+            Self::InvalidInput => ErrorCode::new("OL-CORE-PRJ-0004"),
+            Self::InvalidParameters => ErrorCode::new("OL-CORE-PRJ-0005"),
+        }
+    }
+}
+
 impl fmt::Display for ProjectionError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -27,3 +42,34 @@ impl fmt::Display for ProjectionError {
 }
 
 impl std::error::Error for ProjectionError {}
+
+#[cfg(test)]
+mod tests {
+    use super::ProjectionError;
+
+    #[test]
+    fn every_variant_has_a_unique_code() {
+        let errors = [
+            ProjectionError::InvalidCameraState,
+            ProjectionError::Singularity,
+            ProjectionError::ConvergenceFailed,
+            ProjectionError::InvalidInput,
+            ProjectionError::InvalidParameters,
+        ];
+        let codes = errors.map(|error| error.code());
+
+        assert_eq!(
+            codes.map(|code| code.as_str()),
+            [
+                "OL-CORE-PRJ-0001",
+                "OL-CORE-PRJ-0002",
+                "OL-CORE-PRJ-0003",
+                "OL-CORE-PRJ-0004",
+                "OL-CORE-PRJ-0005",
+            ]
+        );
+        for (index, code) in codes.iter().enumerate() {
+            assert!(!codes[..index].contains(code));
+        }
+    }
+}
