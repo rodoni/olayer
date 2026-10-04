@@ -2496,7 +2496,8 @@ mod unit_tests {
                     "type": "Feature",
                     "properties": {
                         "id": "SIG_TEST",
-                        "hazard": "TURBULENCE",
+                        "name": "Test turbulence SIGMET",
+                        "hazard_type": "TURBULENCE",
                         "severity": "SEVERE"
                     },
                     "geometry": {
