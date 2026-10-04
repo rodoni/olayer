@@ -24,7 +24,7 @@ pub use errors::{
 };
 pub use format::{CoverageSampleType, ImageFormat, VectorFormat};
 pub use request::{QueryParameter, UrlParts};
-pub use tile::{TileKey, TileMatrix};
+pub use tile::{TileAddress, TileKey, TileMatrix};
 pub use wcs::{Coverage, WcsGetCoverageRequest, WcsRequestBuilder};
 pub use wfs::{WfsGetFeatureRequest, WfsRequestBuilder};
 pub use wms::{MapImage, WmsGetMapRequest, WmsRequestBuilder};

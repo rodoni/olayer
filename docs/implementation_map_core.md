@@ -37,7 +37,23 @@ sdk/ts/src/map_provider/      # Browser execution and source adapters
 sdk/native/src/map_provider/  # Native HTTP/filesystem execution adapters
 ```
 
-`olayer-map-core` may depend on `olayer-core` for domain coordinate and projection types. It must not depend on `reqwest`, browser APIs, `tokio`, `wgpu`, filesystem APIs or SDK crates.
+`olayer-map-core` currently has no dependency on `olayer-core`; this keeps the contract crate transport- and engine-independent until a concrete projection conversion contract is approved. It must not depend on `reqwest`, browser APIs, `tokio`, `wgpu`, filesystem APIs or SDK crates.
+
+## Current implementation status
+
+Status is tracked against the atomic phases below:
+
+| Phase | Status | Delivered | Remaining |
+|---|---|---|---|
+| 0 — Specification gate | **Complete** | Workspace crate decision, centralized dependencies and public contract baseline | Formal API review record |
+| 1 — Map Core foundation | **Partial** | `olayer-map-core`, CRS, bounds, `TileAddress`, validated tile matrix, dimensions, formats, errors and response value types | Property-based tests and broader matrix/tile-size policy coverage |
+| 2 — Pure OGC builders | **Partial** | WMS/WMTS/WFS/WCS builders, deterministic query serialization and capability model | Capabilities document parsers and broader fixtures/snapshots |
+| 3 — Native provider migration | **Partial** | `GeoserverWmtsSource` uses `olayer-map-core::wmts`; existing cache/decoder gates preserved | Native WMS/WFS/WCS adapters and transport abstraction |
+| 4 — TypeScript provider migration | **Partial** | WMTS and WMS/WFS/WCS request adapters; `RasterTileSource` accepts structured WMTS options | WFS/WCS execution/decoders, response limits, coded error mapping and remaining source migrations |
+| 5 — 2D/2.5D/3D integration | **Pending** | Existing renderer coverage remains independent of OGC providers | Shared OGC fixtures and end-to-end dimension-specific integration |
+| 6 — Publication and compatibility | **Pending** | No publication changes in this increment | WASM/C-FFI mappings, generated artifacts, changelog and release gates |
+
+The status table is intentionally conservative: request construction is not counted as transport execution, and existing renderer tests are not counted as OGC integration tests.
 
 ## 3. Domain contracts
 
@@ -243,48 +259,48 @@ The map provider returns data; renderers choose the dimension-specific represent
 
 ## 8. Atomic implementation phases
 
-### Phase 0 — Specification gate
+### Phase 0 — Specification gate — **Complete**
 
 - Freeze public domain types and invariants.
 - Decide whether `olayer-map-core` is introduced immediately as a workspace crate.
 - Add `[workspace.dependencies]` entries at the workspace root.
 - Gate: review API signatures before code.
 
-### Phase 1 — Map Core foundation
+### Phase 1 — Map Core foundation — **Partial**
 
 - Add crate and module skeleton.
 - Implement `ErrorCode`, `MapError`, CRS, bounds, tile keys and formats.
 - Add property tests for tile bounds and matrix limits.
 - Gate: `cargo check -p olayer-map-core` and `cargo test -p olayer-map-core`.
 
-### Phase 2 — Pure OGC builders
+### Phase 2 — Pure OGC builders — **Partial**
 
 - Implement WMS and WMTS builders first.
 - Add WFS feature request and WCS coverage request.
 - Add deterministic URL/query tests and capability fixtures.
 - Gate: `cargo clippy -p olayer-map-core --all-targets -- -D warnings`.
 
-### Phase 3 — Native provider migration
+### Phase 3 — Native provider migration — **Partial**
 
 - Add provider interfaces and transport adapter.
 - Migrate `GeoserverWmtsSource` without changing cache behavior.
 - Add WMS/WFS/WCS adapters incrementally.
 - Gate: native unit/integration tests and bounded-response tests.
 
-### Phase 4 — TypeScript provider migration
+### Phase 4 — TypeScript provider migration — **Partial**
 
 - Add TypeScript request adapter using generated WASM/core types where appropriate.
 - Migrate raster/vector/terrain providers one at a time.
 - Preserve `AbortSignal`, retry and cache contracts.
 - Gate: `npm run typecheck`, provider tests and full Vitest suite.
 
-### Phase 5 — 2D/2.5D/3D integration
+### Phase 5 — 2D/2.5D/3D integration — **Pending**
 
 - Add shared fixtures for one request in all display dimensions.
 - Validate projection, terrain draping, ECEF tessellation, horizon culling and depth.
 - Add visual/manual demo checks and deterministic geometry tests.
 
-### Phase 6 — Publication and compatibility
+### Phase 6 — Publication and compatibility — **Pending**
 
 - Update WASM and C-FFI error mappings.
 - Update generated headers and TypeScript declarations.
