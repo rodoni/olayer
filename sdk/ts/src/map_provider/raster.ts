@@ -1,5 +1,9 @@
 import { MapDataSource, ProviderLogger, SILENT_PROVIDER_LOGGER, TileCacheStats, TileRequestOptions } from "./datasource";
 import { TileCache, throwIfAborted } from "./tile_cache";
+import { buildWmtsTileUrl } from "./wmts";
+import type { WmtsTileRequestOptions } from "./wmts";
+
+type RasterUrlResolver = string | ((x: number, y: number, z: number) => string) | WmtsTileRequestOptions;
 
 /**
  * Provedor de tiles de imagens rasterizadas (WMTS / OpenStreetMap / XYZ).
@@ -12,13 +16,13 @@ export class RasterTileSource implements MapDataSource {
   private readonly pending = new Map<string, Promise<void>>();
   private readonly invalidated = new Set<string>();
   private generation = 0;
-  private urlResolver: string | ((x: number, y: number, z: number) => string);
+  private urlResolver: RasterUrlResolver;
   private maxTiles: number;
   private readonly logger: ProviderLogger;
 
   constructor(
     gl: WebGL2RenderingContext,
-    urlResolver: string | ((x: number, y: number, z: number) => string) = "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+    urlResolver: RasterUrlResolver = "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
     maxTiles: number = 100,
     logger: ProviderLogger = SILENT_PROVIDER_LOGGER,
   ) {
@@ -62,6 +66,8 @@ export class RasterTileSource implements MapDataSource {
     let url = "";
     if (typeof this.urlResolver === "function") {
       url = this.urlResolver(x, y, z);
+    } else if (typeof this.urlResolver === "object") {
+      url = buildWmtsTileUrl(this.urlResolver, { x, y, z });
     } else {
       url = this.urlResolver
         .replace("{x}", x.toString())

@@ -72,6 +72,8 @@ export { VectorTileSource } from "./map_provider/vector";
 export type { VectorFeature, VectorGeometryType, VectorCoordinates, VectorTileSourceOptions } from "./map_provider/vector";
 export { MapDataStack } from "./map_provider/stack";
 export type { MapDataSource, TileCacheStats, TileRequestOptions } from "./map_provider/datasource";
+export { buildWmtsTileUrl } from "./map_provider/wmts";
+export type { WmtsTile, WmtsTileRequestOptions } from "./map_provider/wmts";
 
 
 // Export Renderers and Texture Atlas
