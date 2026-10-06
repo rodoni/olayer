@@ -14,7 +14,7 @@ pub mod wms;
 pub mod wmts;
 
 pub use bounds::BoundingBox;
-pub use capabilities::{Capabilities, ServiceType};
+pub use capabilities::{Capabilities, CapabilitiesRequest, ServiceType};
 pub use crs::{CoordinateReferenceSystem, CrsAuthority};
 pub use dimensions::DisplayDimension;
 pub use errors::{
