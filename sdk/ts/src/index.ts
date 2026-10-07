@@ -76,6 +76,10 @@ export { buildWmtsTileUrl } from "./map_provider/wmts";
 export type { WmtsTile, WmtsTileRequestOptions } from "./map_provider/wmts";
 export { buildWcsGetCoverageUrl, buildWfsGetFeatureUrl, buildWmsGetMapUrl } from "./map_provider/ogc";
 export type { OgcBounds, WcsCoverageRequestOptions, WfsFeatureRequestOptions, WmsMapRequestOptions } from "./map_provider/ogc";
+export { OgcHttpClient, OgcHttpError, OgcImageDecodeError, OgcResponseLimitError, OgcTimeoutError } from "./map_provider/ogc_client";
+export type { OgcClientOptions, WcsJsonCoverage, WfsFeature, WfsFeatureCollection } from "./map_provider/ogc_client";
+export { WcsRasterSource, WfsVectorSource } from "./map_provider/ogc_sources";
+export { uploadOgcBitmapTexture } from "./map_provider/webgl";
 
 
 // Export Renderers and Texture Atlas

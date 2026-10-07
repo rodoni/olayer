@@ -7,8 +7,14 @@ pub mod wgpu_cpu_vertex_pipeline;
 pub mod wgpu_gpu_pipeline;
 pub mod wgpu_volumetric_pipeline;
 
-pub use map_provider::decoders::{decode_wfs_feature_collection, decode_wms_image};
+pub use map_provider::decoders::{
+    decode_wcs_json_coverage, decode_wcs_raster_coverage, decode_wfs_feature_collection,
+    decode_wms_image,
+};
 pub use map_provider::ogc::{NativeOgcClient, OgcTransport, UreqTransport};
+pub use map_provider::sources::{
+    WcsCoverageSource, WcsCoverageSourceConfig, WfsFeatureSource, WmsMapSource,
+};
 pub use map_provider::{GeoserverWmtsSource, MapDataSource, NativeMapDataStack, TerrainDataSource};
 pub use native_controller::NativeController;
 pub use native_layer_manager::{Layer, NativeLayerManager};

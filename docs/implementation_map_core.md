@@ -52,8 +52,8 @@ Status reflects the current implementation state, including the native WMS/WFS d
 | 0 — Specification gate | **Complete** | Workspace member/dependencies in root `Cargo.toml`; contract boundaries and non-goals documented | Formal API review record |
 | 1 — Map Core foundation | **Complete** | `map-core/src/{crs,bounds,tile,dimensions,format,request,errors}.rs`; `TileAddress`; validated matrices; checked pixel dimensions; `MapImage`, `FeatureCollection` and `Coverage`; property-based tile tests; CRS/bounds tests; `cargo test -p olayer-map-core` (14 tests) | No Phase 1 deliverables remaining |
 | 2 — Pure OGC builders | **Complete** | `map-core/src/{wms,wmts,wfs,wcs,capabilities}.rs`; deterministic query escaping; `CapabilitiesRequest`; WMS/WMTS/WFS/WCS XML root parsing; malformed-document tests; Rust clippy gate | No Phase 2 deliverables remaining |
-| 3 — Native provider migration | **Partial** | `GeoserverWmtsSource` uses `olayer-map-core::wmts`; `NativeOgcClient<T>`, `OgcTransport`, `UreqTransport`; bounded responses; WMS image and WFS GeoJSON decoders; 82 native tests | WCS decoder and request-specific WMS/WFS/WCS source adapters |
-| 4 — TypeScript provider migration | **Partial** | `map_provider/{wmts,ogc}.ts`; WMS/WMTS/WFS/WCS URL builders; structured WMTS `RasterTileSource`; 16 Vitest files/83 tests and typecheck | WFS/WCS execution/decoders, response limits, coded error mapping and remaining source migrations |
+| 3 — Native provider migration | **Complete** | `GeoserverWmtsSource`; `NativeOgcClient<T>`, `OgcTransport`, `UreqTransport`; bounded responses; WMS/WFS/WCS decoders; `WmsMapSource`, `WfsFeatureSource` and `WcsCoverageSource`; 87 native tests | No Phase 3 deliverables remaining |
+| 4 — TypeScript provider migration | **Complete** | `map_provider/{wmts,ogc,ogc_client,ogc_sources,webgl}.ts`; cancellable/retriable `OgcHttpClient` with timeout and response limits; typed errors; WFS/WCS JSON decoders; ImageBitmap decoding; WebGL upload helper; `RasterTileSource`, `WfsVectorSource` and `WcsRasterSource`; 18 Vitest files/88 tests and typecheck | No Phase 4 deliverables remaining |
 | 5 — 2D/2.5D/3D integration | **Pending** | Existing renderer coverage remains independent of OGC providers | Shared OGC fixtures and end-to-end dimension-specific integration |
 | 6 — Publication and compatibility | **Pending** | No WASM/C-FFI publication mapping for Map Core yet | Error mappings, generated artifacts, changelog and release gates |
 
@@ -284,18 +284,19 @@ The map provider returns data; renderers choose the dimension-specific represent
 - Add deterministic URL/query tests and capability fixtures. **Complete with WMS, WMTS, WFS and WCS parser fixtures.**
 - Gate: `cargo clippy -p olayer-map-core --all-targets -- -D warnings`.
 
-### Phase 3 — Native provider migration — **Partial**
+### Phase 3 — Native provider migration — **Complete**
 
 - Add provider interfaces and transport adapter.
 - Migrate `GeoserverWmtsSource` without changing cache behavior.
-- Add WMS/WFS/WCS adapters incrementally. **WMS image and WFS GeoJSON decoders are complete; WCS remains pending.**
+- Add WMS/WFS/WCS adapters incrementally. **WMS, WFS and WCS decoders and request-specific sources are complete.**
 - Gate: native unit/integration tests and bounded-response tests.
 
-### Phase 4 — TypeScript provider migration — **Partial**
+### Phase 4 — TypeScript provider migration — **Complete**
 
 - Add TypeScript request adapter using generated WASM/core types where appropriate.
 - Migrate raster/vector/terrain providers one at a time.
 - Preserve `AbortSignal`, retry and cache contracts.
+- **Delivered:** `OgcHttpClient` provides fetch, timeout, cancellation, retry, response-size limits, typed errors and WFS/WCS decoding; `ImageBitmap`, WebGL, WFS and WCS source adapters are complete.
 - Gate: `npm run typecheck`, provider tests and full Vitest suite.
 
 ### Phase 5 — 2D/2.5D/3D integration — **Pending**

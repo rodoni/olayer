@@ -11,6 +11,7 @@ use std::sync::{Arc, Mutex};
 
 pub mod decoders;
 pub mod ogc;
+pub mod sources;
 
 const MAX_HTTP_RESPONSE_BYTES: usize = 1024 * 1024;
 const WMTS_TILE_SIZE: u32 = 256;

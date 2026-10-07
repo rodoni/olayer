@@ -1,10 +1,12 @@
 use super::NativeMapDataError;
 use image::io::Reader as ImageReader;
 use olayer_map_core::{
-    BoundingBox, CoordinateReferenceSystem, Feature, FeatureCollection, ImageFormat, MapImage,
+    BoundingBox, CoordinateReferenceSystem, Coverage, CoverageSampleType, Feature,
+    FeatureCollection, ImageFormat, MapImage,
 };
 use serde_json::Value;
 use std::collections::BTreeMap;
+use std::convert::TryFrom;
 use std::io::Cursor;
 use std::num::NonZeroU32;
 
@@ -121,6 +123,108 @@ pub fn decode_wfs_feature_collection(
         .map_err(|error| NativeMapDataError::OgcDecode(error.to_string()))
 }
 
+/// Decodes an image-backed WCS coverage into explicit numeric samples.
+pub fn decode_wcs_raster_coverage(
+    bytes: &[u8],
+    bounds: BoundingBox,
+    sample_type: CoverageSampleType,
+    nodata: Option<f64>,
+) -> Result<Coverage, NativeMapDataError> {
+    let reader = ImageReader::new(Cursor::new(bytes))
+        .with_guessed_format()
+        .map_err(|error| NativeMapDataError::OgcDecode(error.to_string()))?;
+    let detected_format = reader
+        .format()
+        .ok_or_else(|| NativeMapDataError::OgcDecode("unrecognized WCS raster format".into()))?;
+    let (width, height) = reader
+        .into_dimensions()
+        .map_err(|error| NativeMapDataError::OgcDecode(error.to_string()))?;
+    let mut limits = image::io::Limits::default();
+    limits.max_image_width = Some(MAX_OGC_IMAGE_WIDTH);
+    limits.max_image_height = Some(MAX_OGC_IMAGE_HEIGHT);
+    limits.max_alloc = Some(MAX_OGC_IMAGE_ALLOC_BYTES);
+    let mut reader = ImageReader::with_format(Cursor::new(bytes), detected_format);
+    reader.limits(limits);
+    let image = reader
+        .decode()
+        .map_err(|error| NativeMapDataError::OgcDecode(error.to_string()))?;
+    let samples: Vec<f64> = match sample_type {
+        CoverageSampleType::UInt8 => image
+            .to_luma8()
+            .into_raw()
+            .into_iter()
+            .map(f64::from)
+            .collect(),
+        CoverageSampleType::UInt16 | CoverageSampleType::Int16 => image
+            .to_luma16()
+            .into_raw()
+            .into_iter()
+            .map(f64::from)
+            .collect(),
+        CoverageSampleType::Float32 | CoverageSampleType::Float64 => {
+            return Err(NativeMapDataError::OgcDecode(
+                "floating-point raster decoding requires a scientific-grid payload".into(),
+            ));
+        }
+    };
+    Coverage {
+        bounds,
+        width,
+        height,
+        sample_type,
+        nodata,
+        samples: samples.into_boxed_slice(),
+    }
+    .validate()
+    .map_err(|error| NativeMapDataError::OgcDecode(error.to_string()))
+}
+
+/// Decodes a JSON scientific-grid payload: `{ "width", "height", "samples" }`.
+pub fn decode_wcs_json_coverage(
+    bytes: &[u8],
+    bounds: BoundingBox,
+    sample_type: CoverageSampleType,
+    nodata: Option<f64>,
+) -> Result<Coverage, NativeMapDataError> {
+    let document: Value = serde_json::from_slice(bytes)
+        .map_err(|error| NativeMapDataError::OgcDecode(error.to_string()))?;
+    let object = document
+        .as_object()
+        .ok_or_else(|| NativeMapDataError::OgcDecode("WCS grid must be an object".into()))?;
+    let width = object
+        .get("width")
+        .and_then(Value::as_u64)
+        .and_then(|value| u32::try_from(value).ok())
+        .ok_or_else(|| NativeMapDataError::OgcDecode("WCS width is invalid".into()))?;
+    let height = object
+        .get("height")
+        .and_then(Value::as_u64)
+        .and_then(|value| u32::try_from(value).ok())
+        .ok_or_else(|| NativeMapDataError::OgcDecode("WCS height is invalid".into()))?;
+    let samples = object
+        .get("samples")
+        .and_then(Value::as_array)
+        .ok_or_else(|| NativeMapDataError::OgcDecode("WCS samples must be an array".into()))?;
+    let samples: Vec<f64> = samples
+        .iter()
+        .map(|value| {
+            value
+                .as_f64()
+                .ok_or_else(|| NativeMapDataError::OgcDecode("WCS sample is not numeric".into()))
+        })
+        .collect::<Result<_, _>>()?;
+    Coverage {
+        bounds,
+        width,
+        height,
+        sample_type,
+        nodata,
+        samples: samples.into_boxed_slice(),
+    }
+    .validate()
+    .map_err(|error| NativeMapDataError::OgcDecode(error.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -154,5 +258,41 @@ mod tests {
         let result =
             decode_wfs_feature_collection(br#"{"type":"FeatureCollection","features":{}}"#, crs);
         assert!(matches!(result, Err(NativeMapDataError::OgcDecode(_))));
+    }
+
+    #[test]
+    fn decodes_wcs_json_scientific_grid() {
+        let payload = br#"{"width":2,"height":1,"samples":[1.5,2.5]}"#;
+        let bounds = BoundingBox::new(
+            0.0,
+            0.0,
+            1.0,
+            1.0,
+            CoordinateReferenceSystem::epsg(4326).unwrap(),
+        )
+        .unwrap();
+        let coverage =
+            decode_wcs_json_coverage(payload, bounds, CoverageSampleType::Float64, Some(-9999.0))
+                .unwrap();
+        assert_eq!(coverage.samples.as_ref(), &[1.5, 2.5]);
+    }
+
+    #[test]
+    fn decodes_wcs_png_raster() {
+        let mut bytes = Vec::new();
+        image::DynamicImage::new_luma8(2, 1)
+            .write_to(&mut Cursor::new(&mut bytes), image::ImageOutputFormat::Png)
+            .unwrap();
+        let bounds = BoundingBox::new(
+            0.0,
+            0.0,
+            1.0,
+            1.0,
+            CoordinateReferenceSystem::epsg(4326).unwrap(),
+        )
+        .unwrap();
+        let coverage =
+            decode_wcs_raster_coverage(&bytes, bounds, CoverageSampleType::UInt8, None).unwrap();
+        assert_eq!(coverage.samples.len(), 2);
     }
 }
