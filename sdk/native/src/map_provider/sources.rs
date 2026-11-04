@@ -51,6 +51,11 @@ impl<T: super::ogc::OgcTransport> WmsMapSource<T> {
     }
 
     pub fn fetch(&self) -> Result<MapImage, NativeMapDataError> {
+        if self.crs != self.bounds.crs {
+            return Err(NativeMapDataError::OgcDecode(
+                "WMS source CRS differs from its bounds".into(),
+            ));
+        }
         let request = WmsRequestBuilder::new(self.endpoint.clone(), self.layer.clone())
             .bounds(self.bounds)
             .size(self.width, self.height)
@@ -58,7 +63,13 @@ impl<T: super::ogc::OgcTransport> WmsMapSource<T> {
             .get_map()
             .map_err(|error| NativeMapDataError::OgcDecode(error.to_string()))?;
         let bytes = self.client.fetch_wms(&request)?;
-        decode_wms_image(&bytes, self.format, self.crs, self.bounds)
+        let image = decode_wms_image(&bytes, self.format, self.crs, self.bounds)?;
+        if image.width != self.width || image.height != self.height {
+            return Err(NativeMapDataError::OgcDecode(
+                "WMS image dimensions do not match the request".into(),
+            ));
+        }
+        Ok(image)
     }
 }
 

@@ -4,6 +4,7 @@ export interface WmsMapRequestOptions {
   readonly endpoint: string;
   readonly layers: string;
   readonly crs: string;
+  /** [west, south, east, north] in CRS units; EPSG:4326 uses degrees. */
   readonly bounds: OgcBounds;
   readonly width: number;
   readonly height: number;
@@ -70,7 +71,9 @@ export function buildWmsGetMapUrl(options: WmsMapRequestOptions): string {
     ["LAYERS", options.layers],
     ["STYLES", options.styles ?? ""],
     ["CRS", options.crs],
-    ["BBOX", options.bounds.join(",")],
+    ["BBOX", (options.crs === "EPSG:4326"
+      ? [options.bounds[1], options.bounds[0], options.bounds[3], options.bounds[2]]
+      : options.bounds).join(",")],
     ["WIDTH", String(options.width)],
     ["HEIGHT", String(options.height)],
     ["FORMAT", options.format ?? "image/png"],

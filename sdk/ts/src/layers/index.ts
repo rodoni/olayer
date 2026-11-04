@@ -1,5 +1,7 @@
 export { Layer, LayerManager } from "./layer";
 export { TileLayer } from "./tile";
+export { WmsLayer } from "./wms";
+export type { WmsLayerOptions } from "./wms";
 export { TerrainLayer, TerrainContourLayer } from "./terrain";
 export type { TerrainRenderMode, HillshadeOptions } from "./terrain";
 export { VectorTileLayer } from "./vector";

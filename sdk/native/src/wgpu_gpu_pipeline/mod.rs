@@ -2,6 +2,8 @@ use crate::native_controller::NativeController;
 use olayer_core::geodesy::LatLon;
 use wgpu::util::DeviceExt;
 
+pub mod wms;
+
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct RasterVertex {

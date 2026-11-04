@@ -24,6 +24,7 @@ pub use tools::{
     TurnDirection, METERS_PER_NAUTICAL_MILE, STANDARD_RATE_ONE_TURN_DPS,
 };
 pub use wgpu_cpu_vertex_pipeline::{project_lla_to_screen, rasterize_svg, WgpuCpuVertexPipeline};
+pub use wgpu_gpu_pipeline::wms::{build_wms_mesh, WgpuWmsImage, WmsMeshOptions, WmsRenderError};
 pub use wgpu_gpu_pipeline::{RasterTileUpload, WgpuGpuPipeline};
 pub use wgpu_volumetric_pipeline::{
     GpuRibbonVertex, GpuVolumetricVertex, VolumetricGpuMesh, WgpuVolumetricPipeline,

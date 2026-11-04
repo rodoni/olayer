@@ -25,7 +25,8 @@
     "lint": "tsc --noEmit",
     "preview": "vite preview",
     "test": "vitest",
-    "test:run": "vitest run"
+    "test:run": "vitest run",
+    "test:wms:browser": "node tests/wms-browser.mjs"
   },
   "dependencies": {
     "@mapbox/vector-tile": "^3.0.0",

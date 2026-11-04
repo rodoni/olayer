@@ -26,6 +26,14 @@ jobs:
       - name: Run Clippy
         run: cargo clippy --workspace --exclude olayer-desktop-demo --all-targets
 
+      - name: Install software Vulkan renderer
+        run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers
+
+      - name: Verify WMS pixels in all view modes
+        env:
+          XDG_RUNTIME_DIR: ${{ runner.temp }}
+        run: cargo test -p olayer-native wms_image_renders_into_offscreen_pixels_in_all_modes -- --ignored --nocapture
+
       - name: Verify generated C header
         run: |
           cargo build -p olayer-native
@@ -95,6 +103,10 @@ jobs:
       - name: Run TypeScript tests
         working-directory: sdk/ts
         run: npm run test:run
+
+      - name: Verify browser WMS rendering
+        working-directory: sdk/ts
+        run: npm run test:wms:browser
 
   symbol-compiler:
     name: Symbol Compiler Tests

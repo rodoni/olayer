@@ -17,6 +17,22 @@ pub struct WmsGetMapRequest {
 }
 impl WmsGetMapRequest {
     pub fn url(&self) -> String {
+        // Bounds use x/y internally; WMS 1.3.0 follows EPSG axis order on the wire.
+        let bounds = if self.bounds.crs.epsg_code() == 4326 {
+            [
+                self.bounds.min_y,
+                self.bounds.min_x,
+                self.bounds.max_y,
+                self.bounds.max_x,
+            ]
+        } else {
+            [
+                self.bounds.min_x,
+                self.bounds.min_y,
+                self.bounds.max_x,
+                self.bounds.max_y,
+            ]
+        };
         self.endpoint.url(&[
             QueryParameter::new("SERVICE", "WMS"),
             QueryParameter::new("REQUEST", "GetMap"),
@@ -24,13 +40,7 @@ impl WmsGetMapRequest {
             QueryParameter::new("LAYERS", &self.layers),
             QueryParameter::new("STYLES", &self.styles),
             QueryParameter::new("CRS", self.bounds.crs.authority_code()),
-            QueryParameter::new(
-                "BBOX",
-                format!(
-                    "{},{},{},{}",
-                    self.bounds.min_x, self.bounds.min_y, self.bounds.max_x, self.bounds.max_y
-                ),
-            ),
+            QueryParameter::new("BBOX", bounds.map(|value| value.to_string()).join(",")),
             QueryParameter::new("WIDTH", self.width.to_string()),
             QueryParameter::new("HEIGHT", self.height.to_string()),
             QueryParameter::new("FORMAT", self.format.mime()),
@@ -114,4 +124,31 @@ pub struct MapImage {
     pub format: ImageFormat,
     pub crs: CoordinateReferenceSystem,
     pub bounds: BoundingBox,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wms_13_serializes_epsg_axis_order_without_mutating_xy_bounds() {
+        for (code, expected) in [(4326, "2%2C1%2C4%2C3"), (3857, "1%2C2%2C3%2C4")] {
+            let bounds = BoundingBox::new(
+                1.0,
+                2.0,
+                3.0,
+                4.0,
+                CoordinateReferenceSystem::epsg(code).unwrap(),
+            )
+            .unwrap();
+            let request =
+                WmsRequestBuilder::new(UrlParts::new("https://example.test", "wms"), "fixture")
+                    .bounds(bounds)
+                    .size(NonZeroU32::new(2).unwrap(), NonZeroU32::new(2).unwrap())
+                    .get_map()
+                    .unwrap();
+            assert!(request.url().contains(&format!("BBOX={expected}")));
+            assert_eq!(request.bounds, bounds);
+        }
+    }
 }
