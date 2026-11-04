@@ -52,9 +52,9 @@ Status reflects the current implementation state, including the native WMS/WFS d
 | 0 — Specification gate | **Complete** | Workspace member/dependencies in root `Cargo.toml`; contract boundaries and non-goals documented | Formal API review record |
 | 1 — Map Core foundation | **Complete** | `map-core/src/{crs,bounds,tile,dimensions,format,request,errors}.rs`; `TileAddress`; validated matrices; checked pixel dimensions; `MapImage`, `FeatureCollection` and `Coverage`; property-based tile tests; CRS/bounds tests; `cargo test -p olayer-map-core` (14 tests) | No Phase 1 deliverables remaining |
 | 2 — Pure OGC builders | **Complete** | `map-core/src/{wms,wmts,wfs,wcs,capabilities}.rs`; deterministic query escaping; `CapabilitiesRequest`; WMS/WMTS/WFS/WCS XML root parsing; malformed-document tests; Rust clippy gate | No Phase 2 deliverables remaining |
-| 3 — Native provider migration | **Complete** | `GeoserverWmtsSource`; `NativeOgcClient<T>`, `OgcTransport`, `UreqTransport`; bounded responses; WMS/WFS/WCS decoders; `WmsMapSource`, `WfsFeatureSource` and `WcsCoverageSource`; 87 native tests | No Phase 3 deliverables remaining |
+| 3 — Native provider migration | **Complete** | `GeoserverWmtsSource`; `NativeOgcClient<T>`, `OgcTransport`, `UreqTransport`; bounded responses; WMS/WFS/WCS decoders; `WmsMapSource`, `WfsFeatureSource` and `WcsCoverageSource`; 89 native tests | No Phase 3 deliverables remaining |
 | 4 — TypeScript provider migration | **Complete** | `map_provider/{wmts,ogc,ogc_client,ogc_sources,webgl}.ts`; cancellable/retriable `OgcHttpClient` with timeout and response limits; typed errors; WFS/WCS JSON decoders; ImageBitmap decoding; WebGL upload helper; `RasterTileSource`, `WfsVectorSource` and `WcsRasterSource`; 18 Vitest files/88 tests and typecheck | No Phase 4 deliverables remaining |
-| 5 — 2D/2.5D/3D integration | **Pending** | Existing renderer coverage remains independent of OGC providers | Shared OGC fixtures and end-to-end dimension-specific integration |
+| 5 — 2D/2.5D/3D integration | **Partial** | Shared native fixture combines one WMS request with 2D, 2.5D altitude application, 3D ECEF projection and horizon culling | OGC-backed rendering, terrain draping integration, depth validation and visual/manual checks |
 | 6 — Publication and compatibility | **Pending** | No WASM/C-FFI publication mapping for Map Core yet | Error mappings, generated artifacts, changelog and release gates |
 
 The status table is intentionally conservative: request construction is not counted as transport execution, and existing renderer tests are not counted as OGC integration tests. The test counts above are the latest local gates, not a claim of CI coverage.
@@ -299,9 +299,9 @@ The map provider returns data; renderers choose the dimension-specific represent
 - **Delivered:** `OgcHttpClient` provides fetch, timeout, cancellation, retry, response-size limits, typed errors and WFS/WCS decoding; `ImageBitmap`, WebGL, WFS and WCS source adapters are complete.
 - Gate: `npm run typecheck`, provider tests and full Vitest suite.
 
-### Phase 5 — 2D/2.5D/3D integration — **Pending**
+### Phase 5 — 2D/2.5D/3D integration — **Partial**
 
-- Add shared fixtures for one request in all display dimensions.
+- Add shared fixtures for one request in all display dimensions. **One canonical WMS request is now exercised alongside 2D, 2.5D and 3D ECEF/horizon behavior.**
 - Validate projection, terrain draping, ECEF tessellation, horizon culling and depth.
 - Add visual/manual demo checks and deterministic geometry tests.
 

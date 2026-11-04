@@ -279,14 +279,26 @@ mod tests {
     use super::*;
     use olayer_core::geodesy::ellipsoid::Ellipsoid;
     use olayer_core::projections::Stereographic;
+    use olayer_map_core::{
+        BoundingBox, CoordinateReferenceSystem, ImageFormat, UrlParts, WmsRequestBuilder,
+    };
 
     fn viewport<'a>(
         camera: &'a CameraState,
         projection: &'a dyn Projection,
         view_proj_matrix: &'a [f32; 16],
     ) -> ProjectionViewport<'a> {
+        viewport_with_mode("2D", camera, projection, view_proj_matrix)
+    }
+
+    fn viewport_with_mode<'a>(
+        view_mode: &'static str,
+        camera: &'a CameraState,
+        projection: &'a dyn Projection,
+        view_proj_matrix: &'a [f32; 16],
+    ) -> ProjectionViewport<'a> {
         ProjectionViewport {
-            view_mode: "2D",
+            view_mode,
             camera,
             projection,
             view_proj_matrix,
@@ -402,6 +414,81 @@ mod tests {
             &viewport(&camera, &projection, &vp),
         );
         assert!(pos.is_none());
+    }
+
+    #[test]
+    fn shared_fixture_projects_the_same_center_in_2d_and_25d() {
+        let projection = Stereographic::new(0.0, 0.0, Ellipsoid::wgs84()).unwrap();
+        let camera = CameraState::with_attitude(
+            LatLon::new(0.0, 0.0, 0.0),
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            100000.0,
+        );
+        let matrix = camera.get_2d_view_proj_matrix(&projection).unwrap();
+        let crs = CoordinateReferenceSystem::epsg(4326).unwrap();
+        let bounds = BoundingBox::new(-0.1, -0.1, 0.1, 0.1, crs).unwrap();
+        let request =
+            WmsRequestBuilder::new(UrlParts::new("https://example.test", "ows"), "shared-layer")
+                .bounds(bounds)
+                .size(
+                    std::num::NonZeroU32::new(256).unwrap(),
+                    std::num::NonZeroU32::new(256).unwrap(),
+                )
+                .format(ImageFormat::Png)
+                .get_map()
+                .unwrap();
+        let canonical_request_url = request.url();
+        let planar = project_lla_to_screen(
+            0.0,
+            0.0,
+            0.0,
+            &viewport_with_mode("2D", &camera, &projection, &matrix),
+        )
+        .unwrap();
+        let terrain = project_lla_to_screen(
+            0.0,
+            0.0,
+            1000.0,
+            &viewport_with_mode("2.5D", &camera, &projection, &matrix),
+        )
+        .unwrap();
+        assert!((planar.x - 400.0).abs() < 1.0);
+        assert!((planar.y - 300.0).abs() < 1.0);
+        assert!(terrain.x.is_finite() && terrain.y.is_finite());
+        assert_eq!(request.url(), canonical_request_url);
+    }
+
+    #[test]
+    fn shared_fixture_projects_ecef_center_and_culls_horizon() {
+        let projection = Stereographic::new(0.0, 0.0, Ellipsoid::wgs84()).unwrap();
+        let camera = CameraState::with_attitude(
+            LatLon::new(0.0, 0.0, 0.0),
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            100000.0,
+        );
+        let matrix = camera.get_3d_view_proj_matrix().unwrap();
+        let center = project_lla_to_screen(
+            0.0,
+            0.0,
+            0.0,
+            &viewport_with_mode("3D", &camera, &projection, &matrix),
+        );
+        assert!(center.is_some());
+        let hidden = project_lla_to_screen(
+            0.0,
+            std::f64::consts::PI,
+            0.0,
+            &viewport_with_mode("3D", &camera, &projection, &matrix),
+        );
+        assert!(hidden.is_none());
     }
 
     #[test]
