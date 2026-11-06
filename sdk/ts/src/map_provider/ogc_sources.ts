@@ -58,12 +58,23 @@ export class WcsRasterSource {
   readonly #options: WcsCoverageRequestOptions;
 
   public constructor(client: OgcHttpClient, options: WcsCoverageRequestOptions) {
+    buildWcsGetCoverageUrl(options);
     this.#client = client;
-    this.#options = options;
+    this.#options = { ...options, bounds: [...options.bounds] };
   }
 
-  public loadJson(signal?: AbortSignal): Promise<WcsJsonCoverage> {
-    return this.#client.fetchWcsJson(buildWcsGetCoverageUrl(this.#options), signal);
+  public get crs(): string { return this.#options.crs; }
+  public get bounds(): OgcBounds { return [...this.#options.bounds]; }
+
+  public async loadJson(signal?: AbortSignal): Promise<WcsJsonCoverage> {
+    const coverage = await this.#client.fetchWcsJson(buildWcsGetCoverageUrl({
+      ...this.#options, format: "application/json",
+    }), signal);
+    throwIfAborted(signal);
+    if (coverage.width !== this.#options.width || coverage.height !== this.#options.height) {
+      throw new RangeError("WCS dimensions differ from request");
+    }
+    return coverage;
   }
 
   public loadImageBitmap(signal?: AbortSignal): Promise<ImageBitmap> {

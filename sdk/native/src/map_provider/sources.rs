@@ -4,6 +4,7 @@ use super::decoders::{
 };
 use super::ogc::NativeOgcClient;
 use super::NativeMapDataError;
+use olayer_core::terrain::TerrainEngine;
 use olayer_map_core::{
     BoundingBox, CoordinateReferenceSystem, Coverage, CoverageSampleType, FeatureCollection,
     ImageFormat, MapImage, UrlParts, VectorFormat, WcsRequestBuilder, WfsRequestBuilder,
@@ -171,24 +172,59 @@ impl<T: super::ogc::OgcTransport> WcsCoverageSource<T> {
         self
     }
 
-    fn request(&self) -> Result<olayer_map_core::WcsGetCoverageRequest, NativeMapDataError> {
+    fn request(
+        &self,
+        format: &str,
+    ) -> Result<olayer_map_core::WcsGetCoverageRequest, NativeMapDataError> {
+        if self.crs != self.bounds.crs {
+            return Err(NativeMapDataError::OgcDecode(
+                "WCS request CRS conflicts with bounds".into(),
+            ));
+        }
         WcsRequestBuilder::new(self.endpoint.clone(), self.coverage_id.clone())
             .crs(self.crs)
             .bounds(self.bounds)
             .size(self.width, self.height)
-            .format("image/tiff")
+            .format(format)
             .get_coverage()
             .map_err(|error| NativeMapDataError::OgcDecode(error.to_string()))
     }
 
     pub fn fetch_raster(&self) -> Result<Coverage, NativeMapDataError> {
-        let bytes = self.client.fetch_wcs(&self.request()?)?;
-        decode_wcs_raster_coverage(&bytes, self.bounds, self.sample_type, self.nodata)
+        let bytes = self.client.fetch_wcs(&self.request("image/tiff")?)?;
+        self.validate_dimensions(decode_wcs_raster_coverage(
+            &bytes,
+            self.bounds,
+            self.sample_type,
+            self.nodata,
+        )?)
     }
 
     pub fn fetch_json(&self) -> Result<Coverage, NativeMapDataError> {
-        let bytes = self.client.fetch_wcs(&self.request()?)?;
-        decode_wcs_json_coverage(&bytes, self.bounds, self.sample_type, self.nodata)
+        let bytes = self.client.fetch_wcs(&self.request("application/json")?)?;
+        self.validate_dimensions(decode_wcs_json_coverage(
+            &bytes,
+            self.bounds,
+            self.sample_type,
+            self.nodata,
+        )?)
+    }
+    fn validate_dimensions(&self, coverage: Coverage) -> Result<Coverage, NativeMapDataError> {
+        if coverage.width != self.width || coverage.height != self.height {
+            return Err(NativeMapDataError::OgcDecode(
+                "WCS dimensions differ from request".into(),
+            ));
+        }
+        Ok(coverage)
+    }
+
+    /// Fetches a JSON node grid and installs it as ellipsoidal terrain in metres.
+    pub fn load_json_terrain(
+        &self,
+        engine: &TerrainEngine,
+        id: &str,
+    ) -> Result<(), NativeMapDataError> {
+        super::coverage_terrain::install_wcs_terrain(engine, id, self.fetch_json()?)
     }
 }
 

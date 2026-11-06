@@ -75,4 +75,4 @@ npm run test:wms:browser
 
 The native offscreen test fetches and decodes the fixture through `WmsMapSource`, uploads it once, changes display modes, draws through the raster pipeline, and reads the framebuffer. The browser test uses `WmsMapSource`, `WmsLayer`, the actual controller terrain engine, and `LayerManager`; it checks corner colors at their projected geographic locations in each mode and asserts that exactly one correctly ordered WMS request was made. Unit tests cover terrain heights and holes, image orientation, clipping, CRS conversion, cancellation, failed uploads, and cleanup.
 
-WFS feature-layer integration and WCS coverage-to-terrain integration remain separate subsequent increments of Map Core phase 5.
+WCS JSON coverage-to-terrain integration is documented in [wcs_terrain_integration.md](wcs_terrain_integration.md). The GPU pixel checks now drape imagery over the shared WCS elevation fixture. WFS feature-layer integration remains a subsequent increment of Map Core phase 5.

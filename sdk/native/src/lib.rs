@@ -29,3 +29,5 @@ pub use wgpu_gpu_pipeline::{RasterTileUpload, WgpuGpuPipeline};
 pub use wgpu_volumetric_pipeline::{
     GpuRibbonVertex, GpuVolumetricVertex, VolumetricGpuMesh, WgpuVolumetricPipeline,
 };
+
+pub use map_provider::coverage_terrain::install_wcs_terrain;

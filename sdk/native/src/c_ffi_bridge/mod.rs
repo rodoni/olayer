@@ -321,6 +321,83 @@ pub unsafe extern "C" fn olayer_terrain_engine_load_geotiff(
     }
 }
 
+/// Installs a north-up elevation node grid. Bounds are [west,south,east,north],
+/// in degrees for EPSG:4326 or metres for EPSG:3857/900913. Heights are ellipsoidal metres.
+/// Returns 0 on success, -1 for invalid pointers/lengths, -2 for invalid grid data.
+///
+/// # Safety
+/// `engine` must be live. `id` must be a valid NUL-terminated UTF-8 string.
+/// `bounds` must be readable for four f64s; `samples` for `length` aligned f64s.
+/// Input memory must not overlap the engine or be mutated during the call.
+#[no_mangle]
+pub unsafe extern "C" fn olayer_terrain_engine_load_elevation_grid(
+    engine: *mut TerrainEngine,
+    id: *const c_char,
+    epsg: u32,
+    bounds: *const f64,
+    width: u32,
+    height: u32,
+    samples: *const f64,
+    length: usize,
+    has_nodata: bool,
+    nodata: f64,
+) -> c_int {
+    use olayer_core::terrain::{ElevationGrid, ElevationGridCrs};
+    if engine.is_null()
+        || id.is_null()
+        || bounds.is_null()
+        || samples.is_null()
+        || length > MAX_FFI_BUFFER_BYTES / std::mem::size_of::<f64>()
+        || length > isize::MAX as usize / std::mem::size_of::<f64>()
+    {
+        return -1;
+    }
+    let Ok(id) = std::ffi::CStr::from_ptr(id).to_str() else {
+        return -2;
+    };
+    let mut bounds: [f64; 4] = std::slice::from_raw_parts(bounds, 4).try_into().unwrap();
+    let crs = match epsg {
+        4326 => {
+            bounds = bounds.map(f64::to_radians);
+            ElevationGridCrs::Geographic
+        }
+        3857 | 900913 => ElevationGridCrs::WebMercator,
+        _ => return -2,
+    };
+    match ElevationGrid::new(
+        crs,
+        bounds,
+        width as usize,
+        height as usize,
+        std::slice::from_raw_parts(samples, length).into(),
+        has_nodata.then_some(nodata),
+    ) {
+        Ok(grid) => {
+            (&*engine).load_elevation_grid(id.into(), grid);
+            0
+        }
+        Err(_) => -2,
+    }
+}
+
+/// Removes a scalar elevation grid by source identifier.
+///
+/// # Safety
+/// `engine` must be live; `id` must be a valid NUL-terminated UTF-8 string.
+#[no_mangle]
+pub unsafe extern "C" fn olayer_terrain_engine_unload_elevation_grid(
+    engine: *mut TerrainEngine,
+    id: *const c_char,
+) -> bool {
+    if engine.is_null() || id.is_null() {
+        return false;
+    }
+    let Ok(id) = std::ffi::CStr::from_ptr(id).to_str() else {
+        return false;
+    };
+    (&*engine).unload_elevation_grid(id)
+}
+
 /// Decodes Mapbox Terrain-RGB pixel value to elevation in meters.
 ///
 /// # Safety
@@ -2507,6 +2584,66 @@ mod tests {
             data.extend_from_slice(&col);
         }
         data
+    }
+
+    #[test]
+    fn elevation_grid_ffi_preserves_nodata_and_removes_only_its_source() {
+        unsafe {
+            let engine = olayer_terrain_engine_create();
+            let id = std::ffi::CString::new("wcs").unwrap();
+            let bounds = [-1.0, -1.0, 1.0, 1.0];
+            let samples = [100.0, 200.0, 300.0, -9999.0];
+            assert_eq!(
+                olayer_terrain_engine_load_elevation_grid(
+                    engine,
+                    id.as_ptr(),
+                    4326,
+                    bounds.as_ptr(),
+                    2,
+                    2,
+                    samples.as_ptr(),
+                    4,
+                    true,
+                    -9999.0
+                ),
+                0
+            );
+            assert_eq!(
+                (&*engine)
+                    .get_elevation_status(0.0, 0.0)
+                    .unwrap()
+                    .elevation_meters,
+                None
+            );
+            assert_eq!(
+                (&*engine)
+                    .get_elevation_status(1_f64.to_radians(), (-1_f64).to_radians())
+                    .unwrap()
+                    .elevation_meters,
+                Some(100.0)
+            );
+            assert_eq!(
+                olayer_terrain_engine_load_elevation_grid(
+                    engine,
+                    id.as_ptr(),
+                    4978,
+                    bounds.as_ptr(),
+                    2,
+                    2,
+                    samples.as_ptr(),
+                    4,
+                    true,
+                    -9999.0
+                ),
+                -2
+            );
+            assert!(olayer_terrain_engine_unload_elevation_grid(
+                engine,
+                id.as_ptr()
+            ));
+            assert!((&*engine).get_elevation_status(0.0, 0.0).is_err());
+            olayer_terrain_engine_free(engine);
+        }
     }
 
     #[test]

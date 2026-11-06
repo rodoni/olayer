@@ -108,3 +108,4 @@ export type {
   RangeRingsConfig,
   HistoryDot,
 } from "./tools";
+export { WcsTerrainSource } from "./map_provider/wcs_terrain";

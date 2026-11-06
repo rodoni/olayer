@@ -2,6 +2,8 @@ pub mod altitude;
 pub mod engine;
 mod errors;
 pub mod geotiff;
+mod grid;
+pub use grid::{ElevationGrid, ElevationGridCrs};
 pub mod rgb_decoder;
 pub mod rgb_tile;
 mod tile;

@@ -545,7 +545,16 @@ mod tests {
             let pipeline = WgpuGpuPipeline::new(&device, wgpu::TextureFormat::Rgba8Unorm);
             let urls = Arc::new(Mutex::new(Vec::new()));
             let image = source(urls.clone(), 2).fetch().unwrap();
-            let mut controller = controller();
+            let mut controller = NativeController::new(0.0, 0.0).unwrap();
+            // Exercise WCS decoding and installation before the actual GPU draw.
+            let coverage = crate::decode_wcs_json_coverage(
+                include_bytes!("../../../../tests/fixtures/wcs/elevation.json"),
+                bounds(),
+                olayer_map_core::CoverageSampleType::Float64,
+                None,
+            )
+            .unwrap();
+            crate::install_wcs_terrain(&controller.terrain, "wcs", coverage).unwrap();
             controller.camera.pitch = 0.0;
             controller.camera.viewport_base_meters = 600_000.0;
             let mut gpu_image = WgpuWmsImage::new(

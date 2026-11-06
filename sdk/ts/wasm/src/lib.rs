@@ -80,6 +80,46 @@ impl WasmTerrainEngine {
             .map_err(|error| coded_js_error(error.code(), error))
     }
 
+    /// Installs north-up scalar elevation nodes; bounds are [west,south,east,north]
+    /// in degrees for EPSG:4326, metres for EPSG:3857/900913.
+    /// Samples must already be ellipsoidal heights in metres.
+    #[allow(clippy::too_many_arguments)]
+    pub fn load_elevation_grid(
+        &self,
+        id: &str,
+        epsg: u32,
+        bounds: &[f64],
+        width: usize,
+        height: usize,
+        samples: &[f64],
+        nodata: Option<f64>,
+    ) -> Result<(), JsValue> {
+        use olayer_core::terrain::{ElevationGrid, ElevationGridCrs, TerrainError};
+        let invalid = |message: &str| {
+            let error = TerrainError::InvalidInput(message.into());
+            coded_js_error(error.code(), error)
+        };
+        let mut bounds: [f64; 4] = bounds
+            .try_into()
+            .map_err(|_| invalid("grid requires four bounds"))?;
+        let crs = match epsg {
+            4326 => {
+                bounds = bounds.map(f64::to_radians);
+                ElevationGridCrs::Geographic
+            }
+            3857 | 900913 => ElevationGridCrs::WebMercator,
+            _ => return Err(invalid("unsupported elevation grid CRS")),
+        };
+        let grid = ElevationGrid::new(crs, bounds, width, height, samples.into(), nodata)
+            .map_err(|error| coded_js_error(error.code(), error))?;
+        self.inner.load_elevation_grid(id.to_owned(), grid);
+        Ok(())
+    }
+
+    pub fn unload_elevation_grid(&self, id: &str) -> bool {
+        self.inner.unload_elevation_grid(id)
+    }
+
     /// Unloads a tile by its coordinate degrees.
     pub fn unload_tile(&mut self, lat_deg: i32, lon_deg: i32) -> bool {
         let key = olayer_core::terrain::TileKey { lat_deg, lon_deg };
@@ -125,7 +165,11 @@ impl WasmTerrainEngine {
             .inner
             .get_elevation_status(lat_rad, lon_rad)
             .map_err(|error| coded_js_error(error.code(), error))?;
-        serde_wasm_bindgen::to_value(&sample).map_err(|e| JsValue::from_str(&e.to_string()))
+        serde::Serialize::serialize(
+            &sample,
+            &serde_wasm_bindgen::Serializer::new().serialize_missing_as_null(true),
+        )
+        .map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
     /// Returns profile points with nullable elevations. Set reject_unknown to reject null DTED samples.

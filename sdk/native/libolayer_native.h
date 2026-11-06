@@ -249,6 +249,35 @@ int olayer_terrain_engine_load_geotiff(TerrainEngine *engine,
                                        double *out_max_lon_deg);
 
 /**
+ * Installs a north-up elevation node grid. Bounds are [west,south,east,north],
+ * in degrees for EPSG:4326 or metres for EPSG:3857/900913. Heights are ellipsoidal metres.
+ * Returns 0 on success, -1 for invalid pointers/lengths, -2 for invalid grid data.
+ *
+ * # Safety
+ * `engine` must be live. `id` must be a valid NUL-terminated UTF-8 string.
+ * `bounds` must be readable for four f64s; `samples` for `length` aligned f64s.
+ * Input memory must not overlap the engine or be mutated during the call.
+ */
+int olayer_terrain_engine_load_elevation_grid(TerrainEngine *engine,
+                                              const char *id,
+                                              uint32_t epsg,
+                                              const double *bounds,
+                                              uint32_t width,
+                                              uint32_t height,
+                                              const double *samples,
+                                              uintptr_t length,
+                                              bool has_nodata,
+                                              double nodata);
+
+/**
+ * Removes a scalar elevation grid by source identifier.
+ *
+ * # Safety
+ * `engine` must be live; `id` must be a valid NUL-terminated UTF-8 string.
+ */
+bool olayer_terrain_engine_unload_elevation_grid(TerrainEngine *engine, const char *id);
+
+/**
  * Decodes Mapbox Terrain-RGB pixel value to elevation in meters.
  *
  * # Safety

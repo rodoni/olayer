@@ -104,7 +104,7 @@ jobs:
         working-directory: sdk/ts
         run: npm run test:run
 
-      - name: Verify browser WMS rendering
+      - name: Verify browser WMS rendering with WCS terrain
         working-directory: sdk/ts
         run: npm run test:wms:browser
 

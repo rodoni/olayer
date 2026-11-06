@@ -1,3 +1,4 @@
+use super::ElevationGrid;
 use crate::geodesy::coords::LatLon;
 use crate::geodesy::ellipsoid::Ellipsoid;
 use crate::geodesy::solvers::{GeodeticSolver, VincentySolver};
@@ -71,6 +72,7 @@ pub struct TerrainEngine {
     tiles: RefCell<LruCache<TileKey, DtedTile>>,
     rgb_tiles: RefCell<LruCache<SlippyTileKey, RgbElevationTile>>,
     geotiff_tiles: RefCell<VecDeque<GeoTiffTile>>,
+    elevation_grids: RefCell<LruCache<String, ElevationGrid>>,
 }
 
 impl TerrainEngine {
@@ -90,6 +92,7 @@ impl TerrainEngine {
             tiles: RefCell::new(LruCache::new(cap)),
             rgb_tiles: RefCell::new(LruCache::new(cap)),
             geotiff_tiles: RefCell::new(VecDeque::new()),
+            elevation_grids: RefCell::new(LruCache::new(cap)),
         }
     }
 
@@ -101,6 +104,7 @@ impl TerrainEngine {
         let cap = NonZeroUsize::new(capacity.max(1)).expect("capacity.max(1) is non-zero");
         self.tiles.borrow_mut().resize(cap);
         self.rgb_tiles.borrow_mut().resize(cap);
+        self.elevation_grids.borrow_mut().resize(cap);
     }
 
     /// Returns the current number of cached DTED tiles.
@@ -139,12 +143,13 @@ impl TerrainEngine {
         self.geotiff_tiles.borrow_mut().clear();
     }
 
-    /// Clears all terrain sources (DTED, RGB tiles, GeoTIFFs).
+    /// Clears all terrain sources (scalar grids, DTED, RGB tiles, GeoTIFFs).
     #[inline]
     pub fn clear_all(&self) {
         self.clear_cache();
         self.clear_rgb_cache();
         self.clear_geotiff_cache();
+        self.elevation_grids.borrow_mut().clear();
     }
 
     /// Parses a raw DTED buffer and registers the resulting tile.
@@ -202,6 +207,16 @@ impl TerrainEngine {
         Ok(bounds)
     }
 
+    /// Registers or replaces a validated scalar grid by source identifier.
+    /// Newest grids take precedence over older grids and existing terrain formats.
+    pub fn load_elevation_grid(&self, id: String, grid: ElevationGrid) {
+        self.elevation_grids.borrow_mut().put(id, grid);
+    }
+
+    pub fn unload_elevation_grid(&self, id: &str) -> bool {
+        self.elevation_grids.borrow_mut().pop(id).is_some()
+    }
+
     /// Removes an RGB tile by its $(Z, X, Y)$ key. Returns `true` if the tile existed.
     #[inline]
     pub fn unload_rgb_tile(&self, key: &SlippyTileKey) -> bool {
@@ -241,7 +256,7 @@ impl TerrainEngine {
     }
 
     /// Returns elevation quality without converting missing DTED samples to zero.
-    /// Queries DTED cache first, followed by Web Mercator RGB elevation tiles, and GeoTIFF rasters.
+    /// Queries explicit scalar grids newest first (including nodata), then DTED, RGB and GeoTIFF sources.
     ///
     /// # Errors
     /// Returns [`TerrainError::TileNotLoaded`] when no loaded source covers the coordinate.
@@ -259,6 +274,11 @@ impl TerrainEngine {
             return Err(TerrainError::InvalidInput(
                 "latitude/longitude must be finite and in range".to_string(),
             ));
+        }
+        for (_, grid) in self.elevation_grids.borrow().iter() {
+            if let Some(elevation_meters) = grid.sample(lat_rad, lon_rad) {
+                return Ok(ElevationSample { elevation_meters });
+            }
         }
         let lat_deg = lat_rad.to_degrees();
         let lon_deg = lon_rad.to_degrees();

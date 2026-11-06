@@ -9,6 +9,7 @@ use std::io::{Cursor, Read};
 use std::sync::mpsc::{channel, Sender};
 use std::sync::{Arc, Mutex};
 
+pub mod coverage_terrain;
 pub mod decoders;
 pub mod ogc;
 pub mod sources;

@@ -201,6 +201,19 @@ pub fn decode_wcs_json_coverage(
         .and_then(Value::as_u64)
         .and_then(|value| u32::try_from(value).ok())
         .ok_or_else(|| NativeMapDataError::OgcDecode("WCS height is invalid".into()))?;
+    let metadata_nodata =
+        match object.get("nodata") {
+            None | Some(Value::Null) => None,
+            Some(value) => Some(value.as_f64().filter(|v| v.is_finite()).ok_or_else(|| {
+                NativeMapDataError::OgcDecode("WCS nodata must be finite".into())
+            })?),
+        };
+    if nodata.zip(metadata_nodata).is_some_and(|(a, b)| a != b) {
+        return Err(NativeMapDataError::OgcDecode(
+            "conflicting WCS nodata metadata".into(),
+        ));
+    }
+    let nodata = nodata.or(metadata_nodata);
     let samples = object
         .get("samples")
         .and_then(Value::as_array)

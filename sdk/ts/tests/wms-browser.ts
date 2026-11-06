@@ -2,7 +2,8 @@ import init, { WasmProjection, lla_to_ecef } from "olayer-wasm";
 import { OlayerController } from "../src/controller";
 import type { ViewMode } from "../src/controller";
 import { WmsLayer } from "../src/layers/wms";
-import { WmsMapSource } from "../src/map_provider/ogc_sources";
+import { WcsTerrainSource } from "../src/map_provider/wcs_terrain";
+import { WcsRasterSource, WmsMapSource } from "../src/map_provider/ogc_sources";
 import { OgcHttpClient } from "../src/map_provider/ogc_client";
 
 async function run(): Promise<string[]> {
@@ -20,10 +21,14 @@ async function run(): Promise<string[]> {
   const layer = new WmsLayer("fixture", new WmsMapSource(new OgcHttpClient({ maxRetries: 0 }), {
     endpoint: "/fixture-wms", layers: "quadrants", crs: "EPSG:4326", bounds: fixture.bounds, width: 2, height: 2,
   }), { drapeTerrain: true });
-  controller.terrainEngine.load_rgb_tile(0, 0, 0, "mapbox", new Uint8Array(Array.from({ length: 4 }, () => fixture.rgbaTerrain).flat()), 2, 2);
+  const terrain = new WcsTerrainSource("fixture-terrain", controller.terrainEngine,
+    new WcsRasterSource(new OgcHttpClient({ maxRetries: 0 }), {
+      endpoint: "/fixture-wcs", coverageId: "elevation", crs: "EPSG:4326", bounds: fixture.bounds, width: 3, height: 3,
+    }));
   controller.layerManager.addLayer(layer);
   const results: string[] = [];
   try {
+    await terrain.load();
     await layer.load(controller.gl);
     for (const mode of ["2D", "2.5D", "3D"] as ViewMode[]) {
       controller.setViewMode(mode);
@@ -64,7 +69,7 @@ async function run(): Promise<string[]> {
     }
     if (errors.length) throw new Error(errors.join("; "));
     return results;
-  } finally { controller.destroy(); }
+  } finally { terrain.unload(); controller.destroy(); }
 }
 
 run().then(results => {
