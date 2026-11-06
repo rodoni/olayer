@@ -95,6 +95,25 @@ fn clipped_triangle(triangle: [ClipVertex; 3], output: &mut Vec<RasterVertex>) {
     }
 }
 
+pub(super) fn globe_eye(controller: &NativeController) -> [f64; 3] {
+    let camera = &controller.camera;
+    let mut eye = [0.0, 0.0, A + 15_000_000.0 / camera.zoom];
+    for (axis, angle) in [
+        (1, -camera.roll),
+        (0, -camera.pitch),
+        (2, camera.rotation),
+        (0, std::f64::consts::FRAC_PI_2 - camera.center.lat),
+        (2, camera.center.lon + std::f64::consts::FRAC_PI_2),
+    ] {
+        let a = (axis + 1) % 3;
+        let b = (axis + 2) % 3;
+        let (x, y) = (eye[a], eye[b]);
+        eye[a] = angle.cos() * x - angle.sin() * y;
+        eye[b] = angle.sin() * x + angle.cos() * y;
+    }
+    eye
+}
+
 /// Builds north-up textured triangles in projected metres or ECEF metres.
 /// Bounds remain x/y (longitude/latitude for EPSG:4326), independently of WMS wire axis order.
 /// Rebuild after projection, camera, terrain, or display-mode changes.
@@ -142,20 +161,7 @@ fn build_mesh(
     }
     let globe = controller.view_mode == "3D";
     let ellipsoid = Ellipsoid::wgs84();
-    let mut eye = [0.0, 0.0, A + 15_000_000.0 / camera.zoom];
-    for (axis, angle) in [
-        (1, -camera.roll),
-        (0, -camera.pitch),
-        (2, camera.rotation),
-        (0, std::f64::consts::FRAC_PI_2 - camera.center.lat),
-        (2, camera.center.lon + std::f64::consts::FRAC_PI_2),
-    ] {
-        let a = (axis + 1) % 3;
-        let b = (axis + 2) % 3;
-        let (x, y) = (eye[a], eye[b]);
-        eye[a] = angle.cos() * x - angle.sin() * y;
-        eye[b] = angle.sin() * x + angle.cos() * y;
-    }
+    let eye = globe_eye(controller);
     let n = options.subdivisions as usize;
     let mut vertices = Vec::with_capacity((n + 1) * (n + 1));
     for row in 0..=n {

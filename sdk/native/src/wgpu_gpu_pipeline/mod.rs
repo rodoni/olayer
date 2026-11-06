@@ -1385,3 +1385,5 @@ mod tests {
         ));
     }
 }
+
+pub mod wfs;

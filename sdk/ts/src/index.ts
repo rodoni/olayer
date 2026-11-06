@@ -41,6 +41,7 @@ export {
   LayerManager,
   TileLayer,
   WmsLayer,
+  WfsLayer,
   TerrainLayer,
   TerrainContourLayer,
   VectorTileLayer,
@@ -53,6 +54,8 @@ export {
 } from "./layers";
 export type {
   WmsLayerOptions,
+  WfsLayerOptions,
+  WfsMeshOptions,
   AeronauticalLayerOptions,
   WeatherRadarLayerOptions,
   RadarPaletteType,

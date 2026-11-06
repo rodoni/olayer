@@ -34,6 +34,11 @@ jobs:
           XDG_RUNTIME_DIR: ${{ runner.temp }}
         run: cargo test -p olayer-native wms_image_renders_into_offscreen_pixels_in_all_modes -- --ignored --nocapture
 
+      - name: Verify WFS pixels in all view modes
+        env:
+          XDG_RUNTIME_DIR: ${{ runner.temp }}
+        run: cargo test -p olayer-native wfs_features_render_into_offscreen_pixels_in_all_modes -- --ignored --nocapture
+
       - name: Verify generated C header
         run: |
           cargo build -p olayer-native
@@ -107,6 +112,10 @@ jobs:
       - name: Verify browser WMS rendering with WCS terrain
         working-directory: sdk/ts
         run: npm run test:wms:browser
+
+      - name: Verify browser WFS rendering with WCS terrain
+        working-directory: sdk/ts
+        run: npm run test:wfs:browser
 
   symbol-compiler:
     name: Symbol Compiler Tests

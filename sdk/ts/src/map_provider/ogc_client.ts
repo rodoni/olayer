@@ -13,6 +13,7 @@ export interface WfsFeature {
 }
 
 export interface WfsFeatureCollection {
+  readonly crs?: string;
   readonly features: readonly WfsFeature[];
 }
 
@@ -55,7 +56,7 @@ const DEFAULT_MAX_RETRIES = 2;
 const DEFAULT_MAX_RESPONSE_BYTES = 64 * 1024 * 1024;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function isFiniteNumber(value: unknown): value is number {
@@ -86,6 +87,16 @@ function decodeWfsFeatureCollection(value: unknown): WfsFeatureCollection {
       properties: properties === null || properties === undefined ? {} : properties,
     };
   });
+  const metadata = value["crs"];
+  if (metadata !== undefined && metadata !== null) {
+    if (!isRecord(metadata) || metadata["type"] !== "name" || !isRecord(metadata["properties"]) || typeof metadata["properties"]["name"] !== "string") {
+      throw new TypeError("Unsupported WFS CRS metadata");
+    }
+    const name = metadata["properties"]["name"];
+    const match = /^(?:EPSG:|urn:ogc:def:crs:EPSG::|https?:\/\/www\.opengis\.net\/def\/crs\/EPSG\/0\/)([1-9][0-9]*)$/.exec(name);
+    if (!match) throw new TypeError("Unsupported WFS CRS identifier");
+    return { features, crs: `EPSG:${match[1]}` };
+  }
   return { features };
 }
 

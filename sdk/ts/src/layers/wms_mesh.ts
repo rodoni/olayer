@@ -33,7 +33,7 @@ export function validateWmsBounds(crs: string, bounds: OgcBounds): void {
 
 type Vertex = [number, number, number, number, number, number];
 
-function globeEye(context: WmsMeshContext): number[] {
+export function globeEye(context: WmsMeshContext): number[] {
   const eye = [0, 0, RADIUS + 15000000 / context.zoom];
   // Inverse of the core camera view rotations, applied in reverse order.
   for (const [axis, angle] of [

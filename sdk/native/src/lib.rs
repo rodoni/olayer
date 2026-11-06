@@ -31,3 +31,8 @@ pub use wgpu_volumetric_pipeline::{
 };
 
 pub use map_provider::coverage_terrain::install_wcs_terrain;
+
+pub use wgpu_gpu_pipeline::wfs::{
+    build_wfs_mesh, WfsAltitudeMode, WfsMeshOptions, WfsRenderError, WgpuWfsFeatures,
+    WgpuWfsPipeline,
+};

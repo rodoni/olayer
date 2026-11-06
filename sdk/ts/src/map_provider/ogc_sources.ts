@@ -44,12 +44,20 @@ export class WfsVectorSource {
   readonly #options: WfsFeatureRequestOptions;
 
   public constructor(client: OgcHttpClient, options: WfsFeatureRequestOptions) {
+    buildWfsGetFeatureUrl(options);
     this.#client = client;
-    this.#options = options;
+    this.#options = { ...options, ...(options.bbox ? { bbox: [...options.bbox] as OgcBounds } : {}) };
   }
 
-  public load(signal?: AbortSignal): Promise<WfsFeatureCollection> {
-    return this.#client.fetchWfs(buildWfsGetFeatureUrl(this.#options), signal);
+  public get crs(): string { return this.#options.crs; }
+
+  public async load(signal?: AbortSignal): Promise<WfsFeatureCollection> {
+    const collection = await this.#client.fetchWfs(buildWfsGetFeatureUrl(this.#options), signal);
+    throwIfAborted(signal);
+    if (collection.crs !== undefined && collection.crs !== this.crs) {
+      throw new RangeError("WFS response CRS conflicts with request");
+    }
+    return collection;
   }
 }
 

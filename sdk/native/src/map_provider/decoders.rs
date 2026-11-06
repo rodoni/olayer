@@ -76,6 +76,32 @@ pub fn decode_wfs_feature_collection(
             "WFS document must be a FeatureCollection".into(),
         ));
     }
+    if let Some(metadata) = object.get("crs").filter(|value| !value.is_null()) {
+        let name = metadata
+            .get("properties")
+            .and_then(|p| p.get("name"))
+            .and_then(Value::as_str);
+        let code = name
+            .and_then(|name| {
+                [
+                    "EPSG:",
+                    "urn:ogc:def:crs:EPSG::",
+                    "http://www.opengis.net/def/crs/EPSG/0/",
+                    "https://www.opengis.net/def/crs/EPSG/0/",
+                ]
+                .iter()
+                .find_map(|prefix| name.strip_prefix(*prefix))
+            })
+            .filter(|code| !code.starts_with('0') && code.chars().all(|c| c.is_ascii_digit()))
+            .and_then(|code| code.parse::<u32>().ok());
+        if metadata.get("type").and_then(Value::as_str) != Some("name")
+            || code != Some(crs.epsg_code())
+        {
+            return Err(NativeMapDataError::OgcDecode(
+                "WFS response CRS conflicts with request or is unsupported".into(),
+            ));
+        }
+    }
     let raw_features = object
         .get("features")
         .and_then(Value::as_array)

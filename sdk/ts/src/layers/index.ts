@@ -17,3 +17,7 @@ export { VolumetricAirspaceLayer } from "./volumetric_airspace";
 export type { VolumetricAirspaceOptions, AirspaceMeshRecord } from "./volumetric_airspace";
 export { TrajectoryRibbonLayer } from "./trajectory_ribbon";
 export type { TrajectoryRibbonOptions, TrajectoryRibbonRecord } from "./trajectory_ribbon";
+
+export { WfsLayer } from "./wfs";
+export type { WfsLayerOptions } from "./wfs";
+export type { WfsMeshOptions } from "./wfs_mesh";
