@@ -12,3 +12,6 @@ pub use errors::VolumetricError;
 pub use ribbon_mesh::generate_trajectory_ribbon_mesh;
 pub use triangulation::{signed_area_2d, triangulate_polygon_2d};
 pub use types::{RibbonMesh, RibbonVertex, VolumetricMesh, VolumetricVertex};
+
+mod polygon_fill;
+pub use polygon_fill::{triangulate_polygon_rings, MAX_FILL_NODES};

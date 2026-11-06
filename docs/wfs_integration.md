@@ -4,7 +4,7 @@ The browser `WfsLayer` and native `WgpuWfsFeatures` render an already-fetched WF
 
 ## Geometry and coordinate contract
 
-- Supported geometries: Point, MultiPoint, LineString, MultiLineString, Polygon, MultiPolygon and GeometryCollection. Null geometries are skipped. Points draw crosses in projected metres or the local ECEF tangent plane. Lines and independent polygon rings draw one-pixel strokes. Polygon holes are outlined separately; this increment does not fill polygons or apply per-feature styles.
+- Supported geometries: Point, MultiPoint, LineString, MultiLineString, Polygon, MultiPolygon and GeometryCollection. Null geometries are skipped. Points draw crosses in projected metres or the local ECEF tangent plane. Lines and independent polygon rings draw one-pixel strokes. Polygon holes are outlined separately. Optional `fillPolygons`/`fill_polygons` now fills validated interiors, preserving holes; see [polygon fills](wfs_polygon_fills.md). Per-feature styles remain pending.
 - Source positions are `[x,y]` or `[x,y,height]`. EPSG:4326 uses longitude/latitude degrees. EPSG:3857 and EPSG:900913 use Web Mercator metres. The SDK adapters normalize to latitude/longitude radians. ECEF source coordinates and additional measure axes are rejected.
 - The request CRS is explicit. Named GeoJSON CRS metadata must match it. `EPSG:4326`, `urn:ogc:def:crs:EPSG::4326` and `http(s)://www.opengis.net/def/crs/EPSG/0/4326` are recognized forms (likewise for the other supported EPSG codes). Other metadata forms are rejected. Without metadata, the response is interpreted in the requested CRS.
 - Closed rings need at least four positions; nonempty lines need at least two. Positions must be finite and within the CRS domain. Invalid geometry rejects the collection, preserving an installed browser collection. Paths crossing the antimeridian must be split before rendering.
@@ -83,4 +83,4 @@ npm run typecheck
 npm run test:wfs:browser
 ```
 
-Sampled terrain/imagery/feature occlusion is now documented and tested in [shared depth integration](depth_integration.md). Polygon fills, style/property mapping, adaptive tessellation, antimeridian splitting, advanced transparency, other visualization depth passes and production manual visual checks remain follow-up work. Phase 5 remains partial.
+Sampled terrain/imagery/feature occlusion is now documented and tested in [shared depth integration](depth_integration.md). Polygon fills are now available through the [fill extension](wfs_polygon_fills.md). Style/property mapping, adaptive tessellation, antimeridian splitting, advanced transparency, other visualization depth passes and production manual visual checks remain follow-up work. Phase 5 remains partial.

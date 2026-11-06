@@ -28,7 +28,8 @@
     "test:run": "vitest run",
     "test:wms:browser": "node tests/wms-browser.mjs",
     "test:wfs:browser": "node tests/wfs-browser.mjs",
-    "test:depth:browser": "node tests/depth-browser.mjs"
+    "test:depth:browser": "node tests/depth-browser.mjs",
+    "test:wfs-fill:browser": "node tests/wfs-fill-browser.mjs"
   },
   "dependencies": {
     "@mapbox/vector-tile": "^3.0.0",

@@ -1,3 +1,5 @@
+import { buildPreparedWfsFillMesh, prepareWfsFillTriangles } from "./wfs_fill";
+import type { WmsMeshContext } from "./wms_mesh";
 import { drawWithLayerDepth } from "./depth_state";
 import { Layer } from "./layer";
 import type { LayerRenderContext } from "./layer";
@@ -9,23 +11,28 @@ import { throwIfAborted } from "../map_provider/tile_cache";
 
 export interface WfsLayerOptions extends WfsMeshOptions {
   readonly color?: readonly [number, number, number, number];
+  readonly fillColor?: readonly [number, number, number, number];
 }
 
-/** WFS point crosses, lines and polygon outlines through the normal layer stack. */
+/** WFS points, lines, polygon outlines and optional fills through the normal layer stack. */
 export class WfsLayer extends Layer {
   private collection: WfsFeatureCollection | null = null;
+  private fillTriangles: readonly Float64Array[] = [];
   private program: WebGLProgram | null = null;
   private vao: WebGLVertexArrayObject | null = null;
   private buffer: WebGLBuffer | null = null;
   private owner: WebGL2RenderingContext | null = null;
   private generation = 0;
   private readonly options: WfsLayerOptions;
+  private readonly fillColor: readonly [number, number, number, number];
   private readonly color: readonly [number, number, number, number];
 
   public constructor(id: string, private readonly source: WfsVectorSource, options: WfsLayerOptions = {}) {
     super(id);
     this.options = { ...options };
     this.color = [...(options.color ?? [0, 0.9, 0.46, 1])];
+    this.fillColor = [...(options.fillColor ?? this.color)];
+    if (this.fillColor.length !== 4 || this.fillColor.some(v => !Number.isFinite(v) || v < 0 || v > 1)) throw new RangeError("Invalid WFS fill color");
     if (this.color.length !== 4 || this.color.some(v => !Number.isFinite(v) || v < 0 || v > 1)) throw new RangeError("Invalid WFS color");
     buildWfsMesh({ features: [] }, source.crs, {
       viewMode: "2D", centerLat: 0, centerLon: 0, zoom: 1, project: () => [0, 0],
@@ -39,6 +46,8 @@ export class WfsLayer extends Layer {
     throwIfAborted(signal);
     if (generation !== this.generation) return;
     validateWfsGeometry(collection, this.source.crs);
+    const fillTriangles = prepareWfsFillTriangles(collection, this.source.crs, this.options);
+    this.fillTriangles = fillTriangles;
     this.collection = collection;
   }
 
@@ -62,7 +71,7 @@ export class WfsLayer extends Layer {
           precision highp float;
           uniform vec4 featureColor;
           out vec4 color;
-          void main() { color = featureColor; }`],
+          void main() { color = featureColor; if (color.a == 0.0) discard; }`],
       ] as const) {
         const shader = gl.createShader(type);
         if (!shader) throw new Error("Could not allocate WFS shader");
@@ -101,8 +110,9 @@ export class WfsLayer extends Layer {
     const controller = context.controller;
     const camera = controller.getCameraState();
     let vertices: Float32Array;
+    let fills: Float32Array;
     try {
-      vertices = buildWfsMesh(this.collection, this.source.crs, {
+      const meshContext: WmsMeshContext = {
         viewMode: controller.getViewMode(), centerLat: camera.center_lat, centerLon: camera.center_lon,
         zoom: camera.zoom, rotation: camera.rotation, pitch: camera.pitch, roll: camera.roll,
         project: (lat, lon) => controller.projection.project(lat, lon, 0),
@@ -113,18 +123,25 @@ export class WfsLayer extends Layer {
             return typeof sample.elevation_meters === "number" ? sample.elevation_meters : null;
           } catch { return null; }
         },
-      }, this.options);
+      };
+      vertices = buildWfsMesh(this.collection, this.source.crs, meshContext, this.options);
+      fills = buildPreparedWfsFillMesh(this.fillTriangles, meshContext, this.options);
     } finally { camera.free(); }
-    if (vertices.length === 0) return;
+    if (vertices.length === 0 && fills.length === 0) return;
     this.initialize(gl);
     gl.useProgram(this.program);
     gl.bindVertexArray(this.vao);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.buffer);
-    gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.DYNAMIC_DRAW);
+    const data = new Float32Array(fills.length + vertices.length);
+    data.set(fills); data.set(vertices, fills.length);
+    gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW);
     gl.uniformMatrix4fv(gl.getUniformLocation(this.program!, "viewProjection"), false, matrix);
-    gl.uniform4f(gl.getUniformLocation(this.program!, "featureColor"), this.color[0], this.color[1], this.color[2], this.color[3] * this.opacity);
+    const colorLocation = gl.getUniformLocation(this.program!, "featureColor");
     drawWithLayerDepth(gl, controller.getViewMode(), () => {
-      gl.drawArrays(gl.LINES, 0, vertices.length / 3);
+      gl.uniform4f(colorLocation, this.fillColor[0], this.fillColor[1], this.fillColor[2], this.fillColor[3] * this.opacity);
+      gl.drawArrays(gl.TRIANGLES, 0, fills.length / 3);
+      gl.uniform4f(colorLocation, this.color[0], this.color[1], this.color[2], this.color[3] * this.opacity);
+      gl.drawArrays(gl.LINES, fills.length / 3, vertices.length / 3);
     });
     gl.bindVertexArray(null);
   }
@@ -141,6 +158,7 @@ export class WfsLayer extends Layer {
     this.vao = null;
     this.buffer = null;
     this.collection = null;
+    this.fillTriangles = [];
     this.owner = null;
   }
 }

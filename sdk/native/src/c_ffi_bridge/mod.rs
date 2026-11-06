@@ -2186,6 +2186,66 @@ pub unsafe extern "C" fn olayer_sigmet_dataset_free(ds: *mut SigmetDataset) {
 // 3D VOLUMETRIC AIRSPACES & TRAJECTORY RIBBONS (GIS-PROP-007)
 // ============================================================================
 
+/// Triangulates planar closed x/y/height rings, exterior first, holes afterward.
+/// `coords_len`/`out_len` count f64 values; ring lengths count nodes.
+/// Returns 0 on success, -1 invalid pointers/capacities, -2 invalid input lengths,
+/// -3 invalid topology, -4 insufficient output (required length is written).
+/// Null output with zero capacity is permitted for a size query.
+///
+/// # Safety
+/// Inputs must be aligned/readable for their declared lengths. `out_len` must be
+/// writable for one usize. A non-null output must be writable for `capacity` f64s.
+/// All input/output ranges must be disjoint and immutable during this call.
+#[no_mangle]
+pub unsafe extern "C" fn olayer_triangulate_polygon_rings(
+    coords: *const f64,
+    coords_len: usize,
+    ring_lengths: *const u32,
+    ring_count: usize,
+    out: *mut f64,
+    capacity: usize,
+    out_len: *mut usize,
+) -> c_int {
+    use olayer_core::volumetric::MAX_FILL_NODES;
+    if out_len.is_null() {
+        return -1;
+    }
+    *out_len = 0;
+    if coords.is_null()
+        || ring_lengths.is_null()
+        || (out.is_null() && capacity != 0)
+        || capacity > MAX_FFI_BUFFER_BYTES / std::mem::size_of::<f64>()
+    {
+        return -1;
+    }
+    if !coords_len.is_multiple_of(3)
+        || coords_len / 3 > MAX_FILL_NODES
+        || ring_count == 0
+        || ring_count > MAX_FILL_NODES / 4
+    {
+        return -2;
+    }
+    let points: Vec<[f64; 3]> = std::slice::from_raw_parts(coords, coords_len)
+        .as_chunks::<3>()
+        .0
+        .to_vec();
+    let lengths: Vec<usize> = std::slice::from_raw_parts(ring_lengths, ring_count)
+        .iter()
+        .map(|n| *n as usize)
+        .collect();
+    let Ok(triangles) = olayer_core::volumetric::triangulate_polygon_rings(&points, &lengths)
+    else {
+        return -3;
+    };
+    let values: Vec<f64> = triangles.into_iter().flatten().collect();
+    *out_len = values.len();
+    if capacity < values.len() {
+        return -4;
+    }
+    std::ptr::copy_nonoverlapping(values.as_ptr(), out, values.len());
+    0
+}
+
 /// Generates an extruded 3D volumetric airspace mesh.
 /// Writes flat interleaved vertices `[x, y, z, nx, ny, nz, height_ratio, is_edge, ...]` into `out_vertices`
 /// and triangle indices into `out_indices`.
@@ -2593,6 +2653,80 @@ mod tests {
             data.extend_from_slice(&col);
         }
         data
+    }
+
+    #[test]
+    fn polygon_ring_ffi_sizes_output_and_rejects_invalid_topology() {
+        let coords = [
+            0.0, 0.0, 0.0, 4.0, 0.0, 4.0, 4.0, 4.0, 8.0, 0.0, 4.0, 4.0, 0.0, 0.0, 0.0, 1.0, 1.0,
+            2.0, 2.0, 1.0, 3.0, 2.0, 2.0, 4.0, 1.0, 2.0, 3.0, 1.0, 1.0, 2.0,
+        ];
+        let lengths = [5_u32, 5];
+        let mut needed = 0;
+        unsafe {
+            assert_eq!(
+                olayer_triangulate_polygon_rings(
+                    coords.as_ptr(),
+                    coords.len(),
+                    lengths.as_ptr(),
+                    2,
+                    std::ptr::null_mut(),
+                    0,
+                    &mut needed
+                ),
+                -4
+            );
+            assert!(needed > 0 && needed % 9 == 0);
+            let mut output = vec![777.0; needed];
+            assert_eq!(
+                olayer_triangulate_polygon_rings(
+                    coords.as_ptr(),
+                    coords.len(),
+                    lengths.as_ptr(),
+                    2,
+                    output.as_mut_ptr(),
+                    needed - 1,
+                    &mut needed
+                ),
+                -4
+            );
+            assert!(output.iter().all(|v| *v == 777.0));
+            assert_eq!(
+                olayer_triangulate_polygon_rings(
+                    coords.as_ptr(),
+                    coords.len(),
+                    lengths.as_ptr(),
+                    2,
+                    output.as_mut_ptr(),
+                    output.len(),
+                    &mut needed
+                ),
+                0
+            );
+            let area: f64 = output
+                .as_chunks::<9>()
+                .0
+                .iter()
+                .map(|p| {
+                    ((p[3] - p[0]) * (p[7] - p[1]) - (p[4] - p[1]) * (p[6] - p[0])).abs() * 0.5
+                })
+                .sum();
+            assert!((area - 15.0).abs() < 1e-10);
+            let invalid = [4_u32, 6];
+            assert_eq!(
+                olayer_triangulate_polygon_rings(
+                    coords.as_ptr(),
+                    coords.len(),
+                    invalid.as_ptr(),
+                    2,
+                    output.as_mut_ptr(),
+                    output.len(),
+                    &mut needed
+                ),
+                -3
+            );
+            assert_eq!(needed, 0);
+        }
     }
 
     #[test]

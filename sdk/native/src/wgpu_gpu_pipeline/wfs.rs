@@ -25,6 +25,8 @@ pub struct WfsMeshOptions {
     pub subdivisions: u32,
     /// Half-length of point crosses in metres.
     pub point_radius: f64,
+    /// Fill validated Polygon/MultiPolygon interiors as well as drawing outlines.
+    pub fill_polygons: bool,
 }
 impl Default for WfsMeshOptions {
     fn default() -> Self {
@@ -33,6 +35,7 @@ impl Default for WfsMeshOptions {
             height_offset: 0.0,
             subdivisions: 16,
             point_radius: 1000.0,
+            fill_polygons: false,
         }
     }
 }
@@ -56,6 +59,7 @@ struct Decoder {
     crs: u32,
     count: usize,
     paths: Vec<Path>,
+    polygons: Vec<Vec<Vec<[f64; 3]>>>,
 }
 impl Decoder {
     fn array<'a>(&self, value: &'a Value) -> Result<&'a Vec<Value>, WfsRenderError> {
@@ -101,10 +105,10 @@ impl Decoder {
             [(y / A).sinh().atan(), x / A, z]
         })
     }
-    fn line(&mut self, value: &Value, ring: bool) -> Result<(), WfsRenderError> {
+    fn line(&mut self, value: &Value, ring: bool) -> Result<Vec<[f64; 3]>, WfsRenderError> {
         let raw = self.array(value)?;
         if raw.is_empty() {
-            return Ok(());
+            return Ok(Vec::new());
         }
         let positions = raw
             .iter()
@@ -123,9 +127,19 @@ impl Decoder {
             return Err(invalid("split WFS paths at the antimeridian"));
         }
         self.paths.push(Path {
-            positions,
+            positions: positions.clone(),
             point: false,
         });
+        Ok(positions)
+    }
+    fn polygon(&mut self, value: &Value) -> Result<(), WfsRenderError> {
+        let mut rings = Vec::new();
+        for ring in self.array(value)? {
+            rings.push(self.line(ring, true)?);
+        }
+        if !rings.is_empty() {
+            self.polygons.push(rings);
+        }
         Ok(())
     }
     fn geometry(&mut self, value: &Value, depth: usize) -> Result<(), WfsRenderError> {
@@ -153,22 +167,18 @@ impl Decoder {
                     });
                 }
             }
-            Some("LineString") => self.line(coords, false)?,
+            Some("LineString") => {
+                self.line(coords, false)?;
+            }
             Some("MultiLineString") => {
                 for p in self.array(coords)? {
                     self.line(p, false)?;
                 }
             }
-            Some("Polygon") => {
-                for p in self.array(coords)? {
-                    self.line(p, true)?;
-                }
-            }
+            Some("Polygon") => self.polygon(coords)?,
             Some("MultiPolygon") => {
                 for polygon in self.array(coords)? {
-                    for p in self.array(polygon)? {
-                        self.line(p, true)?;
-                    }
+                    self.polygon(polygon)?;
                 }
             }
             Some("GeometryCollection") => {
@@ -182,7 +192,7 @@ impl Decoder {
     }
 }
 
-fn paths(collection: &FeatureCollection) -> Result<Vec<Path>, WfsRenderError> {
+fn paths(collection: &FeatureCollection) -> Result<Decoder, WfsRenderError> {
     let crs = collection.crs.epsg_code();
     if !matches!(crs, 4326 | 3857 | 900913) {
         return Err(invalid("unsupported WFS CRS"));
@@ -191,54 +201,66 @@ fn paths(collection: &FeatureCollection) -> Result<Vec<Path>, WfsRenderError> {
         crs,
         count: 0,
         paths: Vec::new(),
+        polygons: Vec::new(),
     };
     for f in &collection.features {
         decoder.geometry(&f.geometry, 0)?;
     }
-    Ok(decoder.paths)
+    Ok(decoder)
 }
 
-/// Packed line list. Polygon rings remain independent, and nodata breaks segments.
-pub fn build_wfs_mesh(
-    collection: &FeatureCollection,
-    controller: &NativeController,
+struct WfsTransform<'a> {
+    controller: &'a NativeController,
     options: WfsMeshOptions,
-) -> Result<Vec<[f32; 3]>, WfsRenderError> {
-    if !(1..=64).contains(&options.subdivisions)
-        || !options.height_offset.is_finite()
-        || !options.point_radius.is_finite()
-        || options.point_radius <= 0.0
-    {
-        return Err(invalid("invalid WFS mesh options"));
+    eye: [f64; 3],
+}
+impl<'a> WfsTransform<'a> {
+    fn new(
+        controller: &'a NativeController,
+        options: WfsMeshOptions,
+    ) -> Result<Self, WfsRenderError> {
+        if !(1..=64).contains(&options.subdivisions)
+            || !options.height_offset.is_finite()
+            || !options.point_radius.is_finite()
+            || options.point_radius <= 0.0
+        {
+            return Err(invalid("invalid WFS mesh options"));
+        }
+        if !matches!(controller.view_mode.as_str(), "2D" | "2.5D" | "3D") {
+            return Err(invalid("invalid WFS view mode"));
+        }
+        let camera = &controller.camera;
+        if ![
+            camera.center.lat,
+            camera.center.lon,
+            camera.zoom,
+            camera.rotation,
+            camera.pitch,
+            camera.roll,
+        ]
+        .iter()
+        .all(|v| v.is_finite())
+            || camera.zoom <= 0.0
+        {
+            return Err(invalid("invalid WFS camera"));
+        }
+        Ok(Self {
+            controller,
+            options,
+            eye: super::wms::globe_eye(controller),
+        })
     }
-    if !matches!(controller.view_mode.as_str(), "2D" | "2.5D" | "3D") {
-        return Err(invalid("invalid WFS view mode"));
-    }
-    let camera = &controller.camera;
-    if ![
-        camera.center.lat,
-        camera.center.lon,
-        camera.zoom,
-        camera.rotation,
-        camera.pitch,
-        camera.roll,
-    ]
-    .iter()
-    .all(|v| v.is_finite())
-        || camera.zoom <= 0.0
-    {
-        return Err(invalid("invalid WFS camera"));
-    }
-    let globe = controller.view_mode == "3D";
-    let eye = super::wms::globe_eye(controller);
-    let visibility = |p: [f64; 3]| {
-        if globe {
-            (p[0] * eye[0] + p[1] * eye[1]) / (A * A) + p[2] * eye[2] / (B * B) - 1.0
+    fn visibility(&self, p: [f64; 3]) -> f64 {
+        if self.controller.view_mode == "3D" {
+            (p[0] * self.eye[0] + p[1] * self.eye[1]) / (A * A) + p[2] * self.eye[2] / (B * B) - 1.0
         } else {
             1.0
         }
-    };
-    let project = |[lat, lon, z]: [f64; 3]| -> Result<Option<[f64; 3]>, WfsRenderError> {
+    }
+    fn project(&self, [lat, lon, z]: [f64; 3]) -> Result<Option<[f64; 3]>, WfsRenderError> {
+        let controller = self.controller;
+        let options = self.options;
+        let globe = controller.view_mode == "3D";
         let height = if controller.view_mode == "2D" {
             0.0
         } else {
@@ -276,7 +298,19 @@ pub fn build_wfs_mesh(
             return Err(invalid("WFS projection or elevation is not finite"));
         }
         Ok(Some(p))
-    };
+    }
+}
+
+/// Packed line list. Polygon rings remain independent, and nodata breaks segments.
+pub fn build_wfs_mesh(
+    collection: &FeatureCollection,
+    controller: &NativeController,
+    options: WfsMeshOptions,
+) -> Result<Vec<[f32; 3]>, WfsRenderError> {
+    let transform = WfsTransform::new(controller, options)?;
+    let globe = controller.view_mode == "3D";
+    let project = |p| transform.project(p);
+    let visibility = |p| transform.visibility(p);
     let mut output = Vec::new();
     let mut work = 0;
     let mut emit = |a: Option<[f64; 3]>, b: Option<[f64; 3]>| -> Result<(), WfsRenderError> {
@@ -313,7 +347,7 @@ pub fn build_wfs_mesh(
         }
         Ok(())
     };
-    for path in paths(collection)? {
+    for path in paths(collection)?.paths {
         if path.point {
             let [lat, lon, _] = path.positions[0];
             let Some(center) = project(path.positions[0])? else {
@@ -358,6 +392,8 @@ pub fn build_wfs_mesh(
 pub struct WgpuWfsPipeline {
     pipeline: wgpu::RenderPipeline,
     pipeline_2d: wgpu::RenderPipeline,
+    fill_pipeline: wgpu::RenderPipeline,
+    fill_pipeline_2d: wgpu::RenderPipeline,
     uniform: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
 }
@@ -371,20 +407,21 @@ impl WgpuWfsPipeline {
             label: Some("WFS lines"),
             source: wgpu::ShaderSource::Wgsl(
                 r#"
-struct Uniforms { matrix: mat4x4<f32>, color: vec4<f32> };
+struct Uniforms { matrix: mat4x4<f32>, color: vec4<f32>, fill_color: vec4<f32> };
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
 @vertex fn vs(@location(0) position:vec3<f32>) -> @builtin(position) vec4<f32> {
     let clip = uniforms.matrix * vec4<f32>(position,1.0);
     return vec4<f32>(clip.xy, (clip.z + clip.w) * 0.5, clip.w);
 }
-@fragment fn fs() -> @location(0) vec4<f32> { return uniforms.color; }
+@fragment fn fs() -> @location(0) vec4<f32> { if (uniforms.color.a == 0.0) { discard; } return uniforms.color; }
+@fragment fn fs_fill() -> @location(0) vec4<f32> { if (uniforms.fill_color.a == 0.0) { discard; } return uniforms.fill_color; }
 "#
                 .into(),
             ),
         });
         let uniform = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("WFS uniforms"),
-            size: 80,
+            size: 96,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -450,14 +487,22 @@ struct Uniforms { matrix: mat4x4<f32>, color: vec4<f32> };
             multiview: None,
         };
         let pipeline = device.create_render_pipeline(&descriptor);
+        descriptor.primitive.topology = wgpu::PrimitiveTopology::TriangleList;
+        descriptor.fragment.as_mut().unwrap().entry_point = "fs_fill";
+        let fill_pipeline = device.create_render_pipeline(&descriptor);
         if let Some(depth) = descriptor.depth_stencil.as_mut() {
             depth.depth_write_enabled = false;
             depth.depth_compare = wgpu::CompareFunction::Always;
         }
+        let fill_pipeline_2d = device.create_render_pipeline(&descriptor);
+        descriptor.primitive.topology = wgpu::PrimitiveTopology::LineList;
+        descriptor.fragment.as_mut().unwrap().entry_point = "fs";
         let pipeline_2d = device.create_render_pipeline(&descriptor);
         Self {
             pipeline,
             pipeline_2d,
+            fill_pipeline,
+            fill_pipeline_2d,
             uniform,
             bind_group,
         }
@@ -478,6 +523,22 @@ struct Uniforms { matrix: mat4x4<f32>, color: vec4<f32> };
         }
         queue.write_buffer(&self.uniform, 0, bytemuck::cast_slice(matrix));
         queue.write_buffer(&self.uniform, 64, bytemuck::cast_slice(&color));
+        self.set_fill_color(queue, color)
+    }
+
+    /// Override fill color after set_view; colors are normalized RGBA.
+    pub fn set_fill_color(
+        &self,
+        queue: &wgpu::Queue,
+        color: [f32; 4],
+    ) -> Result<(), WfsRenderError> {
+        if !color
+            .iter()
+            .all(|v| v.is_finite() && (0.0..=1.0).contains(v))
+        {
+            return Err(invalid("invalid WFS fill color"));
+        }
+        queue.write_buffer(&self.uniform, 80, bytemuck::cast_slice(&color));
         Ok(())
     }
 }
@@ -489,6 +550,9 @@ pub struct WgpuWfsFeatures {
     options: WfsMeshOptions,
     buffer: wgpu::Buffer,
     count: u32,
+    fill_triangles: Vec<[f64; 3]>,
+    fill_buffer: wgpu::Buffer,
+    fill_count: u32,
 }
 impl WgpuWfsFeatures {
     pub fn new(
@@ -498,6 +562,8 @@ impl WgpuWfsFeatures {
         options: WfsMeshOptions,
     ) -> Result<Self, WfsRenderError> {
         let vertices = build_wfs_mesh(&collection, controller, options)?;
+        let fill_triangles = fill::prepare_wfs_fill(&collection, options)?;
+        let fills = fill::build_prepared_fill(&fill_triangles, controller, options)?;
         let count = vertices.len() as u32;
         Ok(Self {
             two_d: controller.view_mode == "2D",
@@ -505,6 +571,9 @@ impl WgpuWfsFeatures {
             options,
             buffer: Self::buffer(device, &vertices),
             count,
+            fill_triangles,
+            fill_buffer: Self::buffer(device, &fills),
+            fill_count: fills.len() as u32,
         })
     }
     fn buffer(device: &wgpu::Device, vertices: &[[f32; 3]]) -> wgpu::Buffer {
@@ -524,6 +593,9 @@ impl WgpuWfsFeatures {
         controller: &NativeController,
     ) -> Result<(), WfsRenderError> {
         let vertices = build_wfs_mesh(&self.collection, controller, self.options)?;
+        let fills = fill::build_prepared_fill(&self.fill_triangles, controller, self.options)?;
+        self.fill_buffer = Self::buffer(device, &fills);
+        self.fill_count = fills.len() as u32;
         self.buffer = Self::buffer(device, &vertices);
         self.count = vertices.len() as u32;
         self.two_d = controller.view_mode == "2D";
@@ -533,8 +605,18 @@ impl WgpuWfsFeatures {
         &self.collection
     }
     pub fn render<'a>(&'a self, pipeline: &'a WgpuWfsPipeline, pass: &mut wgpu::RenderPass<'a>) {
-        if self.count == 0 {
+        if self.count == 0 && self.fill_count == 0 {
             return;
+        }
+        pass.set_bind_group(0, &pipeline.bind_group, &[]);
+        if self.fill_count > 0 {
+            pass.set_pipeline(if self.two_d {
+                &pipeline.fill_pipeline_2d
+            } else {
+                &pipeline.fill_pipeline
+            });
+            pass.set_vertex_buffer(0, self.fill_buffer.slice(..));
+            pass.draw(0..self.fill_count, 0..1);
         }
         pass.set_pipeline(if self.two_d {
             &pipeline.pipeline_2d
@@ -565,7 +647,11 @@ mod tests {
     impl OgcTransport for FixtureTransport {
         fn get(&self, url: &str) -> Result<Vec<u8>, NativeMapDataError> {
             self.0.lock().unwrap().push(url.into());
-            Ok(include_bytes!("../../../../tests/fixtures/wfs/features.json").to_vec())
+            Ok(if url.contains("filled") {
+                include_bytes!("../../../../tests/fixtures/wfs-fill/features.json").to_vec()
+            } else {
+                include_bytes!("../../../../tests/fixtures/wfs/features.json").to_vec()
+            })
         }
     }
     fn source(urls: Arc<Mutex<Vec<String>>>) -> WfsFeatureSource<FixtureTransport> {
@@ -934,4 +1020,259 @@ mod tests {
             );
         });
     }
+    #[test]
+    #[ignore = "requires a headless WGPU adapter; run explicitly with --ignored"]
+    fn wfs_polygon_fills_preserve_holes_in_offscreen_pixels() {
+        pollster::block_on(async {
+            let instance = wgpu::Instance::default();
+            let adapter = instance
+                .request_adapter(&wgpu::RequestAdapterOptions {
+                    power_preference: wgpu::PowerPreference::LowPower,
+                    compatible_surface: None,
+                    force_fallback_adapter: false,
+                })
+                .await
+                .expect("headless WGPU adapter");
+            let (device, queue) = adapter
+                .request_device(&wgpu::DeviceDescriptor::default(), None)
+                .await
+                .unwrap();
+            let pipeline = WgpuWfsPipeline::new(
+                &device,
+                wgpu::TextureFormat::Rgba8Unorm,
+                Some(wgpu::TextureFormat::Depth32Float),
+            );
+            let urls = Arc::new(Mutex::new(Vec::new()));
+            let crs = CoordinateReferenceSystem::epsg(4326).unwrap();
+            let collection = WfsFeatureSource::new(
+                NativeOgcClient::new(
+                    FixtureTransport(urls.clone()),
+                    NonZeroUsize::new(8192).unwrap(),
+                ),
+                UrlParts::new("https://fixture.test", "wfs"),
+                "filled",
+                crs,
+            )
+            .fetch()
+            .unwrap();
+            let mut controller = controller();
+            controller.camera.pitch = 0.0;
+            controller.camera.viewport_base_meters = 600_000.0;
+            let mut gpu_features = WgpuWfsFeatures::new(
+                &device,
+                collection,
+                &controller,
+                WfsMeshOptions {
+                    altitude_mode: WfsAltitudeMode::RelativeToGround,
+                    fill_polygons: true,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            let raster = crate::WgpuGpuPipeline::with_depth(
+                &device,
+                wgpu::TextureFormat::Rgba8Unorm,
+                Some(wgpu::TextureFormat::Depth32Float),
+            );
+            let bounds = BoundingBox::new(-2.0, -1.0, 2.0, 1.0, crs).unwrap();
+            let image = olayer_map_core::MapImage {
+                pixels: vec![0, 0, 255, 255].into_boxed_slice(),
+                width: std::num::NonZeroU32::new(1).unwrap(),
+                height: std::num::NonZeroU32::new(1).unwrap(),
+                format: olayer_map_core::ImageFormat::Png,
+                crs,
+                bounds,
+            };
+            let mut background = crate::WgpuWmsImage::new(
+                &device,
+                &queue,
+                &raster,
+                &image,
+                &controller,
+                crate::WmsMeshOptions {
+                    drape_terrain: true,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            for mode in ["2D", "2.5D", "3D"] {
+                controller.view_mode = mode.into();
+                controller.camera.zoom = if mode == "3D" { 20.0 } else { 1.0 };
+                controller.camera.pitch = if mode == "2.5D" { 0.4 } else { 0.0 };
+                gpu_features.rebuild(&device, &controller).unwrap();
+                let matrix = match mode {
+                    "3D" => controller.camera.get_3d_view_proj_matrix().unwrap(),
+                    "2.5D" => controller
+                        .camera
+                        .get_25d_view_proj_matrix(controller.projection.as_ref())
+                        .unwrap(),
+                    _ => controller
+                        .camera
+                        .get_2d_view_proj_matrix(controller.projection.as_ref())
+                        .unwrap(),
+                };
+                pipeline
+                    .set_view(&queue, &matrix, [1.0, 1.0, 1.0, 1.0])
+                    .unwrap();
+                for alpha in [1.0, 0.0] {
+                    pipeline
+                        .set_fill_color(&queue, [0.0, 1.0, 0.0, alpha])
+                        .unwrap();
+                    queue.write_buffer(&raster.uniform_buffer, 0, bytemuck::cast_slice(&matrix));
+                    background.rebuild(&device, &controller).unwrap();
+                    let target = device.create_texture(&wgpu::TextureDescriptor {
+                        label: Some("WFS offscreen test"),
+                        size: wgpu::Extent3d {
+                            width: 64,
+                            height: 64,
+                            depth_or_array_layers: 1,
+                        },
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format: wgpu::TextureFormat::Rgba8Unorm,
+                        usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                            | wgpu::TextureUsages::COPY_SRC,
+                        view_formats: &[],
+                    });
+                    let depth = device.create_texture(&wgpu::TextureDescriptor {
+                        label: Some("WFS depth"),
+                        size: wgpu::Extent3d {
+                            width: 64,
+                            height: 64,
+                            depth_or_array_layers: 1,
+                        },
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format: wgpu::TextureFormat::Depth32Float,
+                        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                        view_formats: &[],
+                    });
+                    let depth_view = depth.create_view(&Default::default());
+                    let readback = device.create_buffer(&wgpu::BufferDescriptor {
+                        label: None,
+                        size: 64 * 256,
+                        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                        mapped_at_creation: false,
+                    });
+                    let mut encoder = device.create_command_encoder(&Default::default());
+                    let view = target.create_view(&Default::default());
+                    {
+                        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                            label: None,
+                            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                                view: &view,
+                                resolve_target: None,
+                                ops: wgpu::Operations {
+                                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                                    store: wgpu::StoreOp::Store,
+                                },
+                            })],
+                            depth_stencil_attachment: Some(
+                                wgpu::RenderPassDepthStencilAttachment {
+                                    view: &depth_view,
+                                    depth_ops: Some(wgpu::Operations {
+                                        load: wgpu::LoadOp::Clear(1.0),
+                                        store: wgpu::StoreOp::Store,
+                                    }),
+                                    stencil_ops: None,
+                                },
+                            ),
+                            timestamp_writes: None,
+                            occlusion_query_set: None,
+                        });
+                        if mode == "2D" {
+                            background.render(&raster, &mut pass);
+                        }
+                        gpu_features.render(&pipeline, &mut pass);
+                        if mode != "2D" {
+                            background.render(&raster, &mut pass);
+                        }
+                    }
+                    encoder.copy_texture_to_buffer(
+                        target.as_image_copy(),
+                        wgpu::ImageCopyBuffer {
+                            buffer: &readback,
+                            layout: wgpu::ImageDataLayout {
+                                offset: 0,
+                                bytes_per_row: Some(256),
+                                rows_per_image: Some(64),
+                            },
+                        },
+                        wgpu::Extent3d {
+                            width: 64,
+                            height: 64,
+                            depth_or_array_layers: 1,
+                        },
+                    );
+                    queue.submit(Some(encoder.finish()));
+                    let (sender, receiver) = std::sync::mpsc::channel();
+                    readback
+                        .slice(..)
+                        .map_async(wgpu::MapMode::Read, move |result| {
+                            sender.send(result).unwrap()
+                        });
+                    device.poll(wgpu::Maintain::Wait);
+                    receiver.recv().unwrap().unwrap();
+                    let pixels = readback.slice(..).get_mapped_range();
+                    for (lon, lat, filled) in [
+                        (0_f64, -0.5_f64, true),
+                        (-1.0, -0.5, false),
+                        (-0.2, 0.5, false),
+                        (1.0, 0.5, true),
+                        (-1.2, 0.6, true),
+                    ] {
+                        let height = if mode == "2D" {
+                            0.0
+                        } else if filled {
+                            750.0
+                        } else {
+                            500.0
+                        };
+                        let p = if mode == "3D" {
+                            let p = lla_to_ecef(
+                                &LatLon::new(lat.to_radians(), lon.to_radians(), height),
+                                &Ellipsoid::wgs84(),
+                            );
+                            [p.x, p.y, p.z]
+                        } else {
+                            let (x, y) = controller
+                                .projection
+                                .project(&LatLon::new(lat.to_radians(), lon.to_radians(), 0.0))
+                                .unwrap();
+                            [x, y, height]
+                        };
+                        let clip: [f64; 4] = std::array::from_fn(|row| {
+                            f64::from(matrix[row]) * p[0]
+                                + f64::from(matrix[4 + row]) * p[1]
+                                + f64::from(matrix[8 + row]) * p[2]
+                                + f64::from(matrix[12 + row])
+                        });
+                        let px = ((clip[0] / clip[3] + 1.0) * 32.0).floor() as usize;
+                        let py = ((1.0 - clip[1] / clip[3]) * 32.0).floor() as usize;
+                        let index = py * 256 + px * 4;
+                        let expected = if filled && alpha > 0.0 {
+                            [0_i32, 255, 0]
+                        } else {
+                            [0_i32, 0, 255]
+                        };
+                        assert!(
+                            (0..3).all(|i| (i32::from(pixels[index + i]) - expected[i]).abs() < 35),
+                            "{mode}: wrong fill/hole at {lon},{lat}: {:?}",
+                            &pixels[index..index + 4]
+                        );
+                    }
+                }
+            }
+            assert_eq!(
+                urls.lock().unwrap().len(),
+                1,
+                "switching dimensions must not refetch WFS features"
+            );
+        });
+    }
 }
+
+mod fill;
+pub use fill::build_wfs_fill_mesh;

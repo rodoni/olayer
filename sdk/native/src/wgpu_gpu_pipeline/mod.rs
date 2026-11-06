@@ -416,7 +416,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             depth_stencil: depth_state().map(|mut state| {
                 state.bias = wgpu::DepthBiasState {
                     constant: -1,
-                    slope_scale: -1.0,
+                    slope_scale: 0.0,
                     clamp: 0.0,
                 };
                 state

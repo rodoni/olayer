@@ -1,4 +1,4 @@
-import { lla_to_ecef } from "olayer-wasm";
+import { lla_to_ecef, triangulate_polygon_rings } from "olayer-wasm";
 import type { WfsFeatureCollection } from "../map_provider/ogc_client";
 import { globeEye } from "./wms_mesh";
 import type { WmsMeshContext } from "./wms_mesh";
@@ -11,9 +11,11 @@ export interface WfsMeshOptions {
   readonly subdivisions?: number;
   /** Half-length of point cross markers in metres. Default 1000. */
   readonly pointRadius?: number;
+  /** Fill validated polygon interiors as well as drawing outlines. Default false. */
+  readonly fillPolygons?: boolean;
 }
 
-type Position = [number, number, number];
+export type Position = [number, number, number];
 interface Path { readonly positions: Position[]; readonly point: boolean }
 const A = 6378137, B = 6356752.314245179;
 const MAX_VERTICES = 1_000_000;
@@ -23,14 +25,20 @@ function record(value: unknown): value is Record<string, unknown> {
 }
 
 /** Validates the complete geometry before installation; properties remain on the collection. */
-export function validateWfsGeometry(collection: WfsFeatureCollection, crs: string): void {
-  paths(collection, crs);
+export function validateWfsGeometry(collection: WfsFeatureCollection, crs: string, fillPolygons = false): void {
+  const geometry = paths(collection, crs);
+  if (fillPolygons) for (const rings of geometry.polygons) triangulateWfsPolygon(rings);
 }
 
-function paths(collection: WfsFeatureCollection, crs: string): Path[] {
+export function triangulateWfsPolygon(rings: Position[][]): Float64Array {
+  return triangulate_polygon_rings(new Float64Array(rings.flat(2)), new Uint32Array(rings.map(ring => ring.length)));
+}
+
+export function paths(collection: WfsFeatureCollection, crs: string): { paths: Path[]; polygons: Position[][][] } {
   if (!["EPSG:4326", "EPSG:3857", "EPSG:900913"].includes(crs)) throw new RangeError(`Unsupported WFS CRS: ${crs}`);
   if (collection.crs !== undefined && collection.crs !== crs) throw new RangeError("WFS collection CRS conflicts with placement");
   const output: Path[] = [];
+  const polygons: Position[][][] = [];
   let count = 0;
   const position = (raw: unknown): Position => {
     if (!Array.isArray(raw) || raw.length < 2 || raw.length > 3 || !raw.every(v => typeof v === "number" && Number.isFinite(v))) {
@@ -48,9 +56,9 @@ function paths(collection: WfsFeatureCollection, crs: string): Path[] {
     if (!Array.isArray(raw)) throw new TypeError("Invalid WFS coordinate nesting");
     return raw;
   };
-  const line = (raw: unknown, ring = false): void => {
+  const line = (raw: unknown, ring = false): Position[] => {
     const coordinates = array(raw);
-    if (coordinates.length === 0) return;
+    if (coordinates.length === 0) return [];
     const positions = coordinates.map(position);
     if (positions.length < (ring ? 4 : 2)) throw new TypeError("WFS line or ring is too short");
     if (ring && positions[0]!.some((v, i) => v !== positions[positions.length - 1]![i])) throw new TypeError("WFS ring must be closed");
@@ -58,6 +66,11 @@ function paths(collection: WfsFeatureCollection, crs: string): Path[] {
       if (Math.abs(positions[i]![1] - positions[i - 1]![1]) > Math.PI) throw new RangeError("Split WFS paths at the antimeridian");
     }
     output.push({ positions, point: false });
+    return positions;
+  };
+  const polygon = (raw: unknown): void => {
+    const rings = array(raw).map(ring => line(ring, true));
+    if (rings.length > 0) polygons.push(rings);
   };
   const geometry = (raw: unknown, depth = 0): void => {
     if (raw === null) return;
@@ -68,18 +81,18 @@ function paths(collection: WfsFeatureCollection, crs: string): Path[] {
       case "MultiPoint": for (const p of array(coordinates)) output.push({ positions: [position(p)], point: true }); break;
       case "LineString": line(coordinates); break;
       case "MultiLineString": for (const p of array(coordinates)) line(p); break;
-      case "Polygon": for (const p of array(coordinates)) line(p, true); break;
-      case "MultiPolygon": for (const polygon of array(coordinates)) for (const p of array(polygon)) line(p, true); break;
+      case "Polygon": polygon(coordinates); break;
+      case "MultiPolygon": for (const p of array(coordinates)) polygon(p); break;
       case "GeometryCollection": for (const child of array(raw["geometries"])) geometry(child, depth + 1); break;
       default: throw new TypeError("Unsupported WFS geometry type");
     }
   };
   for (const feature of collection.features) geometry(feature.geometry);
-  return output;
+  return { paths: output, polygons };
 }
 
-/** Packed line-list vertices. Unknown terrain breaks segments, never joins across gaps. */
-export function buildWfsMesh(collection: WfsFeatureCollection, crs: string, context: WmsMeshContext, options: WfsMeshOptions = {}): Float32Array {
+export function createWfsTransform(context: WmsMeshContext, options: WfsMeshOptions) {
+  if (options.fillPolygons !== undefined && typeof options.fillPolygons !== "boolean") throw new TypeError("Invalid WFS fillPolygons option");
   const subdivisions = options.subdivisions ?? 16;
   const radius = options.pointRadius ?? 1000;
   const offset = options.heightOffset ?? 0;
@@ -103,6 +116,12 @@ export function buildWfsMesh(collection: WfsFeatureCollection, crs: string, cont
     if (!result.every(Number.isFinite)) throw new RangeError("WFS projection or elevation is not finite");
     return result;
   };
+  return { project, visibility, globe, subdivisions, radius };
+}
+
+/** Packed line-list vertices. Unknown terrain breaks segments, never joins across gaps. */
+export function buildWfsMesh(collection: WfsFeatureCollection, crs: string, context: WmsMeshContext, options: WfsMeshOptions = {}): Float32Array {
+  const { project, visibility, globe, subdivisions, radius } = createWfsTransform(context, options);
   const output: number[] = [];
   let work = 0;
   const emit = (a: Position | null, b: Position | null): void => {
@@ -119,7 +138,7 @@ export function buildWfsMesh(collection: WfsFeatureCollection, crs: string, cont
     if (output.length / 3 + 2 > MAX_VERTICES) throw new RangeError("WFS mesh vertex limit exceeded");
     output.push(...a, ...b);
   };
-  for (const path of paths(collection, crs)) {
+  for (const path of paths(collection, crs).paths) {
     if (path.point) {
       const geo = path.positions[0]!;
       const center = project(geo);

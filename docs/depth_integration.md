@@ -28,7 +28,7 @@ Render terrain, `WgpuWmsImage`, raster tiles and WFS in a pass with matching col
 
 WMS and WFS retain their current display dimension during creation/rebuild. Their 2D pipelines use Always with depth writes disabled; their 2.5D/3D pipelines use LessEqual with writes enabled. The native map pipeline likewise tracks mode during grid/terrain rebuilds and raster upload, so hosts should rebuild after camera/mode/terrain changes as before. Do not mix geometry generated for different dimensions in one frame.
 
-Raster depth bias is negative one unit/slope for coplanar surface imagery. The host owns attachments, resize handling, clearing and pass order. Existing demos/hosts using `new` must explicitly adopt the depth attachment contract. UI pipelines without depth can render in a subsequent color-only pass that loads the existing color attachment.
+Raster depth bias is negative one constant unit, with zero slope bias, for coplanar surface imagery. The host owns attachments, resize handling, clearing and pass order. Existing demos/hosts using `new` must explicitly adopt the depth attachment contract. UI pipelines without depth can render in a subsequent color-only pass that loads the existing color attachment.
 
 ## Terrain updates and compatibility
 

@@ -2602,3 +2602,26 @@ mod unit_tests {
         assert!(json_out.contains("NorthEast"));
     }
 }
+
+/// Triangulates closed planar x/y/height rings. First ring is exterior; following rings are holes.
+#[wasm_bindgen]
+pub fn triangulate_polygon_rings(
+    coords: &[f64],
+    ring_lengths: &[u32],
+) -> Result<Vec<f64>, JsValue> {
+    use olayer_core::volumetric::{VolumetricError, MAX_FILL_NODES};
+    if !coords.len().is_multiple_of(3)
+        || coords.len() / 3 > MAX_FILL_NODES
+        || ring_lengths.len() > MAX_FILL_NODES / 4
+    {
+        let error = VolumetricError::DegenerateGeometry(
+            "invalid polygon coordinate length or node limit".into(),
+        );
+        return Err(coded_js_error(error.code(), error));
+    }
+    let points: Vec<[f64; 3]> = coords.as_chunks::<3>().0.to_vec();
+    let lengths: Vec<usize> = ring_lengths.iter().map(|n| *n as usize).collect();
+    olayer_core::volumetric::triangulate_polygon_rings(&points, &lengths)
+        .map(|triangles| triangles.into_iter().flatten().collect())
+        .map_err(|error| coded_js_error(error.code(), error))
+}

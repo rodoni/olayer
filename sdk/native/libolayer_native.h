@@ -1023,6 +1023,26 @@ int olayer_sigmet_dataset_total_count(const SigmetDataset *ds, uintptr_t *out_co
 void olayer_sigmet_dataset_free(SigmetDataset *ds);
 
 /**
+ * Triangulates planar closed x/y/height rings, exterior first, holes afterward.
+ * `coords_len`/`out_len` count f64 values; ring lengths count nodes.
+ * Returns 0 on success, -1 invalid pointers/capacities, -2 invalid input lengths,
+ * -3 invalid topology, -4 insufficient output (required length is written).
+ * Null output with zero capacity is permitted for a size query.
+ *
+ * # Safety
+ * Inputs must be aligned/readable for their declared lengths. `out_len` must be
+ * writable for one usize. A non-null output must be writable for `capacity` f64s.
+ * All input/output ranges must be disjoint and immutable during this call.
+ */
+int olayer_triangulate_polygon_rings(const double *coords,
+                                     uintptr_t coords_len,
+                                     const uint32_t *ring_lengths,
+                                     uintptr_t ring_count,
+                                     double *out,
+                                     uintptr_t capacity,
+                                     uintptr_t *out_len);
+
+/**
  * Generates an extruded 3D volumetric airspace mesh.
  * Writes flat interleaved vertices `[x, y, z, nx, ny, nz, height_ratio, is_edge, ...]` into `out_vertices`
  * and triangle indices into `out_indices`.

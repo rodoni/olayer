@@ -24,6 +24,7 @@ export {
   generate_isolines,
   generate_airspace_volume_mesh,
   generate_trajectory_ribbon_mesh,
+  triangulate_polygon_rings,
   decode_mapbox_rgb,
   decode_terrarium_rgb,
   decode_rgb_elevation,

@@ -44,6 +44,11 @@ jobs:
           XDG_RUNTIME_DIR: ${{ runner.temp }}
         run: cargo test -p olayer-native terrain_and_imagery_occlude_wfs_in_shared_depth -- --ignored --nocapture
 
+      - name: Verify WFS polygon fills and holes
+        env:
+          XDG_RUNTIME_DIR: ${{ runner.temp }}
+        run: cargo test -p olayer-native wfs_polygon_fills_preserve_holes_in_offscreen_pixels -- --ignored --nocapture
+
       - name: Verify generated C header
         run: |
           cargo build -p olayer-native
@@ -125,6 +130,10 @@ jobs:
       - name: Verify browser terrain imagery and feature depth
         working-directory: sdk/ts
         run: npm run test:depth:browser
+
+      - name: Verify browser WFS polygon fills and holes
+        working-directory: sdk/ts
+        run: npm run test:wfs-fill:browser
 
   symbol-compiler:
     name: Symbol Compiler Tests

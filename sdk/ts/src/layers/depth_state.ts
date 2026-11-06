@@ -23,7 +23,7 @@ export function drawWithLayerDepth(
     if (mode === "2D") gl.disable(gl.DEPTH_TEST); else gl.enable(gl.DEPTH_TEST);
     if (imagery && mode !== "2D") {
       gl.enable(gl.POLYGON_OFFSET_FILL);
-      gl.polygonOffset(-1, -1);
+      gl.polygonOffset(0, -1);
     } else gl.disable(gl.POLYGON_OFFSET_FILL);
     draw();
   } finally {
