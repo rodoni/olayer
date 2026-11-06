@@ -44,7 +44,7 @@ cd sdk/ts && npm run test:run
 
 ## Common Pitfalls
 
-- Do **not** change `README.md` architecture diagrams without also updating this file and `docs/spec.md` if referenced.
+- Do **not** change `README.md` architecture diagrams without also updating this file and `docs/architecture/specification.md` if referenced.
 - Any change to the Rust core usually needs corresponding changes in both `sdk/ts/wasm/src/lib.rs` and `sdk/native/src/c_ffi_bridge/mod.rs`.
 - `sdk/ts/src/controller/index.ts` duplicates camera logic with `sdk/native/src/native_controller/mod.rs`; keep behavior consistent.
 - Avoid adding `as any` casts in TypeScript; prefer adding proper public getters/setters on `OlayerController`.
