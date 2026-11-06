@@ -398,6 +398,15 @@ pub unsafe extern "C" fn olayer_terrain_engine_unload_elevation_grid(
     (&*engine).unload_elevation_grid(id)
 }
 
+/// Returns terrain revision, or zero for a null handle.
+///
+/// # Safety
+/// A non-null `engine` must be a live terrain engine handle.
+#[no_mangle]
+pub unsafe extern "C" fn olayer_terrain_engine_revision(engine: *const TerrainEngine) -> u32 {
+    engine.as_ref().map_or(0, TerrainEngine::revision)
+}
+
 /// Decodes Mapbox Terrain-RGB pixel value to elevation in meters.
 ///
 /// # Safety
@@ -2590,6 +2599,7 @@ mod tests {
     fn elevation_grid_ffi_preserves_nodata_and_removes_only_its_source() {
         unsafe {
             let engine = olayer_terrain_engine_create();
+            let initial_revision = olayer_terrain_engine_revision(engine);
             let id = std::ffi::CString::new("wcs").unwrap();
             let bounds = [-1.0, -1.0, 1.0, 1.0];
             let samples = [100.0, 200.0, 300.0, -9999.0];
@@ -2608,6 +2618,8 @@ mod tests {
                 ),
                 0
             );
+            let loaded_revision = olayer_terrain_engine_revision(engine);
+            assert_ne!(loaded_revision, initial_revision);
             assert_eq!(
                 (&*engine)
                     .get_elevation_status(0.0, 0.0)
@@ -2637,10 +2649,12 @@ mod tests {
                 ),
                 -2
             );
+            assert_eq!(olayer_terrain_engine_revision(engine), loaded_revision);
             assert!(olayer_terrain_engine_unload_elevation_grid(
                 engine,
                 id.as_ptr()
             ));
+            assert_ne!(olayer_terrain_engine_revision(engine), loaded_revision);
             assert!((&*engine).get_elevation_status(0.0, 0.0).is_err());
             olayer_terrain_engine_free(engine);
         }

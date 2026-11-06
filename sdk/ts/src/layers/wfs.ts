@@ -1,3 +1,4 @@
+import { drawWithLayerDepth } from "./depth_state";
 import { Layer } from "./layer";
 import type { LayerRenderContext } from "./layer";
 import { buildWfsMesh, validateWfsGeometry } from "./wfs_mesh";
@@ -122,25 +123,10 @@ export class WfsLayer extends Layer {
     gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.DYNAMIC_DRAW);
     gl.uniformMatrix4fv(gl.getUniformLocation(this.program!, "viewProjection"), false, matrix);
     gl.uniform4f(gl.getUniformLocation(this.program!, "featureColor"), this.color[0], this.color[1], this.color[2], this.color[3] * this.opacity);
-    const blend = gl.isEnabled(gl.BLEND), depth = gl.isEnabled(gl.DEPTH_TEST);
-    const srcRgb = gl.getParameter(gl.BLEND_SRC_RGB) as number, dstRgb = gl.getParameter(gl.BLEND_DST_RGB) as number;
-    const srcAlpha = gl.getParameter(gl.BLEND_SRC_ALPHA) as number, dstAlpha = gl.getParameter(gl.BLEND_DST_ALPHA) as number;
-    const lineWidth = gl.getParameter(gl.LINE_WIDTH) as number;
-    const depthFunc = gl.getParameter(gl.DEPTH_FUNC) as number;
-    const depthMask = gl.getParameter(gl.DEPTH_WRITEMASK) as boolean;
-    gl.enable(gl.BLEND);
-    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-    gl.lineWidth(1);
-    if (controller.getViewMode() === "2D") gl.disable(gl.DEPTH_TEST);
-    else { gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL); gl.depthMask(true); }
-    gl.drawArrays(gl.LINES, 0, vertices.length / 3);
+    drawWithLayerDepth(gl, controller.getViewMode(), () => {
+      gl.drawArrays(gl.LINES, 0, vertices.length / 3);
+    });
     gl.bindVertexArray(null);
-    gl.lineWidth(lineWidth);
-    gl.blendFuncSeparate(srcRgb, dstRgb, srcAlpha, dstAlpha);
-    if (!blend) gl.disable(gl.BLEND);
-    gl.depthFunc(depthFunc);
-    gl.depthMask(depthMask);
-    if (depth) gl.enable(gl.DEPTH_TEST); else gl.disable(gl.DEPTH_TEST);
   }
 
   public renderDynamic(_ctx: CanvasRenderingContext2D, _time: number): void {}

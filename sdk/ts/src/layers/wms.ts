@@ -1,3 +1,4 @@
+import { drawWithLayerDepth } from "./depth_state";
 import { Layer } from "./layer";
 import type { LayerRenderContext } from "./layer";
 import { buildWmsMesh, validateWmsBounds } from "./wms_mesh";
@@ -85,7 +86,7 @@ export class WmsLayer extends Layer {
           uniform sampler2D imagery;
           uniform float opacity;
           out vec4 color;
-          void main() { color = texture(imagery, texCoord); color.a *= opacity; }`],
+          void main() { color = texture(imagery, texCoord); color.a *= opacity; if (color.a == 0.0) discard; }`],
       ] as const) {
         const shader = gl.createShader(type);
         if (!shader) throw new Error("Could not allocate WMS shader");
@@ -153,16 +154,10 @@ export class WmsLayer extends Layer {
     gl.uniform1i(gl.getUniformLocation(this.program!, "imagery"), 0);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.texture);
-    const blend = gl.isEnabled(gl.BLEND);
-    const depth = gl.isEnabled(gl.DEPTH_TEST);
-    gl.enable(gl.BLEND);
-    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-    // Horizon clipping happens in the mesh; preserve the host's depth configuration.
-    if (controller.getViewMode() === "2D") gl.disable(gl.DEPTH_TEST);
-    gl.drawArrays(gl.TRIANGLES, 0, vertices.length / 5);
+    drawWithLayerDepth(gl, controller.getViewMode(), () => {
+      gl.drawArrays(gl.TRIANGLES, 0, vertices.length / 5);
+    }, true);
     gl.bindVertexArray(null);
-    if (!blend) gl.disable(gl.BLEND);
-    if (depth) gl.enable(gl.DEPTH_TEST);
   }
 
   public renderDynamic(_ctx: CanvasRenderingContext2D, _time: number): void {}

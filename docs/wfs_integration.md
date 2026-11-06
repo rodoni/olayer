@@ -45,7 +45,7 @@ features.destroy(controller.gl);
 
 The layer validates the complete collection before replacement. Failed loads retain existing features; obsolete completions after a newer load or destruction are discarded. Options and source request bounds are snapshotted. GPU resources are created on the first nonempty draw and released by `destroy` or controller teardown. A layer belongs to one WebGL context. Rebuilding geometry on a static render follows camera, projection and terrain changes.
 
-The layer enables depth testing/writes with LEQUAL in 2.5D/3D and disables depth testing for its 2D draw. It restores the host's depth, blending and line-width settings afterward. The host must provide/clear a depth buffer for cross-layer occlusion.
+The layer enables depth testing/writes with LEQUAL in 2.5D/3D and disables depth testing for its 2D draw. It restores the host's depth, blending and line-width settings afterward. The host must provide/clear a depth buffer for cross-layer occlusion; the browser controller now clears it with writes enabled each frame.
 
 ## Native
 
@@ -83,4 +83,4 @@ npm run typecheck
 npm run test:wfs:browser
 ```
 
-Polygon fills, style/property mapping, adaptive tessellation, antimeridian splitting, terrain-aware occlusion, integration with every existing layer's depth pass, and production manual visual checks remain follow-up work. Phase 5 remains partial.
+Sampled terrain/imagery/feature occlusion is now documented and tested in [shared depth integration](depth_integration.md). Polygon fills, style/property mapping, adaptive tessellation, antimeridian splitting, advanced transparency, other visualization depth passes and production manual visual checks remain follow-up work. Phase 5 remains partial.

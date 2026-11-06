@@ -10,7 +10,7 @@ use crate::terrain::rgb_tile::{RgbElevationTile, SlippyTileKey};
 use crate::terrain::tile::DtedTile;
 use lru::LruCache;
 use serde::{Deserialize, Serialize};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::num::NonZeroUsize;
 
@@ -69,6 +69,7 @@ pub struct ClearanceResult {
 /// Multi-source terrain elevation engine supporting DTED, Mapbox/Terrarium RGB tiles,
 /// and Cloud-Optimized GeoTIFFs (COG) with sub-grid bilinear interpolation.
 pub struct TerrainEngine {
+    revision: Cell<u32>,
     tiles: RefCell<LruCache<TileKey, DtedTile>>,
     rgb_tiles: RefCell<LruCache<SlippyTileKey, RgbElevationTile>>,
     geotiff_tiles: RefCell<VecDeque<GeoTiffTile>>,
@@ -89,11 +90,21 @@ impl TerrainEngine {
     pub fn with_capacity(capacity: usize) -> Self {
         let cap = NonZeroUsize::new(capacity.max(1)).expect("capacity.max(1) is non-zero");
         Self {
+            revision: Cell::new(0),
             tiles: RefCell::new(LruCache::new(cap)),
             rgb_tiles: RefCell::new(LruCache::new(cap)),
             geotiff_tiles: RefCell::new(VecDeque::new()),
             elevation_grids: RefCell::new(LruCache::new(cap)),
         }
+    }
+
+    /// Changes after terrain mutations so renderers can invalidate sampled meshes.
+    pub fn revision(&self) -> u32 {
+        self.revision.get()
+    }
+
+    fn changed(&self) {
+        self.revision.set(self.revision.get().wrapping_add(1));
     }
 
     /// Changes the tile cache capacity.
@@ -105,6 +116,7 @@ impl TerrainEngine {
         self.tiles.borrow_mut().resize(cap);
         self.rgb_tiles.borrow_mut().resize(cap);
         self.elevation_grids.borrow_mut().resize(cap);
+        self.changed();
     }
 
     /// Returns the current number of cached DTED tiles.
@@ -129,18 +141,21 @@ impl TerrainEngine {
     #[inline]
     pub fn clear_cache(&self) {
         self.tiles.borrow_mut().clear();
+        self.changed();
     }
 
     /// Clears all cached RGB elevation tiles.
     #[inline]
     pub fn clear_rgb_cache(&self) {
         self.rgb_tiles.borrow_mut().clear();
+        self.changed();
     }
 
     /// Clears all registered GeoTIFF rasters.
     #[inline]
     pub fn clear_geotiff_cache(&self) {
         self.geotiff_tiles.borrow_mut().clear();
+        self.changed();
     }
 
     /// Clears all terrain sources (scalar grids, DTED, RGB tiles, GeoTIFFs).
@@ -150,6 +165,7 @@ impl TerrainEngine {
         self.clear_rgb_cache();
         self.clear_geotiff_cache();
         self.elevation_grids.borrow_mut().clear();
+        self.changed();
     }
 
     /// Parses a raw DTED buffer and registers the resulting tile.
@@ -164,6 +180,7 @@ impl TerrainEngine {
             lon_deg: tile.origin_lon,
         };
         self.tiles.borrow_mut().put(key, tile);
+        self.changed();
         Ok(key)
     }
 
@@ -188,6 +205,7 @@ impl TerrainEngine {
         let key = SlippyTileKey::new(z, x, y);
         let tile = RgbElevationTile::from_rgba(key, width, height, rgba_buffer, encoding)?;
         self.rgb_tiles.borrow_mut().put(key, tile);
+        self.changed();
         Ok(key)
     }
 
@@ -204,6 +222,7 @@ impl TerrainEngine {
             cache.pop_front();
         }
         cache.push_back(tile);
+        self.changed();
         Ok(bounds)
     }
 
@@ -211,22 +230,35 @@ impl TerrainEngine {
     /// Newest grids take precedence over older grids and existing terrain formats.
     pub fn load_elevation_grid(&self, id: String, grid: ElevationGrid) {
         self.elevation_grids.borrow_mut().put(id, grid);
+        self.changed();
     }
 
     pub fn unload_elevation_grid(&self, id: &str) -> bool {
-        self.elevation_grids.borrow_mut().pop(id).is_some()
+        let removed = self.elevation_grids.borrow_mut().pop(id).is_some();
+        if removed {
+            self.changed();
+        }
+        removed
     }
 
     /// Removes an RGB tile by its $(Z, X, Y)$ key. Returns `true` if the tile existed.
     #[inline]
     pub fn unload_rgb_tile(&self, key: &SlippyTileKey) -> bool {
-        self.rgb_tiles.borrow_mut().pop(key).is_some()
+        let removed = self.rgb_tiles.borrow_mut().pop(key).is_some();
+        if removed {
+            self.changed();
+        }
+        removed
     }
 
     /// Removes a tile from the engine.  Returns `true` if the tile existed.
     #[inline]
     pub fn unload_tile(&mut self, key: &TileKey) -> bool {
-        self.tiles.borrow_mut().pop(key).is_some()
+        let removed = self.tiles.borrow_mut().pop(key).is_some();
+        if removed {
+            self.changed();
+        }
+        removed
     }
 
     /// Returns the interpolated ground elevation (metres) for the given

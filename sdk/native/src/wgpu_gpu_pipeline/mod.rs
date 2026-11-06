@@ -45,6 +45,7 @@ pub enum RasterTileUploadError {
 
 #[derive(Debug, PartialEq, Eq)]
 struct TerrainCacheKey {
+    terrain_revision: u32,
     view_mode: String,
     center_lat: u64,
     center_lon: u64,
@@ -59,6 +60,7 @@ struct TerrainCacheKey {
 impl TerrainCacheKey {
     fn new(controller: &NativeController, exaggeration: f32) -> Self {
         Self {
+            terrain_revision: controller.terrain.revision(),
             view_mode: controller.view_mode.clone(),
             center_lat: controller.camera.center.lat.to_bits(),
             center_lon: controller.camera.center.lon.to_bits(),
@@ -102,6 +104,9 @@ pub struct RasterTileUpload<'a> {
 /// View-Projection matrix and grid color, and dynamic vertex buffers for
 /// geodetic grid lines.
 pub struct WgpuGpuPipeline {
+    two_d: bool,
+    pipeline_2d: wgpu::RenderPipeline,
+    terrain_2d_pipeline: wgpu::RenderPipeline,
     pub pipeline: wgpu::RenderPipeline,
     pub bind_group: wgpu::BindGroup,
     pub uniform_buffer: wgpu::Buffer,
@@ -110,6 +115,7 @@ pub struct WgpuGpuPipeline {
 
     // Raster Rendering Resources
     pub raster_pipeline: wgpu::RenderPipeline,
+    pub(super) raster_2d_pipeline: wgpu::RenderPipeline,
     pub raster_bind_group_layout: wgpu::BindGroupLayout,
     pub raster_sampler: wgpu::Sampler,
     pub loaded_gpu_tiles: std::collections::HashMap<String, WgpuRasterTile>,
@@ -123,10 +129,28 @@ pub struct WgpuGpuPipeline {
 
 impl WgpuGpuPipeline {
     pub fn new(device: &wgpu::Device, config_format: wgpu::TextureFormat) -> Self {
+        Self::with_depth(device, config_format, None)
+    }
+
+    /// All passes using this pipeline must provide the configured depth attachment.
+    pub fn with_depth(
+        device: &wgpu::Device,
+        config_format: wgpu::TextureFormat,
+        depth_format: Option<wgpu::TextureFormat>,
+    ) -> Self {
+        let depth_state = || {
+            depth_format.map(|format| wgpu::DepthStencilState {
+                format,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::LessEqual,
+                stencil: Default::default(),
+                bias: Default::default(),
+            })
+        };
         // Simple WGSL shader for drawing lines (grid)
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Grid Shader"),
-            source: wgpu::ShaderSource::Wgsl("struct VertexOutput {\n    @builtin(position) position: vec4<f32>,\n    @location(0) color: vec4<f32>,\n};\n\n@group(0) @binding(0)\nvar<uniform> view_proj: mat4x4<f32>;\n@group(0) @binding(1)\nvar<uniform> grid_color: vec4<f32>;\n\n@vertex\nfn vs_main(@location(0) pos: vec3<f32>) -> VertexOutput {\n    var out: VertexOutput;\n    out.position = view_proj * vec4<f32>(pos, 1.0);\n    out.color = grid_color;\n    return out;\n}\n\n@fragment\nfn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {\n    return in.color;\n}\n".into()),
+            source: wgpu::ShaderSource::Wgsl("struct VertexOutput {\n    @builtin(position) position: vec4<f32>,\n    @location(0) color: vec4<f32>,\n};\n\n@group(0) @binding(0)\nvar<uniform> view_proj: mat4x4<f32>;\n@group(0) @binding(1)\nvar<uniform> grid_color: vec4<f32>;\n\n@vertex\nfn vs_main(@location(0) pos: vec3<f32>) -> VertexOutput {\n    var out: VertexOutput;\n    out.position = view_proj * vec4<f32>(pos, 1.0);\n    out.position.z = (out.position.z + out.position.w) * 0.5;\n    out.color = grid_color;\n    return out;\n}\n\n@fragment\nfn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {\n    return in.color;\n}\n".into()),
         });
 
         let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -216,7 +240,7 @@ impl WgpuGpuPipeline {
             push_constant_ranges: &[],
         });
 
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        let mut grid_descriptor = wgpu::RenderPipelineDescriptor {
             label: Some("Grid Render Pipeline"),
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
@@ -250,10 +274,17 @@ impl WgpuGpuPipeline {
                 polygon_mode: wgpu::PolygonMode::Fill,
                 conservative: false,
             },
-            depth_stencil: None,
+            depth_stencil: depth_state(),
             multisample: wgpu::MultisampleState::default(),
             multiview: None,
+        };
+        let pipeline = device.create_render_pipeline(&grid_descriptor);
+        grid_descriptor.depth_stencil = depth_state().map(|mut state| {
+            state.depth_write_enabled = false;
+            state.depth_compare = wgpu::CompareFunction::Always;
+            state
         });
+        let pipeline_2d = device.create_render_pipeline(&grid_descriptor);
 
         // ---------------------------------------------------------------------
         // RASTER TILE RENDERING SETUP
@@ -280,6 +311,7 @@ var<uniform> view_proj: mat4x4<f32>;
 fn vs_main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
     out.position = view_proj * vec4<f32>(in.position, 1.0);
+    out.position.z = (out.position.z + out.position.w) * 0.5;
     out.tex_coords = in.tex_coords;
     return out;
 }
@@ -291,7 +323,9 @@ var s_diffuse: sampler;
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    return textureSample(t_diffuse, s_diffuse, in.tex_coords);
+    let color = textureSample(t_diffuse, s_diffuse, in.tex_coords);
+    if (color.a == 0.0) { discard; }
+    return color;
 }
             "
                 .into(),
@@ -338,7 +372,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                 push_constant_ranges: &[],
             });
 
-        let raster_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        let mut raster_descriptor = wgpu::RenderPipelineDescriptor {
             label: Some("Raster Render Pipeline"),
             layout: Some(&raster_pipeline_layout),
             vertex: wgpu::VertexState {
@@ -379,10 +413,24 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                 polygon_mode: wgpu::PolygonMode::Fill,
                 conservative: false,
             },
-            depth_stencil: None,
+            depth_stencil: depth_state().map(|mut state| {
+                state.bias = wgpu::DepthBiasState {
+                    constant: -1,
+                    slope_scale: -1.0,
+                    clamp: 0.0,
+                };
+                state
+            }),
             multisample: wgpu::MultisampleState::default(),
             multiview: None,
+        };
+        let raster_pipeline = device.create_render_pipeline(&raster_descriptor);
+        raster_descriptor.depth_stencil = depth_state().map(|mut state| {
+            state.depth_write_enabled = false;
+            state.depth_compare = wgpu::CompareFunction::Always;
+            state
         });
+        let raster_2d_pipeline = device.create_render_pipeline(&raster_descriptor);
 
         let terrain_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Terrain Mesh Shader"),
@@ -420,6 +468,7 @@ var<uniform> terrain_style: TerrainStyle;
 fn vs_main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
     out.position = view_proj * vec4<f32>(in.position, 1.0);
+    out.position.z = (out.position.z + out.position.w) * 0.5;
     out.normal = in.normal;
     out.elevation = in.elevation;
     out.slope = in.slope;
@@ -429,11 +478,7 @@ fn vs_main(in: VertexInput) -> VertexOutput {
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    if (in.terrain_known < 0.5) {
-        let checker = (i32(in.position.x / 8.0) + i32(in.position.y / 8.0)) % 2;
-        let unknown_color = select(vec3<f32>(0.35, 0.08, 0.48), vec3<f32>(0.72, 0.22, 0.82), checker == 0);
-        return vec4<f32>(unknown_color, 0.94);
-    }
+    if (in.terrain_known < 0.5) { discard; }
     let amount = clamp((in.elevation - terrain_style.min_elevation) / max(1.0, terrain_style.max_elevation - terrain_style.min_elevation), 0.0, 1.0);
     let hypsometric = mix(vec3<f32>(0.08, 0.28, 0.12), vec3<f32>(0.72, 0.52, 0.22), amount);
     let slope_color = mix(vec3<f32>(0.08, 0.55, 0.18), vec3<f32>(0.9, 0.08, 0.04), clamp(in.slope / 55.0, 0.0, 1.0));
@@ -467,7 +512,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         color = mix(color, contour_color, contour_alpha * 0.85);
     }
 
-    return vec4<f32>(color, 0.82);
+    return vec4<f32>(color, 1.0);
 }
 ".into()),
         });
@@ -479,7 +524,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                 push_constant_ranges: &[],
             });
 
-        let terrain_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        let mut terrain_descriptor = wgpu::RenderPipelineDescriptor {
             label: Some("Terrain Mesh Pipeline"),
             layout: Some(&terrain_pipeline_layout),
             vertex: wgpu::VertexState {
@@ -535,18 +580,29 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                 polygon_mode: wgpu::PolygonMode::Fill,
                 conservative: false,
             },
-            depth_stencil: None,
+            depth_stencil: depth_state(),
             multisample: wgpu::MultisampleState::default(),
             multiview: None,
+        };
+        let terrain_pipeline = device.create_render_pipeline(&terrain_descriptor);
+        terrain_descriptor.depth_stencil = depth_state().map(|mut state| {
+            state.depth_write_enabled = false;
+            state.depth_compare = wgpu::CompareFunction::Always;
+            state
         });
+        let terrain_2d_pipeline = device.create_render_pipeline(&terrain_descriptor);
 
         Self {
+            two_d: false,
+            pipeline_2d,
+            terrain_2d_pipeline,
             pipeline,
             bind_group,
             uniform_buffer,
             grid_vertex_buffer: None,
             grid_vertices_len: 0,
             raster_pipeline,
+            raster_2d_pipeline,
             raster_bind_group_layout,
             raster_sampler,
             loaded_gpu_tiles: std::collections::HashMap::new(),
@@ -677,6 +733,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) {
+        self.two_d = controller.view_mode == "2D";
         let coords = Self::generate_grid_vertices(controller);
 
         if !coords.is_empty() {
@@ -699,7 +756,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     #[inline]
     pub fn render<'a>(&'a self, render_pass: &mut wgpu::RenderPass<'a>) {
         if let Some(ref buffer) = self.grid_vertex_buffer {
-            render_pass.set_pipeline(&self.pipeline);
+            render_pass.set_pipeline(if self.two_d {
+                &self.pipeline_2d
+            } else {
+                &self.pipeline
+            });
             render_pass.set_bind_group(0, &self.bind_group, &[]);
             render_pass.set_vertex_buffer(0, buffer.slice(..));
             render_pass.draw(0..(self.grid_vertices_len / 3) as u32, 0..1);
@@ -711,7 +772,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         exaggeration: f32,
     ) -> Vec<TerrainVertex> {
         let grid = 32usize;
-        let span_meters = controller.camera.viewport_base_meters / controller.camera.zoom;
+        let span_meters = if controller.view_mode == "3D" {
+            30_000_000.0 / controller.camera.zoom
+        } else {
+            controller.camera.viewport_base_meters / controller.camera.zoom
+        };
         let lat_span = (span_meters / 111_000.0 / 2.0)
             .to_radians()
             .min(60.0f64.to_radians());
@@ -727,11 +792,16 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                 let lon = controller.camera.center.lon + (u - 0.5) * lon_span;
                 let elevation = controller
                     .terrain
-                    .get_elevation(lat.to_degrees(), lon.to_degrees())
+                    .get_elevation_status(lat, lon)
                     .ok()
+                    .and_then(|sample| sample.elevation_meters)
                     .filter(|elevation| elevation.is_finite());
                 *elevation_cell = elevation;
-                let height = elevation.unwrap_or(0.0) * exaggeration as f64;
+                let height = if controller.view_mode == "2D" {
+                    0.0
+                } else {
+                    elevation.unwrap_or(0.0) * exaggeration as f64
+                };
                 let position = if controller.view_mode == "3D" {
                     let ecef = olayer_core::geodesy::lla_to_ecef(
                         &LatLon::new(lat, lon, height),
@@ -757,7 +827,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             }
         }
 
-        let spacing = (span_meters / grid as f64).max(1.0);
+        let spacing = (lat_span * 6_378_137.0 / grid as f64).max(1.0);
         for (row, elevation_row) in elevations.iter().enumerate() {
             for (column, center_elevation) in elevation_row.iter().enumerate() {
                 let Some(center) = *center_elevation else {
@@ -867,6 +937,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         queue: &wgpu::Queue,
         exaggeration: f32,
     ) {
+        self.two_d = controller.view_mode == "2D";
         let key = TerrainCacheKey::new(controller, exaggeration);
         if self.terrain_cache_key.as_ref() == Some(&key) {
             return;
@@ -918,7 +989,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     pub fn render_terrain<'a>(&'a self, render_pass: &mut wgpu::RenderPass<'a>) {
         if let Some(ref buffer) = self.terrain_vertex_buffer {
-            render_pass.set_pipeline(&self.terrain_pipeline);
+            render_pass.set_pipeline(if self.two_d {
+                &self.terrain_2d_pipeline
+            } else {
+                &self.terrain_pipeline
+            });
             render_pass.set_bind_group(0, &self.bind_group, &[]);
             render_pass.set_vertex_buffer(0, buffer.slice(..));
             render_pass.draw(0..self.terrain_vertices_len as u32, 0..1);
@@ -930,6 +1005,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         &mut self,
         upload: RasterTileUpload<'_>,
     ) -> Result<(), RasterTileUploadError> {
+        self.two_d = upload.controller.view_mode == "2D";
         validate_raster_tile_upload(upload.pixels, upload.x, upload.y, upload.z)?;
         if self.loaded_gpu_tiles.contains_key(upload.key) {
             return Ok(());
@@ -1070,7 +1146,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         if self.loaded_gpu_tiles.is_empty() {
             return;
         }
-        render_pass.set_pipeline(&self.raster_pipeline);
+        render_pass.set_pipeline(if self.two_d {
+            &self.raster_2d_pipeline
+        } else {
+            &self.raster_pipeline
+        });
         render_pass.set_bind_group(0, &self.bind_group, &[]); // Uniforms
 
         for tile in self.loaded_gpu_tiles.values() {
@@ -1387,3 +1467,6 @@ mod tests {
 }
 
 pub mod wfs;
+
+#[cfg(test)]
+mod depth_tests;

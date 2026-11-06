@@ -423,7 +423,11 @@ export class OlayerController {
     // 2. Render Static WebGL Layers (Clear and Draw)
     this.gl.viewport(0, 0, this.glCanvas.width, this.glCanvas.height);
     this.gl.clearColor(0.08, 0.09, 0.12, 1.0); // SLEEK DARK MODE BASE
+    const depthWrite = this.gl.getParameter(this.gl.DEPTH_WRITEMASK) as boolean;
+    this.gl.depthMask(true);
+    this.gl.clearDepth(1);
     this.gl.clear(this.gl.COLOR_BUFFER_BIT | this.gl.DEPTH_BUFFER_BIT);
+    this.gl.depthMask(depthWrite);
 
     const renderContext = { controller: this };
     try {

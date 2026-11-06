@@ -278,6 +278,14 @@ int olayer_terrain_engine_load_elevation_grid(TerrainEngine *engine,
 bool olayer_terrain_engine_unload_elevation_grid(TerrainEngine *engine, const char *id);
 
 /**
+ * Returns terrain revision, or zero for a null handle.
+ *
+ * # Safety
+ * A non-null `engine` must be a live terrain engine handle.
+ */
+uint32_t olayer_terrain_engine_revision(const TerrainEngine *engine);
+
+/**
  * Decodes Mapbox Terrain-RGB pixel value to elevation in meters.
  *
  * # Safety

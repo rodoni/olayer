@@ -61,4 +61,4 @@ npm run typecheck
 npm run test:wms:browser
 ```
 
-WFS points, lines and polygon outlines now use this terrain through the [feature layer](wfs_integration.md). Polygon fills, broader WCS format/registration/datum adapters, full inter-layer depth/terrain occlusion and production manual visual checks remain follow-up work. The phase-5 status remains partial.
+WFS points, lines and polygon outlines now use this terrain through the [feature layer](wfs_integration.md). Polygon fills, broader WCS format/registration/datum adapters, adaptive terrain coverage, advanced transparency and production manual visual checks remain follow-up work. Sampled terrain/imagery/feature occlusion is documented in [shared depth integration](depth_integration.md). The phase-5 status remains partial.

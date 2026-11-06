@@ -39,6 +39,11 @@ jobs:
           XDG_RUNTIME_DIR: ${{ runner.temp }}
         run: cargo test -p olayer-native wfs_features_render_into_offscreen_pixels_in_all_modes -- --ignored --nocapture
 
+      - name: Verify shared terrain imagery and feature depth
+        env:
+          XDG_RUNTIME_DIR: ${{ runner.temp }}
+        run: cargo test -p olayer-native terrain_and_imagery_occlude_wfs_in_shared_depth -- --ignored --nocapture
+
       - name: Verify generated C header
         run: |
           cargo build -p olayer-native
@@ -116,6 +121,10 @@ jobs:
       - name: Verify browser WFS rendering with WCS terrain
         working-directory: sdk/ts
         run: npm run test:wfs:browser
+
+      - name: Verify browser terrain imagery and feature depth
+        working-directory: sdk/ts
+        run: npm run test:depth:browser
 
   symbol-compiler:
     name: Symbol Compiler Tests

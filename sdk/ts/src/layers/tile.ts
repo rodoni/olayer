@@ -1,3 +1,4 @@
+import { drawWithLayerDepth } from "./depth_state";
 import { Layer } from "./layer";
 import type { LayerRenderContext } from "./layer";
 import type { OlayerController } from "../controller";
@@ -456,115 +457,105 @@ export class TileLayer extends Layer {
 
     gl.activeTexture(gl.TEXTURE0);
 
-    // Ativa transparência para mesclagem de bordas
-    gl.enable(gl.BLEND);
-    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-    if (viewMode === "3D") {
-      gl.enable(gl.DEPTH_TEST);
-      gl.depthFunc(gl.LEQUAL);
-      gl.depthMask(true);
-    } else {
-      gl.disable(gl.DEPTH_TEST);
-    }
-
     const subdivision = TILE_SUBDIVISION;
     const vertexCount = (subdivision + 1) * (subdivision + 1);
     const attribsPerVertex = 5; // X, Y, Z, U, V
 
     // Renderiza cada tile ativo
-    for (const tile of tilesToDraw) {
-      const key = `${z}/${tile.x}/${tile.y}`;
-      let tileGeom = this.tileGeometries.get(key);
+    drawWithLayerDepth(gl, viewMode, () => {
+      for (const tile of tilesToDraw) {
+        const key = `${z}/${tile.x}/${tile.y}`;
+        let tileGeom = this.tileGeometries.get(key);
 
-      if (!tileGeom) {
-        controller.logger.debug("Generating tile geometry", { key });
-        const vertices = new Float32Array(vertexCount * attribsPerVertex);
+        if (!tileGeom) {
+          controller.logger.debug("Generating tile geometry", { key });
+          const vertices = new Float32Array(vertexCount * attribsPerVertex);
         
-        // Calcula os vértices projetados do tile subdividido
-        let offset = 0;
-        for (let r = 0; r <= subdivision; r++) {
-          const v = r / subdivision; // 0.0 to 1.0 (vertical tile coord)
-          const tileY = tile.y + v;
-          // Web Mercator ends at about 85 degrees; pinch its boundary row to
-          // each geographic pole so the map does not leave a square cap hole.
-          const latDeg = viewMode === "3D" && tile.y === 0 && r === 0
-            ? 90
-            : viewMode === "3D" && tile.y === 2 ** z - 1 && r === subdivision
-              ? -90
-              : this.tileYToLat(tileY, z);
-          const latRad = latDeg * (Math.PI / 180);
+          // Calcula os vértices projetados do tile subdividido
+          let offset = 0;
+          for (let r = 0; r <= subdivision; r++) {
+            const v = r / subdivision; // 0.0 to 1.0 (vertical tile coord)
+            const tileY = tile.y + v;
+            // Web Mercator ends at about 85 degrees; pinch its boundary row to
+            // each geographic pole so the map does not leave a square cap hole.
+            const latDeg = viewMode === "3D" && tile.y === 0 && r === 0
+              ? 90
+              : viewMode === "3D" && tile.y === 2 ** z - 1 && r === subdivision
+                ? -90
+                : this.tileYToLat(tileY, z);
+            const latRad = latDeg * (Math.PI / 180);
 
-          for (let c = 0; c <= subdivision; c++) {
-            const u = c / subdivision; // 0.0 to 1.0 (horizontal tile coord)
-            const tileX = tile.x + u;
-            const lonDeg = this.tileXToLon(tileX, z);
-            const lonRad = lonDeg * (Math.PI / 180);
+            for (let c = 0; c <= subdivision; c++) {
+              const u = c / subdivision; // 0.0 to 1.0 (horizontal tile coord)
+              const tileX = tile.x + u;
+              const lonDeg = this.tileXToLon(tileX, z);
+              const lonRad = lonDeg * (Math.PI / 180);
 
-            let px = 0, py = 0, pz = 0;
+              let px = 0, py = 0, pz = 0;
 
-            try {
-              if (viewMode === "3D") {
-                const ecef = lla_to_ecef(latRad, lonRad, 0.0);
-                 const [x, y, zValue] = ecef;
-                 if (x === undefined || y === undefined || zValue === undefined) continue;
-                 px = x;
-                 py = y;
-                 pz = zValue;
-              } else {
-                const flatPos = projection.project(latRad, lonRad, 0.0);
-                 const [x, y] = flatPos;
-                 if (x === undefined || y === undefined) continue;
-                 px = x;
-                 py = y;
-                pz = 0.0;
+              try {
+                if (viewMode === "3D") {
+                  const ecef = lla_to_ecef(latRad, lonRad, 0.0);
+                   const [x, y, zValue] = ecef;
+                   if (x === undefined || y === undefined || zValue === undefined) continue;
+                   px = x;
+                   py = y;
+                   pz = zValue;
+                } else {
+                  const flatPos = projection.project(latRad, lonRad, 0.0);
+                   const [x, y] = flatPos;
+                   if (x === undefined || y === undefined) continue;
+                   px = x;
+                   py = y;
+                  pz = 0.0;
+                }
+              } catch {
+                // Ignora erros de projeção de bordas de mapa
               }
-            } catch {
-              // Ignora erros de projeção de bordas de mapa
+
+              // Atributos: X, Y, Z
+              vertices[offset] = px;
+              vertices[offset + 1] = py;
+              vertices[offset + 2] = pz;
+              // Atributos: U, V (inverte V do WebGL)
+              vertices[offset + 3] = u;
+              vertices[offset + 4] = v;
+
+              offset += attribsPerVertex;
             }
-
-            // Atributos: X, Y, Z
-            vertices[offset] = px;
-            vertices[offset + 1] = py;
-            vertices[offset + 2] = pz;
-            // Atributos: U, V (inverte V do WebGL)
-            vertices[offset + 3] = u;
-            vertices[offset + 4] = v;
-
-            offset += attribsPerVertex;
           }
+
+          const vao = gl.createVertexArray()!;
+          const vertexBuffer = gl.createBuffer()!;
+
+          gl.bindVertexArray(vao);
+          gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
+          gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+
+          const aPosLoc = gl.getAttribLocation(this.program!, "a_position");
+          gl.enableVertexAttribArray(aPosLoc);
+          gl.vertexAttribPointer(aPosLoc, 3, gl.FLOAT, false, 5 * 4, 0); // (X,Y,Z)
+
+          const aTexLoc = gl.getAttribLocation(this.program!, "a_texCoord");
+          gl.enableVertexAttribArray(aTexLoc);
+          gl.vertexAttribPointer(aTexLoc, 2, gl.FLOAT, false, 5 * 4, 3 * 4); // (U,V)
+
+          gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.indexBuffer!);
+          gl.bindVertexArray(null);
+
+          tileGeom = { vao, vertexBuffer };
+          this.tileGeometries.set(key, tileGeom);
         }
 
-        const vao = gl.createVertexArray()!;
-        const vertexBuffer = gl.createBuffer()!;
-
-        gl.bindVertexArray(vao);
-        gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
-        gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
-
-        const aPosLoc = gl.getAttribLocation(this.program!, "a_position");
-        gl.enableVertexAttribArray(aPosLoc);
-        gl.vertexAttribPointer(aPosLoc, 3, gl.FLOAT, false, 5 * 4, 0); // (X,Y,Z)
-
-        const aTexLoc = gl.getAttribLocation(this.program!, "a_texCoord");
-        gl.enableVertexAttribArray(aTexLoc);
-        gl.vertexAttribPointer(aTexLoc, 2, gl.FLOAT, false, 5 * 4, 3 * 4); // (U,V)
-
-        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.indexBuffer!);
-        gl.bindVertexArray(null);
-
-        tileGeom = { vao, vertexBuffer };
-        this.tileGeometries.set(key, tileGeom);
+        gl.bindTexture(gl.TEXTURE_2D, tile.texture);
+        gl.bindVertexArray(tileGeom.vao);
+      
+        // Desenha o tile triangulado usando os elementos do VAO
+        gl.drawElements(gl.TRIANGLES, this.indexCount, gl.UNSIGNED_SHORT, 0);
       }
 
-      gl.bindTexture(gl.TEXTURE_2D, tile.texture);
-      gl.bindVertexArray(tileGeom.vao);
-      
-      // Desenha o tile triangulado usando os elementos do VAO
-      gl.drawElements(gl.TRIANGLES, this.indexCount, gl.UNSIGNED_SHORT, 0);
-    }
-
-    gl.bindVertexArray(null);
-    gl.disable(gl.BLEND);
+      gl.bindVertexArray(null);
+    }, true);
   }
 
   public renderDynamic(ctx: CanvasRenderingContext2D, currentTime: number): void {

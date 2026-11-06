@@ -120,6 +120,11 @@ impl WasmTerrainEngine {
         self.inner.unload_elevation_grid(id)
     }
 
+    /// Revision used to invalidate geometry after terrain changes.
+    pub fn revision(&self) -> u32 {
+        self.inner.revision()
+    }
+
     /// Unloads a tile by its coordinate degrees.
     pub fn unload_tile(&mut self, lat_deg: i32, lon_deg: i32) -> bool {
         let key = olayer_core::terrain::TileKey { lat_deg, lon_deg };

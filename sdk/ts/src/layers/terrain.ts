@@ -1,3 +1,5 @@
+import { buildTerrainGrid } from "./terrain_mesh";
+import { drawWithLayerDepth } from "./depth_state";
 import { Layer } from "./layer";
 import type { LayerRenderContext } from "./layer";
 import type { OlayerController } from "../controller";
@@ -225,7 +227,7 @@ export class TerrainLayer extends Layer {
           color = mix(color, contourColor, contourAlpha * 0.85);
         }
 
-        fragColor = vec4(color, u_opacity * 0.82);
+        fragColor = vec4(color, u_opacity);
       }
     `);
     gl.compileShader(fragmentShader);
@@ -237,6 +239,8 @@ export class TerrainLayer extends Layer {
     gl.attachShader(this.program, vertexShader);
     gl.attachShader(this.program, fragmentShader);
     gl.linkProgram(this.program);
+    gl.deleteShader(vertexShader);
+    gl.deleteShader(fragmentShader);
     if (!gl.getProgramParameter(this.program, gl.LINK_STATUS)) {
       throw new Error(`Terrain shader link error: ${gl.getProgramInfoLog(this.program)}`);
     }
@@ -275,14 +279,9 @@ export class TerrainLayer extends Layer {
     const camera = controller.getCameraState();
     const projection = controller.projection;
     const version = projection.version();
-    const key = [
-      controller.getViewMode(),
-      controller.getCenterLat().toFixed(5),
-      controller.getCenterLon().toFixed(5),
-      camera.zoom.toFixed(3),
-      this.verticalExaggeration.toFixed(2),
-      version
-    ].join(":");
+    const key = [controller.getViewMode(), controller.getCenterLat(), controller.getCenterLon(),
+      camera.zoom, camera.viewport_base_meters, this.verticalExaggeration, version,
+      controller.terrainEngine.revision()].join(":");
     camera.free();
     return key;
   }
@@ -291,85 +290,21 @@ export class TerrainLayer extends Layer {
     const camera = controller.getCameraState();
     const centerLat = controller.getCenterLat();
     const centerLon = controller.getCenterLon();
-    const spanMeters = camera.viewport_base_meters / camera.zoom;
+    const spanMeters = (controller.getViewMode() === "3D" ? 30000000 : camera.viewport_base_meters) / camera.zoom;
     const latSpan = Math.min(Math.PI / 3, spanMeters / 111_000.0 / 2 * Math.PI / 180);
     const lonSpan = latSpan / Math.max(0.15, Math.cos(centerLat));
-    const vertices: number[] = [];
-    const indices: number[] = [];
-    const elevations: number[][] = [];
-    const viewMode = controller.getViewMode();
-    const projection = controller.projection;
     const tile = this.imageryTile(controller);
-
-    for (let row = 0; row <= this.gridSize; row++) {
-      const elevationRow: number[] = [];
-      const v = row / this.gridSize;
-      const lat = centerLat + (0.5 - v) * latSpan;
-      for (let column = 0; column <= this.gridSize; column++) {
-        const u = column / this.gridSize;
-        const lon = centerLon + (u - 0.5) * lonSpan;
-        let elevation = 0;
+    const { vertices, indices } = buildTerrainGrid(this.gridSize, centerLat, centerLon, latSpan, lonSpan, {
+      viewMode: controller.getViewMode(), centerLat, centerLon, zoom: camera.zoom,
+      project: (lat, lon) => controller.projection.project(lat, lon, 0),
+      elevation: (lat, lon) => {
         try {
-          elevation = controller.terrainEngine.get_elevation(lat * 180 / Math.PI, lon * 180 / Math.PI) || 0;
-        } catch {
-          // Unknown terrain is rendered at sea level until a source is available.
-        }
-        elevationRow.push(elevation);
-        const height = elevation * this.verticalExaggeration;
-        let position: number[];
-        if (viewMode === "3D") {
-          position = Array.from(lla_to_ecef(lat, lon, height));
-        } else {
-          const projected = projection.project(lat, lon, 0);
-          const [x, y] = projected;
-          if (x === undefined || y === undefined) continue;
-          position = [x, y, height];
-        }
-        // Vertex layout: position(3), elevation(1), slope(1), normal(3), uv(2) -> 10 floats = 40 bytes
-         const [positionX, positionY, positionZ] = position;
-         if (positionX === undefined || positionY === undefined || positionZ === undefined) continue;
-         vertices.push(positionX, positionY, positionZ, elevation, 0, 0, 0, 1, ...this.imageryUv(lat, lon, tile));
-      }
-      elevations.push(elevationRow);
-    }
-
-    const dx = Math.max(1, spanMeters / this.gridSize);
-    const dy = dx;
-    for (let row = 0; row <= this.gridSize; row++) {
-      for (let column = 0; column <= this.gridSize; column++) {
-        const currentRow = elevations[row];
-        const previousRow = elevations[Math.max(0, row - 1)];
-        const nextRow = elevations[Math.min(this.gridSize, row + 1)];
-        if (!currentRow || !previousRow || !nextRow) continue;
-        const left = currentRow[Math.max(0, column - 1)];
-        const right = currentRow[Math.min(this.gridSize, column + 1)];
-        const north = previousRow[column];
-        const south = nextRow[column];
-        if (left === undefined || right === undefined || north === undefined || south === undefined) continue;
-        const dzdx = (right - left) / (column === 0 || column === this.gridSize ? dx : 2 * dx);
-        const dzdy = (south - north) / (row === 0 || row === this.gridSize ? dy : 2 * dy);
-        const slope = Math.atan(Math.hypot(dzdx, dzdy)) * 180 / Math.PI;
-        const nx = -dzdx;
-        const ny = -dzdy;
-        const nz = 1;
-        const length = Math.hypot(nx, ny, nz);
-        const offset = (row * (this.gridSize + 1) + column) * 10;
-        vertices[offset + 4] = slope;
-        vertices[offset + 5] = nx / length;
-        vertices[offset + 6] = ny / length;
-        vertices[offset + 7] = nz / length;
-      }
-    }
-
-    for (let row = 0; row < this.gridSize; row++) {
-      for (let column = 0; column < this.gridSize; column++) {
-        const topLeft = row * (this.gridSize + 1) + column;
-        const topRight = topLeft + 1;
-        const bottomLeft = topLeft + this.gridSize + 1;
-        const bottomRight = bottomLeft + 1;
-        indices.push(topLeft, topRight, bottomLeft, topRight, bottomRight, bottomLeft);
-      }
-    }
+          const sample: unknown = controller.terrainEngine.get_elevation_status(lat, lon);
+          if (typeof sample !== "object" || sample === null || !("elevation_meters" in sample)) return null;
+          return typeof sample.elevation_meters === "number" ? sample.elevation_meters : null;
+        } catch { return null; }
+      },
+    }, this.verticalExaggeration, (lat, lon) => this.imageryUv(lat, lon, tile));
     camera.free();
 
     this.disposeMesh(gl);
@@ -378,9 +313,9 @@ export class TerrainLayer extends Layer {
     const indexBuffer = gl.createBuffer()!;
     gl.bindVertexArray(vao);
     gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.DYNAMIC_DRAW);
+    gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.DYNAMIC_DRAW);
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
-    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint32Array(indices), gl.STATIC_DRAW);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
 
     // Stride: 10 floats = 40 bytes
     const stride = 40;
@@ -406,7 +341,7 @@ export class TerrainLayer extends Layer {
 
   private imageryTile(controller: OlayerController): { z: number; x: number; y: number } {
     const camera = controller.getCameraState();
-    const spanMeters = camera.viewport_base_meters / camera.zoom;
+    const spanMeters = (controller.getViewMode() === "3D" ? 30000000 : camera.viewport_base_meters) / camera.zoom;
     const latSpan = Math.min(Math.PI / 3, spanMeters / 111_000.0 / 2 * Math.PI / 180);
     const centerLat = controller.getCenterLat();
     const lonSpan = latSpan / Math.max(0.15, Math.cos(centerLat));
@@ -438,7 +373,9 @@ export class TerrainLayer extends Layer {
     this.imageryRequestKey = key;
     const image = new Image();
     image.crossOrigin = "anonymous";
+    const texture = this.imageryTexture;
     image.onload = () => {
+      if (this.imageryTexture !== texture || this.imageryRequestKey !== key) return;
       gl.bindTexture(gl.TEXTURE_2D, this.imageryTexture);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
       gl.generateMipmap(gl.TEXTURE_2D);
@@ -499,17 +436,26 @@ export class TerrainLayer extends Layer {
     gl.uniform1i(this.imageryEnabledLocation, this.imageryEnabled && this.imageryLoadedKey !== "" ? 1 : 0);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.imageryTexture);
-    gl.enable(gl.DEPTH_TEST);
-    gl.enable(gl.BLEND);
-    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     gl.bindVertexArray(this.mesh.vao);
-    gl.drawElements(gl.TRIANGLES, this.mesh.indexCount, gl.UNSIGNED_INT, 0);
+    drawWithLayerDepth(gl, controller.getViewMode(), () => {
+      gl.drawElements(gl.TRIANGLES, this.mesh!.indexCount, gl.UNSIGNED_INT, 0);
+    });
     gl.bindVertexArray(null);
     gl.bindTexture(gl.TEXTURE_2D, null);
   }
 
   public renderDynamic(_ctx: CanvasRenderingContext2D, _currentTime: number): void {
     // Terrain is rendered entirely by WebGL.
+  }
+  public override destroy(gl: WebGL2RenderingContext): void {
+    this.disposeMesh(gl);
+    if (this.program) gl.deleteProgram(this.program);
+    if (this.imageryTexture) gl.deleteTexture(this.imageryTexture);
+    this.program = null;
+    this.imageryTexture = null;
+    this.imageryRequestKey = "";
+    this.imageryLoadedKey = "";
+    this.lastKey = "";
   }
 }
 
@@ -581,6 +527,8 @@ export class TerrainContourLayer extends Layer {
     gl.attachShader(this.program, vertexShader);
     gl.attachShader(this.program, fragmentShader);
     gl.linkProgram(this.program);
+    gl.deleteShader(vertexShader);
+    gl.deleteShader(fragmentShader);
     if (!gl.getProgramParameter(this.program, gl.LINK_STATUS)) {
       throw new Error(`Contour shader link error: ${gl.getProgramInfoLog(this.program)}`);
     }
@@ -590,14 +538,9 @@ export class TerrainContourLayer extends Layer {
 
   private meshKey(controller: OlayerController): string {
     const camera = controller.getCameraState();
-    const key = [
-      controller.getViewMode(),
-      controller.getCenterLat().toFixed(5),
-      controller.getCenterLon().toFixed(5),
-      camera.zoom.toFixed(3),
-      this.interval.toFixed(1),
-      this.verticalExaggeration.toFixed(2)
-    ].join(":");
+    const key = [controller.getViewMode(), controller.getCenterLat(), controller.getCenterLon(),
+      camera.zoom, camera.viewport_base_meters, this.interval, this.verticalExaggeration,
+      controller.projection.version(), controller.terrainEngine.revision()].join(":");
     camera.free();
     return key;
   }
@@ -609,7 +552,7 @@ export class TerrainContourLayer extends Layer {
     }
     const projected = controller.projection.project(lat, lon, 0);
     const [x, y] = projected;
-    if (x === undefined || y === undefined) return [0, 0, height];
+    if (x === undefined || y === undefined) return [];
     return [x, y, height];
   }
 
@@ -617,27 +560,32 @@ export class TerrainContourLayer extends Layer {
     const camera = controller.getCameraState();
     const centerLat = controller.getCenterLat();
     const centerLon = controller.getCenterLon();
-    const spanMeters = camera.viewport_base_meters / camera.zoom;
+    const spanMeters = (controller.getViewMode() === "3D" ? 30000000 : camera.viewport_base_meters) / camera.zoom;
     const latSpan = Math.min(Math.PI / 3, spanMeters / 111_000 / 2 * Math.PI / 180);
     const lonSpan = latSpan / Math.max(0.15, Math.cos(centerLat));
-    const samples: ContourPoint[][] = [];
+    const samples: Array<Array<ContourPoint | null>> = [];
     let minimum = Number.POSITIVE_INFINITY;
     let maximum = Number.NEGATIVE_INFINITY;
 
     for (let row = 0; row <= this.gridSize; row++) {
-      const sampleRow: ContourPoint[] = [];
+      const sampleRow: Array<ContourPoint | null> = [];
       const lat = centerLat + (0.5 - row / this.gridSize) * latSpan;
       for (let column = 0; column <= this.gridSize; column++) {
         const lon = centerLon + (column / this.gridSize - 0.5) * lonSpan;
-        let elevation = 0;
+        let elevation: number | null = null;
         try {
-          elevation = controller.terrainEngine.get_elevation(lat * 180 / Math.PI, lon * 180 / Math.PI) || 0;
-        } catch {
-          // Keep uncovered samples at sea level.
-        }
-        const position = this.projectPoint(controller, lat, lon, elevation);
+          const sample: unknown = controller.terrainEngine.get_elevation_status(lat, lon);
+          if (typeof sample === "object" && sample !== null && "elevation_meters" in sample
+            && typeof sample.elevation_meters === "number" && Number.isFinite(sample.elevation_meters)) elevation = sample.elevation_meters;
+        } catch { /* Leave an explicit gap in uncovered terrain. */ }
+        if (elevation === null) { sampleRow.push(null); continue; }
+        let position: number[];
+        try { position = this.projectPoint(controller, lat, lon, elevation); }
+        catch { sampleRow.push(null); continue; }
         const [x, y, z] = position;
-        if (x === undefined || y === undefined || z === undefined) continue;
+        if (x === undefined || y === undefined || z === undefined || !position.every(Number.isFinite)) {
+          sampleRow.push(null); continue;
+        }
         sampleRow.push({ x, y, z, elevation });
         minimum = Math.min(minimum, elevation);
         maximum = Math.max(maximum, elevation);
@@ -709,18 +657,23 @@ export class TerrainContourLayer extends Layer {
     gl.useProgram(this.program);
     gl.uniformMatrix4fv(this.matrixLocation, false, viewProjMatrix);
     gl.uniform1f(this.opacityLocation, this.opacity);
-    gl.enable(gl.DEPTH_TEST);
-    gl.enable(gl.BLEND);
-    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
     const positionLocation = gl.getAttribLocation(this.program!, "a_position");
     gl.enableVertexAttribArray(positionLocation);
     gl.vertexAttribPointer(positionLocation, 3, gl.FLOAT, false, 12, 0);
-    gl.drawArrays(gl.LINES, 0, this.vertexCount);
+    drawWithLayerDepth(gl, controller.getViewMode(), () => gl.drawArrays(gl.LINES, 0, this.vertexCount));
     gl.bindBuffer(gl.ARRAY_BUFFER, null);
   }
 
   public renderDynamic(_ctx: CanvasRenderingContext2D, _currentTime: number): void {
     // Contours are rendered entirely by WebGL.
+  }
+  public override destroy(gl: WebGL2RenderingContext): void {
+    if (this.program) gl.deleteProgram(this.program);
+    if (this.vertexBuffer) gl.deleteBuffer(this.vertexBuffer);
+    this.program = null;
+    this.vertexBuffer = null;
+    this.vertexCount = 0;
+    this.invalidate();
   }
 }

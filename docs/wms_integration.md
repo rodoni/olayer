@@ -12,7 +12,7 @@ WMS images can now be rendered by the browser layer stack and the native WGPU ra
 - Draping is opt-in. Without it, imagery lies at zero ellipsoidal height. With it, terrain is queried through the existing terrain engine; unknown samples leave holes. The renderer does not silently convert missing elevation to zero.
 - Extents that cross the antimeridian must be split into separate images. Unsupported CRS and out-of-domain bounds are rejected.
 
-The horizon test models the reference ellipsoid. Exact terrain occlusion, depth interaction with other layers, adaptive tessellation, and production visual validation remain follow-up work.
+The horizon test models the reference ellipsoid. Sampled terrain/imagery/feature occlusion is now covered by [shared depth integration](depth_integration.md). Adaptive tessellation, complete globe terrain coverage and production visual validation remain follow-up work.
 
 ## Browser
 
@@ -37,7 +37,7 @@ controller.layerManager.addLayer(layer);
 controller.triggerActive();
 ```
 
-`WmsLayer.load` owns and closes decoded bitmaps after upload, replaces existing textures only after a successful upload, and ignores obsolete loads after another load or destruction. Call `destroy(gl)` when removing the layer; the controller also destroys its active layers during teardown. Geometry is rebuilt on each static render so projection, mode, camera, and terrain updates take effect. The host retains its depth configuration.
+`WmsLayer.load` owns and closes decoded bitmaps after upload, replaces existing textures only after a successful upload, and ignores obsolete loads after another load or destruction. Call `destroy(gl)` when removing the layer; the controller also destroys its active layers during teardown. Geometry is rebuilt on each static render so projection, mode, camera, and terrain updates take effect. The layer establishes and restores depth/blend state; fully transparent pixels do not write depth. See the shared depth contract.
 
 ## Native
 
@@ -52,7 +52,7 @@ let mut gpu_image = WgpuWmsImage::new(
 // After changing the camera, projection, view mode, or loaded terrain:
 gpu_image.rebuild(&device, &controller)?;
 // Update pipeline.uniform_buffer with the controller's current view-projection matrix,
-// then draw inside the same color pass as the existing raster tiles:
+// then draw inside the matching color/depth pass (use WgpuGpuPipeline::with_depth):
 gpu_image.render(&pipeline, &mut render_pass);
 ```
 

@@ -230,6 +230,7 @@ fn build_mesh(
 
 /// GPU-owned image. Drop to release resources; fetch it once and rebuild geometry as the view changes.
 pub struct WgpuWmsImage {
+    two_d: bool,
     bounds: BoundingBox,
     options: WmsMeshOptions,
     bind_group: wgpu::BindGroup,
@@ -310,6 +311,7 @@ impl WgpuWmsImage {
         });
         let vertex_buffer = Self::buffer(device, &vertices);
         Ok(Self {
+            two_d: controller.view_mode == "2D",
             bounds: image.bounds,
             options,
             bind_group,
@@ -343,6 +345,7 @@ impl WgpuWmsImage {
         let vertices = build_wms_mesh(self.bounds, controller, self.options)?;
         self.vertex_buffer = Self::buffer(device, &vertices);
         self.vertex_count = vertices.len() as u32;
+        self.two_d = controller.view_mode == "2D";
         Ok(())
     }
 
@@ -351,7 +354,11 @@ impl WgpuWmsImage {
         if self.vertex_count == 0 {
             return;
         }
-        pass.set_pipeline(&pipeline.raster_pipeline);
+        pass.set_pipeline(if self.two_d {
+            &pipeline.raster_2d_pipeline
+        } else {
+            &pipeline.raster_pipeline
+        });
         pass.set_bind_group(0, &pipeline.bind_group, &[]);
         pass.set_bind_group(1, &self.bind_group, &[]);
         pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));

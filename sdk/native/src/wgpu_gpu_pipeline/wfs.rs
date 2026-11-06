@@ -357,6 +357,7 @@ pub fn build_wfs_mesh(
 /// Shared line pipeline. The optional depth format must match the host render pass.
 pub struct WgpuWfsPipeline {
     pipeline: wgpu::RenderPipeline,
+    pipeline_2d: wgpu::RenderPipeline,
     uniform: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
 }
@@ -413,7 +414,7 @@ struct Uniforms { matrix: mat4x4<f32>, color: vec4<f32> };
             bind_group_layouts: &[&layout],
             push_constant_ranges: &[],
         });
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        let mut descriptor = wgpu::RenderPipelineDescriptor {
             label: Some("WFS line pipeline"),
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
@@ -447,9 +448,16 @@ struct Uniforms { matrix: mat4x4<f32>, color: vec4<f32> };
             }),
             multisample: Default::default(),
             multiview: None,
-        });
+        };
+        let pipeline = device.create_render_pipeline(&descriptor);
+        if let Some(depth) = descriptor.depth_stencil.as_mut() {
+            depth.depth_write_enabled = false;
+            depth.depth_compare = wgpu::CompareFunction::Always;
+        }
+        let pipeline_2d = device.create_render_pipeline(&descriptor);
         Self {
             pipeline,
+            pipeline_2d,
             uniform,
             bind_group,
         }
@@ -476,6 +484,7 @@ struct Uniforms { matrix: mat4x4<f32>, color: vec4<f32> };
 
 /// Owns a decoded feature collection and GPU lines; rebuild after view or terrain changes.
 pub struct WgpuWfsFeatures {
+    two_d: bool,
     collection: FeatureCollection,
     options: WfsMeshOptions,
     buffer: wgpu::Buffer,
@@ -491,6 +500,7 @@ impl WgpuWfsFeatures {
         let vertices = build_wfs_mesh(&collection, controller, options)?;
         let count = vertices.len() as u32;
         Ok(Self {
+            two_d: controller.view_mode == "2D",
             collection,
             options,
             buffer: Self::buffer(device, &vertices),
@@ -516,6 +526,7 @@ impl WgpuWfsFeatures {
         let vertices = build_wfs_mesh(&self.collection, controller, self.options)?;
         self.buffer = Self::buffer(device, &vertices);
         self.count = vertices.len() as u32;
+        self.two_d = controller.view_mode == "2D";
         Ok(())
     }
     pub fn collection(&self) -> &FeatureCollection {
@@ -525,7 +536,11 @@ impl WgpuWfsFeatures {
         if self.count == 0 {
             return;
         }
-        pass.set_pipeline(&pipeline.pipeline);
+        pass.set_pipeline(if self.two_d {
+            &pipeline.pipeline_2d
+        } else {
+            &pipeline.pipeline
+        });
         pass.set_bind_group(0, &pipeline.bind_group, &[]);
         pass.set_vertex_buffer(0, self.buffer.slice(..));
         pass.draw(0..self.count, 0..1);
