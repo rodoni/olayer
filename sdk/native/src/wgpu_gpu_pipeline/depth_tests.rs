@@ -228,7 +228,19 @@ fn terrain_and_imagery_occlude_wfs_in_shared_depth() {
             if mode == "2D" {
                 assert!(mesh_height.is_none());
             } else {
-                assert!(mesh_height.is_some_and(|height| (height - terrain_height).abs() < 50.0));
+                let mesh_height = mesh_height.expect("known rendered terrain at the camera center");
+                assert!((mesh_height - terrain_height).abs() < 50.0);
+                let resolved = raster
+                    .resolve_altitude_at_mesh(
+                        &controller,
+                        0.0,
+                        0.0,
+                        100.0,
+                        olayer_core::terrain::AltitudeMode::RelativeToMesh,
+                        olayer_core::terrain::AltitudeUnknownPolicy::Reject,
+                    )
+                    .unwrap();
+                assert!((resolved - (mesh_height + 100.0)).abs() < 1.0e-6);
             }
             let matrix = match mode {
                 "3D" => controller.camera.get_3d_view_proj_matrix().unwrap(),

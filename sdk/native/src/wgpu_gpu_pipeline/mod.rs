@@ -1414,6 +1414,30 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         sample_terrain_mesh_height(&self.terrain_cpu_vertices, footprint, lat_rad, lon_rad)
     }
 
+    /// Resolves a placement against the current mesh when `RelativeToMesh` is selected.
+    /// Missing mesh height retains the core resolver's documented sampled-ground fallback.
+    pub fn resolve_altitude_at_mesh(
+        &self,
+        controller: &NativeController,
+        lat_rad: f64,
+        lon_rad: f64,
+        input_height_meters: f64,
+        mode: olayer_core::terrain::AltitudeMode,
+        unknown_policy: olayer_core::terrain::AltitudeUnknownPolicy,
+    ) -> Result<f64, TerrainError> {
+        let mesh_height = (mode == olayer_core::terrain::AltitudeMode::RelativeToMesh)
+            .then(|| self.terrain_mesh_height_at(lat_rad, lon_rad))
+            .flatten();
+        controller.resolve_altitude(
+            lat_rad,
+            lon_rad,
+            input_height_meters,
+            mode,
+            unknown_policy,
+            mesh_height,
+        )
+    }
+
     pub fn rebuild_terrain_buffers(
         &mut self,
         controller: &NativeController,

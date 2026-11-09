@@ -1,6 +1,7 @@
 import { buildTerrainGrid, buildTerrainGridWithLod } from "./terrain_mesh";
 import type { TerrainLodOptions, TerrainLodResult } from "./terrain_mesh";
 import type { WmsMeshContext } from "./wms_mesh";
+import type { AltitudeMode, AltitudeUnknownPolicy } from "../types/altitude";
 import { drawWithLayerDepth } from "./depth_state";
 import { Layer } from "./layer";
 import type { LayerRenderContext } from "./layer";
@@ -148,6 +149,19 @@ export class TerrainLayer extends Layer {
       }
     }
     return null;
+  }
+
+  /** Resolves a placement against this layer's current rendered mesh when requested. */
+  public resolveAltitudeAt(
+    controller: OlayerController,
+    latRad: number,
+    lonRad: number,
+    inputHeightMeters: number,
+    mode: AltitudeMode = controller.getAltitudeMode(),
+    unknownPolicy: AltitudeUnknownPolicy = controller.getAltitudeUnknownPolicy(),
+  ): number {
+    const meshHeight = mode === "relative-to-mesh" ? this.getMeshHeightAt(latRad, lonRad) ?? undefined : undefined;
+    return controller.resolveAltitude(latRad, lonRad, inputHeightMeters, mode, unknownPolicy, meshHeight);
   }
 
   public setRenderMode(mode: TerrainRenderMode): void {

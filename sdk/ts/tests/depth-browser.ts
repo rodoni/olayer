@@ -66,6 +66,10 @@ async function run(): Promise<string[]> {
           if (lod.triangleCount > 0 && (meshHeight === null || Math.abs(meshHeight - scene.terrainHeight) > 20)) {
             throw new Error(`${mode}: rendered-mesh altitude sample is invalid: ${meshHeight}; LOD=${JSON.stringify(terrain.getLodReport())}`);
           }
+          if (meshHeight !== null) {
+            const resolved = terrain.resolveAltitudeAt(controller, 0, 0, 100, "relative-to-mesh", "reject");
+            if (Math.abs(resolved - (meshHeight + 100)) > 1e-6) throw new Error(`${mode}: mesh-relative placement ignored rendered terrain`);
+          }
         }
         if (gl.isEnabled(gl.DEPTH_TEST) || gl.getParameter(gl.DEPTH_FUNC) !== gl.GREATER || gl.getParameter(gl.DEPTH_WRITEMASK)
           || gl.isEnabled(gl.BLEND) || gl.getParameter(gl.BLEND_EQUATION_RGB) !== gl.FUNC_REVERSE_SUBTRACT) throw new Error("Layer leaked host GL state");
