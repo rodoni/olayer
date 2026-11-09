@@ -22,6 +22,28 @@ mod ui;
 
 use sim::SimulatedTarget;
 
+const MAP_DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+
+fn create_map_depth_view(device: &wgpu::Device, width: u32, height: u32) -> wgpu::TextureView {
+    // A view retains its texture; clamp the initial allocation for zero-sized windows.
+    device
+        .create_texture(&wgpu::TextureDescriptor {
+            label: Some("Map Depth Texture"),
+            size: wgpu::Extent3d {
+                width: width.max(1),
+                height: height.max(1),
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: MAP_DEPTH_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        })
+        .create_view(&wgpu::TextureViewDescriptor::default())
+}
+
 fn projection_for_selection(
     name: &str,
     center: LatLon,
@@ -98,6 +120,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if size.width > 0 && size.height > 0 {
         surface.configure(&device, &config);
     }
+    let mut map_depth_view = create_map_depth_view(&device, config.width, config.height);
 
     // Setup egui
     let egui_ctx = egui::Context::default();
@@ -119,7 +142,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut layer_manager = NativeLayerManager::new();
     let mut map_data_stack = NativeMapDataStack::new();
-    let mut gpu_pipeline = WgpuGpuPipeline::new(&device, config.format);
+    let mut gpu_pipeline =
+        WgpuGpuPipeline::with_depth(&device, config.format, Some(MAP_DEPTH_FORMAT));
     let cpu_pipeline = WgpuCpuVertexPipeline::new();
 
     // Load mock DTED Level 0 tiles for São Paulo TMA area using MapDataStack
@@ -226,6 +250,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             config.width = new_size.width;
                             config.height = new_size.height;
                             surface.configure(&device, &config);
+                            map_depth_view = create_map_depth_view(&device, config.width, config.height);
                             controller.camera.aspect_ratio =
                                 f64::from(new_size.width) / f64::from(new_size.height);
                             gpu_pipeline.invalidate_terrain_cache();
@@ -234,7 +259,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                     WindowEvent::RedrawRequested => {
-                        if config.width == 0 || config.height == 0 {
+                        let window_size = window.inner_size();
+                        if window_size.width == 0 || window_size.height == 0 {
                             return;
                         }
                         let pixels_per_point = egui_ctx.pixels_per_point();
@@ -682,10 +708,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         };
                         let view = current_texture.texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-                        // WGPU render pass for background + grid + egui UI
+                        // Map geometry shares depth; egui uses a separate color-only pass.
                         {
                             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                                label: Some("Render Pass"),
+                                label: Some("Map Render Pass"),
                                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                                     view: &view,
                                     resolve_target: None,
@@ -694,7 +720,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         store: wgpu::StoreOp::Store,
                                     },
                                 })],
-                                depth_stencil_attachment: None,
+                                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                                    view: &map_depth_view,
+                                    depth_ops: Some(wgpu::Operations {
+                                        load: wgpu::LoadOp::Clear(1.0),
+                                        store: wgpu::StoreOp::Store,
+                                    }),
+                                    stencil_ops: None,
+                                }),
                                 timestamp_writes: None,
                                 occlusion_query_set: None,
                             });
@@ -713,8 +746,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                              if layer_manager.show_grid {
                                  gpu_pipeline.render(&mut render_pass);
                              }
+                        }
 
-                            // Draw egui UI overlay
+                        {
+                            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                                label: Some("UI Render Pass"),
+                                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                                    view: &view,
+                                    resolve_target: None,
+                                    ops: wgpu::Operations {
+                                        load: wgpu::LoadOp::Load,
+                                        store: wgpu::StoreOp::Store,
+                                    },
+                                })],
+                                depth_stencil_attachment: None,
+                                timestamp_writes: None,
+                                occlusion_query_set: None,
+                            });
                             egui_renderer.render(&mut render_pass, &paint_jobs, &screen_descriptor);
                         }
 

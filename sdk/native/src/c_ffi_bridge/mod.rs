@@ -14,6 +14,12 @@ use olayer_core::interpolator::{InterpolationEngine, TargetState};
 use olayer_core::terrain::TerrainEngine;
 use std::os::raw::{c_char, c_int};
 
+mod map;
+pub use map::{
+    olayer_map_build_request_json, olayer_map_parse_capabilities_json,
+    olayer_map_validate_model_json,
+};
+
 const MAX_FFI_BUFFER_BYTES: usize = 256 * 1024 * 1024;
 const MAX_FFI_TEXT_BYTES: usize = 16 * 1024 * 1024;
 const MAX_TARGET_ID_BYTES: usize = 1_024;

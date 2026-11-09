@@ -18,17 +18,22 @@
     }
   },
   "type": "module",
+  "bundledDependencies": [
+    "olayer-wasm"
+  ],
   "scripts": {
     "dev": "vite",
-    "build": "tsc --emitDeclarationOnly --noImplicitOverride false && vite build",
+    "build": "vite build && tsc --emitDeclarationOnly",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit",
     "preview": "vite preview",
     "test": "vitest",
     "test:run": "vitest run",
+    "test:package": "npm run build && node tests/package-smoke.mjs",
     "test:wms:browser": "node tests/wms-browser.mjs",
     "test:wfs:browser": "node tests/wfs-browser.mjs",
     "test:depth:browser": "node tests/depth-browser.mjs",
+    "test:volumetric:browser": "node tests/volumetric-browser.mjs",
     "test:wfs-fill:browser": "node tests/wfs-fill-browser.mjs"
   },
   "dependencies": {

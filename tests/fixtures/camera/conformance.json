@@ -1,0 +1,50 @@
+{
+  "reference": "Analytical column-major OpenGL matrices, not captured SDK output. f=cot(pi/8)=1+sqrt(2); planar depth=-1/1000; 2.5D d=80000, near=800, far=800000; globe d=6378137+15000000, near=50000, far=40000000. Quarter-turn attitudes reduce to signed axis permutations. EPSG:3857 x=a*longitude, pole y uses the documented 85.05112878 degree clamp. Equatorial stereographic x=2*b*tan(delta_longitude/2), b=6356752.314245179. Tolerances accommodate f32 rotations and matrix arithmetic, not pixel-scale behavior changes.",
+  "matrix_absolute_tolerance": 0.000001,
+  "matrix_relative_tolerance": 0.0000005,
+  "projection_tolerance_meters": 0.00001,
+  "cases": [
+    {
+      "name": "mercator-nadir", "projection": "mercator", "mode": "2d",
+      "center": [0, 0, 0], "attitude": [0, 0, 0], "zoom": 2, "aspect": 2, "width": 100000,
+      "matrix": [0.00004,0,0,0, 0,0.00008,0,0, 0,0,-0.001,0, 0,0,0,1],
+      "points": [{"lla": [0,1,0], "xy": [111319.49079327357,0]}]
+    },
+    {
+      "name": "mercator-north-east-boundary", "projection": "mercator", "mode": "2d",
+      "center": [90,180,0], "attitude": [0,0,0], "zoom": 1, "aspect": 1, "width": 40075016.68557849,
+      "matrix": [4.990640467330674e-8,0,0,0, 0,4.990640467330674e-8,0,0, 0,0,-0.001,0, -1,-1,0,1],
+      "points": [{"lla": [90,180,0], "xy": [20037508.342789244,20037508.343038812]}]
+    },
+    {
+      "name": "mercator-south-west-boundary", "projection": "mercator", "mode": "2d",
+      "center": [-90,-180,0], "attitude": [0,0,0], "zoom": 1, "aspect": 1, "width": 40075016.68557849,
+      "matrix": [4.990640467330674e-8,0,0,0, 0,4.990640467330674e-8,0,0, 0,0,-0.001,0, 1,1,0,1],
+      "points": [{"lla": [-90,-180,0], "xy": [-20037508.342789244,-20037508.343038812]}]
+    },
+    {
+      "name": "tilted-combined-quarter-turn-attitude", "projection": "mercator", "mode": "25d",
+      "center": [0,0,0], "attitude": [90,90,90], "zoom": 1, "aspect": 2, "width": 100000,
+      "matrix": [-1.2071067811865475,0,0,0, 0,0,1.002002002002002,1, 0,-2.414213562373095,0,0, 0,0,78558.55855855856,80000],
+      "points": [{"lla": [0,-1,0], "xy": [-111319.49079327357,0]}]
+    },
+    {
+      "name": "globe-north-pole", "projection": "stereographic", "mode": "3d",
+      "center": [90,-90,0], "attitude": [0,0,0], "zoom": 1, "aspect": 2, "width": 100000,
+      "matrix": [1.2071067811865475,0,0,0, 0,2.414213562373095,0,0, 0,0,-1.002503128911139,-1, 0,0,21331524.076345433,21378137],
+      "points": [{"lla": [90,90,0], "xy": [0,0]}]
+    },
+    {
+      "name": "globe-south-pole", "projection": "stereographic", "mode": "3d",
+      "center": [-90,-90,0], "attitude": [0,0,0], "zoom": 1, "aspect": 2, "width": 100000,
+      "matrix": [1.2071067811865475,0,0,0, 0,-2.414213562373095,0,0, 0,0,1.002503128911139,1, 0,0,21331524.076345433,21378137],
+      "points": [{"lla": [-90,90,0], "xy": [0,0]}]
+    },
+    {
+      "name": "stereographic-antimeridian-wrap", "projection": "stereographic", "mode": "2d",
+      "center": [0,180,0], "attitude": [90,0,0], "zoom": 1, "aspect": 2, "width": 100000,
+      "matrix": [0,-0.00004,0,0, 0.00002,0,0,0, 0,0,-0.001,0, 0,0,0,1],
+      "points": [{"lla": [0,-180,0], "xy": [0,0]}, {"lla": [0,179,0], "xy": [-110949.0740500353,0]}]
+    }
+  ]
+}

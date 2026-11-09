@@ -33,6 +33,9 @@ jobs:
       - name: Run Rust tests
         run: cargo test --workspace --exclude olayer-desktop-demo
 
+      - name: Verify Rust formatting
+        run: cargo fmt --all --check
+
       - name: Run Clippy
         run: cargo clippy --workspace --exclude olayer-desktop-demo --all-targets
 
@@ -59,10 +62,27 @@ jobs:
           XDG_RUNTIME_DIR: ${{ runner.temp }}
         run: cargo test -p olayer-native wfs_polygon_fills_preserve_holes_in_offscreen_pixels -- --ignored --nocapture
 
+      - name: Verify styled WFS immutable draw snapshots
+        env:
+          XDG_RUNTIME_DIR: ${{ runner.temp }}
+        run: cargo test -p olayer-native immutable_styled_draw_has_two_colors_in_one_submission_all_modes -- --ignored --nocapture
+
+      - name: Verify volumetric depth participation and transparency
+        env:
+          XDG_RUNTIME_DIR: ${{ runner.temp }}
+        run: cargo test -p olayer-native translucent_volumetric_mesh_tests_depth_without_writing_it -- --ignored --nocapture
+
       - name: Verify generated C header
         run: |
           cargo build -p olayer-native
           git diff --exit-code -- sdk/native/libolayer_native.h
+
+      - name: Compile and run external C Map Core consumer
+        run: |
+          cc -std=c11 -Wall -Wextra -Werror -I sdk/native sdk/native/tests/map_api_consumer.c \
+            -L target/debug -lolayer_native -Wl,-rpath,"$PWD/target/debug" \
+            -o target/map-api-consumer
+          target/map-api-consumer
 
   wasm:
     name: WASM Build
@@ -104,7 +124,7 @@ jobs:
       - name: Install Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -129,6 +149,14 @@ jobs:
         working-directory: sdk/ts
         run: npm run test:run
 
+      - name: Verify TypeScript contracts
+        working-directory: sdk/ts
+        run: npm run typecheck
+
+      - name: Verify SDK build declarations and isolated package consumers
+        working-directory: sdk/ts
+        run: npm run test:package
+
       - name: Verify browser WMS rendering with WCS terrain
         working-directory: sdk/ts
         run: npm run test:wms:browser
@@ -140,6 +168,10 @@ jobs:
       - name: Verify browser terrain imagery and feature depth
         working-directory: sdk/ts
         run: npm run test:depth:browser
+
+      - name: Verify browser volumetric depth and alpha blending
+        working-directory: sdk/ts
+        run: npm run test:volumetric:browser
 
       - name: Verify browser WFS polygon fills and holes
         working-directory: sdk/ts
@@ -155,7 +187,7 @@ jobs:
       - name: Install Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
 
       - name: Install symbol compiler dependencies
         working-directory: tools/symbol-compiler

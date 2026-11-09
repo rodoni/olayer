@@ -3,6 +3,7 @@ import { initSync, WasmTerrainEngine } from "olayer-wasm";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { WcsTerrainSource } from "./wcs_terrain";
+import type { WcsElevationInterpretation } from "./wcs_terrain";
 import { WcsRasterSource } from "./ogc_sources";
 import { OgcHttpClient } from "./ogc_client";
 import { buildWmsMesh } from "../layers/wms_mesh";
@@ -11,8 +12,8 @@ beforeAll(() => initSync({ module: readFileSync(resolve(__dirname, "../../wasm/p
 afterEach(() => vi.unstubAllGlobals());
 const fixture = readFileSync(resolve(__dirname, "../../../../tests/fixtures/wcs/elevation.json"), "utf8");
 const options = {endpoint:"https://fixture.test/wcs",coverageId:"terrain",crs:"EPSG:4326",bounds:[-2,-1,2,1] as const,width:3,height:3};
-function source(engine: WasmTerrainEngine): WcsTerrainSource {
-  return new WcsTerrainSource("wcs",engine,new WcsRasterSource(new OgcHttpClient({maxRetries:0}),options));
+function source(engine: WasmTerrainEngine, interpretation: WcsElevationInterpretation = {}): WcsTerrainSource {
+  return new WcsTerrainSource("wcs",engine,new WcsRasterSource(new OgcHttpClient({maxRetries:0}),options),interpretation);
 }
 
 describe("WCS terrain integration", () => {
@@ -65,6 +66,39 @@ describe("WCS terrain integration", () => {
       const abort = new AbortController();
       abort.abort();
       await expect(terrain.load(abort.signal)).rejects.toThrow();
+    } finally { engine.free(); }
+  });
+
+  it("converts units and explicitly converts orthometric samples before atomic installation", async () => {
+    vi.stubGlobal("fetch",vi.fn(async()=>new Response(JSON.stringify({width:3,height:3,samples:Array<number>(9).fill(100),nodata:-9999}))));
+    const engine = new WasmTerrainEngine();
+    try {
+      const terrain = source(engine, {
+        unit: "international-foot",
+        verticalReference: "orthometric",
+        geoid: { geoidUndulationMeters: () => 30 },
+      });
+      await terrain.load();
+      expect(engine.get_elevation_status(0,0).elevation_meters).toBeCloseTo(60.48, 6);
+      const previous = engine.get_elevation_status(0,0).elevation_meters;
+      vi.stubGlobal("fetch",vi.fn(async()=>new Response(JSON.stringify({width:3,height:3,samples:Array<number>(9).fill(200)}))));
+      const missingGeoid = source(engine, {
+        unit: "metre", verticalReference: "orthometric",
+        geoid: { geoidUndulationMeters: () => null },
+      });
+      await expect(missingGeoid.load()).rejects.toThrow("geoid correction");
+      expect(engine.get_elevation_status(0,0).elevation_meters).toBe(previous);
+    } finally { engine.free(); }
+  });
+
+  it("registers cell-centred coverage at pixel centres and preserves nodata sentinels", async () => {
+    vi.stubGlobal("fetch",vi.fn(async()=>new Response(JSON.stringify({width:3,height:3,samples:[0,1,2,3,4,5,6,7,8]}))));
+    const engine = new WasmTerrainEngine();
+    try {
+      await source(engine,{ registration: "cell-center" }).load();
+      expect(engine.get_elevation_status(0,-Math.PI/180).elevation_meters).toBeCloseTo(3.25, 6);
+      expect(engine.get_elevation_status(0,0).elevation_meters).toBeCloseTo(4, 6);
+      expect(() => engine.get_elevation_status(0,-1.9*Math.PI/180)).toThrow();
     } finally { engine.free(); }
   });
 });

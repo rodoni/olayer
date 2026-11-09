@@ -25,14 +25,21 @@ pub use tools::{
 };
 pub use wgpu_cpu_vertex_pipeline::{project_lla_to_screen, rasterize_svg, WgpuCpuVertexPipeline};
 pub use wgpu_gpu_pipeline::wms::{build_wms_mesh, WgpuWmsImage, WmsMeshOptions, WmsRenderError};
-pub use wgpu_gpu_pipeline::{RasterTileUpload, WgpuGpuPipeline};
+pub use wgpu_gpu_pipeline::{
+    RasterTileUpload, TerrainLodError, TerrainLodOptions, TerrainLodReport, WgpuGpuPipeline,
+};
 pub use wgpu_volumetric_pipeline::{
     GpuRibbonVertex, GpuVolumetricVertex, VolumetricGpuMesh, WgpuVolumetricPipeline,
 };
 
-pub use map_provider::coverage_terrain::install_wcs_terrain;
+pub use map_provider::coverage_terrain::{
+    install_wcs_terrain, install_wcs_terrain_with_interpretation, CoverageCoordinateSystem,
+    CoverageGridRegistration, CoverageTerrainInterpretation, ElevationUnit,
+    GeoidUndulationProvider, VerticalReference,
+};
 
 pub use wgpu_gpu_pipeline::wfs::{
-    build_wfs_fill_mesh, build_wfs_mesh, WfsAltitudeMode, WfsMeshOptions, WfsRenderError,
-    WgpuWfsFeatures, WgpuWfsPipeline,
+    build_wfs_fill_mesh, build_wfs_mesh, PreparedWfsFeatures, WfsAltitudeMode, WfsFeatureIndex,
+    WfsMatchPriority, WfsMeshOptions, WfsPaint, WfsPredicate, WfsRenderError, WfsRgba, WfsScalar,
+    WfsStyleRule, WfsStyleSheet, WfsVisibility, WgpuWfsDraw, WgpuWfsFeatures, WgpuWfsPipeline,
 };

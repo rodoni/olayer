@@ -28,6 +28,9 @@ export {
   decode_mapbox_rgb,
   decode_terrarium_rgb,
   decode_rgb_elevation,
+  map_build_request_json,
+  map_parse_capabilities_json,
+  map_validate_model_json,
 } from "olayer-wasm";
 
 // Export SDK Controller
@@ -53,6 +56,16 @@ export {
   VolumetricAirspaceLayer,
   TrajectoryRibbonLayer,
 } from "./layers";
+export type { TerrainLodOptions, TerrainLodResult } from "./layers/terrain_mesh";
+export type {
+  WfsColor,
+  WfsMatchPriority,
+  WfsPaint,
+  WfsPredicate,
+  WfsScalar,
+  WfsStyleRule,
+  WfsStyleSheet,
+} from "./layers/wfs_style";
 export type {
   WmsLayerOptions,
   WfsLayerOptions,
@@ -113,3 +126,4 @@ export type {
   HistoryDot,
 } from "./tools";
 export { WcsTerrainSource } from "./map_provider/wcs_terrain";
+export type { GeoidUndulationProvider, WcsElevationInterpretation, WcsElevationUnit, WcsGridRegistration, WcsVerticalReference } from "./map_provider/wcs_terrain";

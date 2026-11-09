@@ -129,7 +129,7 @@ export class OgcHttpClient {
     const maxResponseBytes = options.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES;
     if (!Number.isInteger(maxRetries) || maxRetries < 0) throw new RangeError("maxRetries must be non-negative");
     if (options.timeoutMs !== undefined && (!Number.isInteger(options.timeoutMs) || options.timeoutMs <= 0)) throw new RangeError("timeoutMs must be positive");
-    if (!Number.isInteger(maxResponseBytes) || maxResponseBytes <= 0) throw new RangeError("maxResponseBytes must be positive");
+    if (!Number.isSafeInteger(maxResponseBytes) || maxResponseBytes <= 0) throw new RangeError("maxResponseBytes must be a positive safe integer");
     this.#maxRetries = maxRetries;
     this.#timeoutMs = options.timeoutMs;
     this.#maxResponseBytes = maxResponseBytes;
@@ -179,11 +179,39 @@ export class OgcHttpClient {
       if (!response.ok) throw new OgcHttpError(response.status, url);
       const contentLength = response.headers.get("content-length");
       if (contentLength !== null && Number(contentLength) > this.#maxResponseBytes) {
+        void response.body?.cancel().catch(() => undefined);
         throw new OgcResponseLimitError(this.#maxResponseBytes);
       }
-      const bytes = new Uint8Array(await response.arrayBuffer());
-      if (bytes.byteLength > this.#maxResponseBytes) throw new OgcResponseLimitError(this.#maxResponseBytes);
-      return bytes;
+      if (response.body === null) return new Uint8Array();
+      const reader = response.body.getReader();
+      const chunks: Uint8Array[] = [];
+      let total = 0;
+      try {
+        while (true) {
+          throwIfAborted(requestSignal);
+          const next = await reader.read();
+          throwIfAborted(requestSignal);
+          if (next.done) break;
+          if (next.value.byteLength > this.#maxResponseBytes - total) {
+            throw new OgcResponseLimitError(this.#maxResponseBytes);
+          }
+          total += next.value.byteLength;
+          chunks.push(next.value);
+        }
+      } catch (error: unknown) {
+        // Preserve the original error even when transport cleanup itself fails.
+        void reader.cancel().catch(() => undefined);
+        throw error;
+      } finally {
+        reader.releaseLock();
+      }
+      const result = new Uint8Array(total);
+      let offset = 0;
+      for (const chunk of chunks) {
+        result.set(chunk, offset);
+        offset += chunk.byteLength;
+      }
+      return result;
     } catch (error: unknown) {
       if (controller?.signal.aborted && !signal?.aborted) throw new OgcTimeoutError(this.#timeoutMs ?? 0);
       throw error;

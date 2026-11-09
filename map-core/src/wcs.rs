@@ -120,6 +120,12 @@ impl WcsRequestBuilder {
         let bounds = self
             .bounds
             .ok_or_else(|| MapError::new(INVALID_WCS, "bounds are required"))?;
+        if bounds.crs != crs {
+            return Err(MapError::new(
+                INVALID_WCS,
+                "bounds CRS conflicts with request CRS",
+            ));
+        }
         Ok(WcsGetCoverageRequest {
             endpoint: self.endpoint,
             coverage_id: self.coverage_id,

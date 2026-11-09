@@ -4,7 +4,7 @@ The browser `WfsLayer` and native `WgpuWfsFeatures` render an already-fetched WF
 
 ## Geometry and coordinate contract
 
-- Supported geometries: Point, MultiPoint, LineString, MultiLineString, Polygon, MultiPolygon and GeometryCollection. Null geometries are skipped. Points draw crosses in projected metres or the local ECEF tangent plane. Lines and independent polygon rings draw one-pixel strokes. Polygon holes are outlined separately. Optional `fillPolygons`/`fill_polygons` now fills validated interiors, preserving holes; see [polygon fills](#polygon-fills-and-interior-holes). Per-feature styles remain pending.
+- Supported geometries: Point, MultiPoint, LineString, MultiLineString, Polygon, MultiPolygon and GeometryCollection. Null geometries are skipped. Points draw crosses in projected metres or the local ECEF tangent plane. Lines and independent polygon rings draw one-pixel strokes. Polygon holes are outlined separately. Optional `fillPolygons`/`fill_polygons` fills validated interiors, preserving holes; see [polygon fills](#polygon-fills-and-interior-holes). A bounded opt-in property style sheet is available below.
 - Source positions are `[x,y]` or `[x,y,height]`. EPSG:4326 uses longitude/latitude degrees. EPSG:3857 and EPSG:900913 use Web Mercator metres. The SDK adapters normalize to latitude/longitude radians. ECEF source coordinates and additional measure axes are rejected.
 - The request CRS is explicit. Named GeoJSON CRS metadata must match it. `EPSG:4326`, `urn:ogc:def:crs:EPSG::4326` and `http(s)://www.opengis.net/def/crs/EPSG/0/4326` are recognized forms (likewise for the other supported EPSG codes). Other metadata forms are rejected. Without metadata, the response is interpreted in the requested CRS.
 - Closed rings need at least four positions; nonempty lines need at least two. Positions must be finite and within the CRS domain. Invalid geometry rejects the collection, preserving an installed browser collection. Paths crossing the antimeridian must be split before rendering.
@@ -125,6 +125,29 @@ features.render(&pipeline, &mut pass);
 ```
 
 `set_view` resets fill color to the supplied stroke color; call `set_fill_color` afterward for a separate fill style. One pipeline stores one view/style per submission, as before. Fill and outline buffers share the same bind group, with triangle/line pipeline variants for planar layer order and perspective depth. The feature handle caches validated source triangles. `build_wfs_fill_mesh` exposes the same operation without a GPU.
+
+### Bounded per-feature property styling
+
+WFS layers accept an optional complete style sheet. When omitted, the existing layer-wide `color`/`fillColor` and `fillPolygons` behavior is unchanged. A style sheet cannot be mixed with those legacy paint options.
+
+```ts
+const layer = new WfsLayer("areas", source, {
+  style: {
+    defaultPaint: { visibility: "visible", stroke: [1, 1, 1, 1], fill: [0.1, 0.3, 0.8, 1] },
+    priority: "first-match",
+    rules: [{
+      predicate: { kind: "equals", property: "class", value: "restricted" },
+      paint: { visibility: "visible", stroke: [1, 0, 0, 1], fill: [0.8, 0.1, 0.1, 1] },
+    }],
+  },
+});
+```
+
+Predicates access literal, case-sensitive own property names only. `exists` matches present null, scalar, array or object values; `equals` is strict JSON-scalar equality, with no coercion. Missing properties do not match. The first matching rule wins by default; `last-match` selects the final matching rule. Paints are complete rather than cascading: absent stroke/fill disables that channel. RGBA channels are finite normalized straight-alpha values; zero alpha emits no draw. Limits include 64 rules, 256 UTF-8 bytes per property key, 4096 bytes per string operand, 100,000 features, and aggregate geometry/topology/output/draw-range budgets.
+
+Style replacement is atomic and does not refetch data or retriangulate polygons. Geometry is validated even for hidden features; collection indices, not optional/duplicate GeoJSON IDs, associate paints with prepared ranges. Draw order remains all fills followed by all strokes, preserving feature order within each phase.
+
+Browser `WfsLayer.setStyle(sheetOrNull)` replaces paints; `null` restores the sheetless legacy path. Native’s opt-in prepared path is `PreparedWfsFeatures::new` → `prepare_draw` → `WgpuWfsDraw::render`. It creates immutable per-range uniform bindings, so subsequent paint changes do not mutate a draw already encoded for submission. The legacy `WgpuWfsFeatures` renderer remains single-paint and keeps its existing behavior.
 
 Adding `fill_polygons` extends the Rust options struct. Existing callers using `..Default::default()` need no changes; exhaustive struct literals must add `fill_polygons: false` to retain outline-only rendering.
 

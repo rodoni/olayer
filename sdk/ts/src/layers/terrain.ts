@@ -1,15 +1,26 @@
-import { buildTerrainGrid } from "./terrain_mesh";
+import { buildTerrainGrid, buildTerrainGridWithLod } from "./terrain_mesh";
+import type { TerrainLodOptions, TerrainLodResult } from "./terrain_mesh";
+import type { WmsMeshContext } from "./wms_mesh";
 import { drawWithLayerDepth } from "./depth_state";
 import { Layer } from "./layer";
 import type { LayerRenderContext } from "./layer";
 import type { OlayerController } from "../controller";
-import { lla_to_ecef, WasmProjection } from "olayer-wasm";
+import { ecef_to_lla, lla_to_ecef, WasmProjection } from "olayer-wasm";
 
 interface TerrainMesh {
   vao: WebGLVertexArrayObject;
   vertexBuffer: WebGLBuffer;
   indexBuffer: WebGLBuffer;
   indexCount: number;
+  readonly vertices: Float32Array;
+  readonly indices: Uint32Array;
+  readonly gridSize: number;
+  readonly centerLat: number;
+  readonly centerLon: number;
+  readonly latSpan: number;
+  readonly lonSpan: number;
+  readonly viewMode: string;
+  readonly validCells: Uint8Array;
 }
 
 export type TerrainRenderMode = "hypsometric" | "hillshade" | "slope" | "hybrid" | "textured" | "taws";
@@ -26,6 +37,8 @@ export interface HillshadeOptions {
  */
 export class TerrainLayer extends Layer {
   private readonly gridSize: number;
+  private lodOptions: TerrainLodOptions | null = null;
+  private lodReport: Omit<TerrainLodResult, "vertices" | "indices"> | null = null;
   private mesh: TerrainMesh | null = null;
   private program: WebGLProgram | null = null;
   private lastKey = "";
@@ -69,6 +82,72 @@ export class TerrainLayer extends Layer {
 
   public getVerticalExaggeration(): number {
     return this.verticalExaggeration;
+  }
+
+  /** Opt into bounded sampled whole-grid LOD; `null` restores the fixed-resolution mesh. */
+  public setLod(options: TerrainLodOptions | null): void {
+    if (options !== null && (!Number.isFinite(options.targetErrorMeters) || options.targetErrorMeters < 0
+      || !Number.isSafeInteger(options.maxSubdivisions) || options.maxSubdivisions < this.gridSize || options.maxSubdivisions > 64
+      || !Number.isInteger(options.maxSubdivisions / this.gridSize) || !Number.isInteger(Math.log2(options.maxSubdivisions / this.gridSize))
+      || !Number.isSafeInteger(options.maxSourceSamples) || options.maxSourceSamples < (this.gridSize + 1) ** 2 || options.maxSourceSamples > 4_225)) {
+      throw new RangeError("Invalid terrain LOD options for this layer grid");
+    }
+    this.lodOptions = options === null ? null : { ...options };
+    this.lodReport = null;
+    this.lastKey = "";
+  }
+
+  /** Last sampled adaptive result; null before a successful adaptive build or on the fixed path. */
+  public getLodReport(): Omit<TerrainLodResult, "vertices" | "indices"> | null {
+    return this.lodReport === null ? null : { ...this.lodReport };
+  }
+
+  /**
+   * Samples the currently installed rendered terrain mesh, not the source elevation grid.
+   * In 3D this returns ellipsoidal height from the selected ECEF triangle. Unknown cells,
+   * points outside this local patch and the 2D mode return null.
+   */
+  public getMeshHeightAt(latRad: number, lonRad: number): number | null {
+    const mesh = this.mesh;
+    if (!mesh || mesh.viewMode === "2D" || !Number.isFinite(latRad) || !Number.isFinite(lonRad)
+      || Math.abs(latRad) > Math.PI / 2) return null;
+    const longitudeDelta = ((lonRad - mesh.centerLon + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
+    const rowPosition = (0.5 - (latRad - mesh.centerLat) / mesh.latSpan) * mesh.gridSize;
+    const columnPosition = (0.5 + longitudeDelta / mesh.lonSpan) * mesh.gridSize;
+    if (rowPosition < 0 || rowPosition > mesh.gridSize || columnPosition < 0 || columnPosition > mesh.gridSize) return null;
+    const width = mesh.gridSize + 1;
+    const baseRow = Math.min(mesh.gridSize - 1, Math.floor(rowPosition));
+    const baseColumn = Math.min(mesh.gridSize - 1, Math.floor(columnPosition));
+    const rows = rowPosition === Math.floor(rowPosition) && baseRow > 0 ? [baseRow, baseRow - 1] : [baseRow];
+    const columns = columnPosition === Math.floor(columnPosition) && baseColumn > 0 ? [baseColumn, baseColumn - 1] : [baseColumn];
+    const valueAt = (vertex: number, axis: number): number => mesh.vertices[vertex * 10 + axis] ?? Number.NaN;
+    for (const row of rows) for (const column of columns) {
+      if (mesh.validCells[row * mesh.gridSize + column] !== 1) {
+        continue;
+      }
+      const t = rowPosition - row, u = columnPosition - column;
+      const topLeft = row * width + column, topRight = topLeft + 1;
+      const bottomLeft = topLeft + width, bottomRight = bottomLeft + 1;
+      const triangle = u + t <= 1
+        ? { indices: [topLeft, topRight, bottomLeft] as const, weights: [1 - u - t, u, t] as const }
+        : { indices: [topRight, bottomRight, bottomLeft] as const, weights: [1 - t, u + t - 1, 1 - u] as const };
+      if (mesh.viewMode !== "3D") {
+        const height = triangle.indices.reduce((sum, vertex, index) => sum + valueAt(vertex, 2) * triangle.weights[index]!, 0);
+        if (Number.isFinite(height)) return height;
+        continue;
+      }
+      const x = triangle.indices.reduce((sum, vertex, index) => sum + valueAt(vertex, 0) * triangle.weights[index]!, 0);
+      const y = triangle.indices.reduce((sum, vertex, index) => sum + valueAt(vertex, 1) * triangle.weights[index]!, 0);
+      const z = triangle.indices.reduce((sum, vertex, index) => sum + valueAt(vertex, 2) * triangle.weights[index]!, 0);
+      if (![x, y, z].every(Number.isFinite)) continue;
+      const coordinate = ecef_to_lla(x, y, z);
+      try {
+        if (Number.isFinite(coordinate.height)) return coordinate.height;
+      } finally {
+        coordinate.free();
+      }
+    }
+    return null;
   }
 
   public setRenderMode(mode: TerrainRenderMode): void {
@@ -281,7 +360,8 @@ export class TerrainLayer extends Layer {
     const version = projection.version();
     const key = [controller.getViewMode(), controller.getCenterLat(), controller.getCenterLon(),
       camera.zoom, camera.viewport_base_meters, this.verticalExaggeration, version,
-      controller.terrainEngine.revision()].join(":");
+      controller.terrainEngine.revision(), this.lodOptions?.targetErrorMeters ?? "fixed",
+      this.lodOptions?.maxSubdivisions ?? "", this.lodOptions?.maxSourceSamples ?? ""].join(":");
     camera.free();
     return key;
   }
@@ -294,18 +374,35 @@ export class TerrainLayer extends Layer {
     const latSpan = Math.min(Math.PI / 3, spanMeters / 111_000.0 / 2 * Math.PI / 180);
     const lonSpan = latSpan / Math.max(0.15, Math.cos(centerLat));
     const tile = this.imageryTile(controller);
-    const { vertices, indices } = buildTerrainGrid(this.gridSize, centerLat, centerLon, latSpan, lonSpan, {
+    const context: WmsMeshContext = {
       viewMode: controller.getViewMode(), centerLat, centerLon, zoom: camera.zoom,
       project: (lat, lon) => controller.projection.project(lat, lon, 0),
       elevation: (lat, lon) => {
         try {
-          const sample: unknown = controller.terrainEngine.get_elevation_status(lat, lon);
+          const wrappedLon = ((lon + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
+          const sample: unknown = controller.terrainEngine.get_elevation_status(lat, wrappedLon);
           if (typeof sample !== "object" || sample === null || !("elevation_meters" in sample)) return null;
           return typeof sample.elevation_meters === "number" ? sample.elevation_meters : null;
         } catch { return null; }
       },
-    }, this.verticalExaggeration, (lat, lon) => this.imageryUv(lat, lon, tile));
-    camera.free();
+    };
+    let result: { vertices: Float32Array; indices: Uint32Array };
+    let nextLodReport: Omit<TerrainLodResult, "vertices" | "indices"> | null = null;
+    try {
+      if (this.lodOptions === null) {
+        result = buildTerrainGrid(this.gridSize, centerLat, centerLon, latSpan, lonSpan, context,
+          this.verticalExaggeration, (lat, lon) => this.imageryUv(lat, lon, tile));
+      } else {
+        const adaptive = buildTerrainGridWithLod(this.gridSize, centerLat, centerLon, latSpan, lonSpan,
+          context, this.verticalExaggeration, (lat, lon) => this.imageryUv(lat, lon, tile), this.lodOptions);
+        result = adaptive;
+        const { vertices: _vertices, indices: _indices, ...report } = adaptive;
+        nextLodReport = report;
+      }
+    } finally {
+      camera.free();
+    }
+    const { vertices, indices } = result;
 
     this.disposeMesh(gl);
     const vao = gl.createVertexArray()!;
@@ -336,12 +433,24 @@ export class TerrainLayer extends Layer {
     gl.enableVertexAttribArray(uvLocation);
     gl.vertexAttribPointer(uvLocation, 2, gl.FLOAT, false, stride, 32);
     gl.bindVertexArray(null);
-    this.mesh = { vao, vertexBuffer, indexBuffer, indexCount: indices.length };
+    const gridSize = nextLodReport?.gridSize ?? this.gridSize;
+    const validCells = new Uint8Array(gridSize * gridSize);
+    for (let offset = 0; offset + 5 < indices.length; offset += 6) {
+      const first = indices[offset];
+      if (first === undefined) continue;
+      const row = Math.floor(first / (gridSize + 1));
+      const column = first % (gridSize + 1);
+      if (row < gridSize && column < gridSize) validCells[row * gridSize + column] = 1;
+    }
+    this.mesh = {
+      vao, vertexBuffer, indexBuffer, indexCount: indices.length, vertices, indices,
+      gridSize, centerLat, centerLon, latSpan, lonSpan, viewMode: controller.getViewMode(), validCells,
+    };
+    this.lodReport = nextLodReport;
   }
 
   private imageryTile(controller: OlayerController): { z: number; x: number; y: number } {
-    const camera = controller.getCameraState();
-    const spanMeters = (controller.getViewMode() === "3D" ? 30000000 : camera.viewport_base_meters) / camera.zoom;
+    const spanMeters = (controller.getViewMode() === "3D" ? 30000000 : controller.getViewportBaseMeters()) / controller.getZoom();
     const latSpan = Math.min(Math.PI / 3, spanMeters / 111_000.0 / 2 * Math.PI / 180);
     const centerLat = controller.getCenterLat();
     const lonSpan = latSpan / Math.max(0.15, Math.cos(centerLat));
@@ -354,7 +463,6 @@ export class TerrainLayer extends Layer {
     const x = Math.floor((lon * 180 / Math.PI + 180) / 360 * n);
     const mercatorY = (1 - Math.asinh(Math.tan(lat)) / Math.PI) / 2;
     const y = Math.floor(mercatorY * n);
-    camera.free();
     return { z, x: Math.max(0, Math.min(n - 1, x)), y: Math.max(0, Math.min(n - 1, y)) };
   }
 
@@ -393,7 +501,6 @@ export class TerrainLayer extends Layer {
     const controller = context?.controller;
     if (!controller) return;
     if (controller.getViewMode() === "2D") return;
-
     this.initWebGL(gl);
     this.ensureImagery(gl, controller);
     const key = this.getMeshKey(controller);

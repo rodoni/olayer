@@ -1,5 +1,5 @@
 use crate::native_controller::NativeController;
-use olayer_core::geodesy::LatLon;
+use olayer_core::{geodesy::LatLon, terrain::TerrainError};
 use wgpu::util::DeviceExt;
 
 pub mod wms;
@@ -19,6 +19,38 @@ pub struct TerrainVertex {
     pub elevation: f32,
     pub slope: f32,
     pub terrain_known: f32,
+}
+
+/// Opt-in limits for sampled, whole-grid terrain LOD. Subdivisions select powers of two up to 64.
+/// Bounds the source lattice and sampled geometric error used by opt-in terrain LOD.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TerrainLodOptions {
+    /// Nonnegative sampled 3D position residual threshold in metres.
+    pub target_error_meters: f64,
+    /// Maximum subdivision level; must be a power of two in `1..=64`.
+    pub max_subdivisions: u32,
+    /// Maximum source-lattice samples, bounded to 4,225.
+    pub max_source_samples: u32,
+}
+
+/// Diagnostics for the sampled (not globally guaranteed) terrain LOD decision.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TerrainLodReport {
+    pub chosen_subdivisions: u32,
+    pub triangle_count: u32,
+    pub samples: u32,
+    /// Largest residual across all tested candidate levels; `None` means no valid probes.
+    pub max_observed_error: Option<f64>,
+    pub threshold_satisfied: bool,
+    pub has_unknown: bool,
+    pub budget_limited: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TerrainLodError {
+    InvalidOptions,
+    TerrainQueryFailed,
+    ProjectionFailed,
 }
 
 pub struct WgpuRasterTile {
@@ -52,13 +84,129 @@ struct TerrainCacheKey {
     zoom: u64,
     rotation: u64,
     pitch: u64,
+    roll: u64,
     aspect_ratio: u64,
     viewport_base_meters: u64,
     exaggeration: u32,
+    lod: Option<(u64, u32, u32)>,
+    projection_reference: [u64; 6],
+}
+
+#[derive(Clone, Copy, Debug)]
+struct TerrainMeshFootprint {
+    center_lat: f64,
+    center_lon: f64,
+    lat_span: f64,
+    lon_span: f64,
+    subdivisions: u32,
+    view_mode: &'static str,
+}
+
+fn sample_terrain_mesh_height(
+    vertices: &[TerrainVertex],
+    footprint: TerrainMeshFootprint,
+    lat_rad: f64,
+    lon_rad: f64,
+) -> Option<f64> {
+    if footprint.view_mode == "2D"
+        || !lat_rad.is_finite()
+        || !lon_rad.is_finite()
+        || lat_rad.abs() > std::f64::consts::FRAC_PI_2
+        || footprint.subdivisions == 0
+        || footprint.lat_span <= 0.0
+        || footprint.lon_span <= 0.0
+    {
+        return None;
+    }
+    let lon_delta = (lon_rad - footprint.center_lon + std::f64::consts::PI)
+        .rem_euclid(std::f64::consts::TAU)
+        - std::f64::consts::PI;
+    let row_position = (0.5 - (lat_rad - footprint.center_lat) / footprint.lat_span)
+        * f64::from(footprint.subdivisions);
+    let column_position =
+        (0.5 + lon_delta / footprint.lon_span) * f64::from(footprint.subdivisions);
+    let grid = f64::from(footprint.subdivisions);
+    if row_position < 0.0 || row_position > grid || column_position < 0.0 || column_position > grid
+    {
+        return None;
+    }
+    // Both floored coordinates were checked above to lie in [0, subdivisions], with a hard max of 64.
+    let row =
+        usize::try_from((row_position.floor() as u32).min(footprint.subdivisions - 1)).ok()?;
+    let column =
+        usize::try_from((column_position.floor() as u32).min(footprint.subdivisions - 1)).ok()?;
+    let subdivisions = usize::try_from(footprint.subdivisions).ok()?;
+    let cell_offset = row
+        .checked_mul(subdivisions)?
+        .checked_add(column)?
+        .checked_mul(6)?;
+    let cell = vertices.get(cell_offset..cell_offset.checked_add(6)?)?;
+    let u = column_position - f64::from(u32::try_from(column).ok()?);
+    let v = row_position - f64::from(u32::try_from(row).ok()?);
+    let (triangle, weights) = if u + v <= 1.0 {
+        ([0, 1, 2], [1.0 - u - v, u, v])
+    } else {
+        ([3, 4, 5], [1.0 - v, u + v - 1.0, 1.0 - u])
+    };
+    let triangle = triangle.map(|index| cell[index]);
+    if triangle.iter().any(|vertex| vertex.terrain_known < 0.5) {
+        return None;
+    }
+    if footprint.view_mode != "3D" {
+        let height = triangle
+            .iter()
+            .zip(weights)
+            .map(|(vertex, weight)| f64::from(vertex.position[2]) * weight)
+            .sum::<f64>();
+        return height.is_finite().then_some(height);
+    }
+    let ecef: [f64; 3] = std::array::from_fn(|axis| {
+        triangle
+            .iter()
+            .zip(weights)
+            .map(|(vertex, weight)| f64::from(vertex.position[axis]) * weight)
+            .sum()
+    });
+    let geodetic = olayer_core::geodesy::ecef_to_lla(
+        &olayer_core::geodesy::Ecef::new(ecef[0], ecef[1], ecef[2]),
+        &olayer_core::geodesy::ellipsoid::Ellipsoid::wgs84(),
+    );
+    geodetic.height.is_finite().then_some(geodetic.height)
+}
+
+fn wrap_longitude_radians(lon: f64) -> f64 {
+    (lon + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI
 }
 
 impl TerrainCacheKey {
-    fn new(controller: &NativeController, exaggeration: f32) -> Self {
+    fn new(
+        controller: &NativeController,
+        exaggeration: f32,
+        lod: Option<TerrainLodOptions>,
+    ) -> Self {
+        let lat = controller.camera.center.lat;
+        let lon = controller.camera.center.lon;
+        let probe_lat = (lat + 0.05).min(std::f64::consts::FRAC_PI_2 - 0.001);
+        let probe_lon = (lon + 0.05 + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU)
+            - std::f64::consts::PI;
+        let mut projection_reference = [0_u64; 6];
+        for (slot, coordinate) in [
+            LatLon::new(lat, lon, 0.0),
+            LatLon::new(probe_lat, lon, 0.0),
+            LatLon::new(lat, probe_lon, 0.0),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let offset = slot * 2;
+            if let Ok((x, y)) = controller.projection.project(&coordinate) {
+                projection_reference[offset] = x.to_bits();
+                projection_reference[offset + 1] = y.to_bits();
+            } else {
+                projection_reference[offset] = u64::MAX;
+                projection_reference[offset + 1] = u64::MAX;
+            }
+        }
         Self {
             terrain_revision: controller.terrain.revision(),
             view_mode: controller.view_mode.clone(),
@@ -67,9 +215,18 @@ impl TerrainCacheKey {
             zoom: controller.camera.zoom.to_bits(),
             rotation: controller.camera.rotation.to_bits(),
             pitch: controller.camera.pitch.to_bits(),
+            roll: controller.camera.roll.to_bits(),
             aspect_ratio: controller.camera.aspect_ratio.to_bits(),
             viewport_base_meters: controller.camera.viewport_base_meters.to_bits(),
             exaggeration: exaggeration.to_bits(),
+            lod: lod.map(|options| {
+                (
+                    options.target_error_meters.to_bits(),
+                    options.max_subdivisions,
+                    options.max_source_samples,
+                )
+            }),
+            projection_reference,
         }
     }
 }
@@ -125,6 +282,10 @@ pub struct WgpuGpuPipeline {
     pub terrain_vertices_len: usize,
     pub terrain_style_buffer: wgpu::Buffer,
     terrain_cache_key: Option<TerrainCacheKey>,
+    terrain_lod_options: Option<TerrainLodOptions>,
+    terrain_lod_report: Option<TerrainLodReport>,
+    terrain_cpu_vertices: Vec<TerrainVertex>,
+    terrain_footprint: Option<TerrainMeshFootprint>,
 }
 
 impl WgpuGpuPipeline {
@@ -612,6 +773,10 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             terrain_vertices_len: 0,
             terrain_style_buffer,
             terrain_cache_key: None,
+            terrain_lod_options: None,
+            terrain_lod_report: None,
+            terrain_cpu_vertices: Vec::new(),
+            terrain_footprint: None,
         }
     }
 
@@ -792,7 +957,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                 let lon = controller.camera.center.lon + (u - 0.5) * lon_span;
                 let elevation = controller
                     .terrain
-                    .get_elevation_status(lat, lon)
+                    .get_elevation_status(lat, wrap_longitude_radians(lon))
                     .ok()
                     .and_then(|sample| sample.elevation_meters)
                     .filter(|elevation| elevation.is_finite());
@@ -930,6 +1095,325 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         vertices
     }
 
+    /// Generates terrain with opt-in, bounded whole-grid LOD. Error is evaluated only at
+    /// sampled lattice points; this is a diagnostic estimate, not a global error bound.
+    pub fn generate_terrain_vertices_with_lod(
+        controller: &NativeController,
+        exaggeration: f32,
+        options: TerrainLodOptions,
+    ) -> Result<(Vec<TerrainVertex>, TerrainLodReport), TerrainLodError> {
+        if !options.target_error_meters.is_finite()
+            || options.target_error_meters < 0.0
+            || options.max_subdivisions == 0
+            || options.max_subdivisions > 64
+            || !options.max_subdivisions.is_power_of_two()
+            || options.max_source_samples == 0
+            || options.max_source_samples < 4
+            || options.max_source_samples > 4_225
+            || !exaggeration.is_finite()
+            || exaggeration < 0.0
+        {
+            return Err(TerrainLodError::InvalidOptions);
+        }
+        let source_limit = options.max_source_samples;
+        let max_level = options.max_subdivisions;
+        let mut level = 1u32;
+        let mut candidates = Vec::with_capacity(7);
+        while level <= max_level {
+            let required = level
+                .checked_add(1)
+                .and_then(|side| side.checked_mul(side))
+                .ok_or(TerrainLodError::InvalidOptions)?;
+            if required > source_limit {
+                break;
+            }
+            candidates.push(level);
+            level = level.saturating_mul(2);
+        }
+        if candidates.is_empty() {
+            return Err(TerrainLodError::InvalidOptions);
+        }
+        let finest = candidates.last().copied().unwrap_or(1);
+        // Sample one lattice, capped at 65×65 = 4,225 points.
+        let grid = finest;
+        let span_meters = if controller.view_mode == "3D" {
+            30_000_000.0 / controller.camera.zoom
+        } else {
+            controller.camera.viewport_base_meters / controller.camera.zoom
+        };
+        let lat_span = (span_meters / 111_000.0 / 2.0)
+            .to_radians()
+            .min(60.0f64.to_radians());
+        let lon_span = lat_span / controller.camera.center.lat.cos().abs().max(0.15);
+        let side = usize::try_from(grid + 1).map_err(|_| TerrainLodError::InvalidOptions)?;
+        let mut heights = Vec::with_capacity(side * side);
+        let mut positions = Vec::with_capacity(side * side);
+        let mut has_unknown = false;
+        for row in 0..=grid {
+            let v = f64::from(row) / f64::from(grid);
+            let lat = controller.camera.center.lat + (0.5 - v) * lat_span;
+            for column in 0..=grid {
+                let u = f64::from(column) / f64::from(grid);
+                let lon = controller.camera.center.lon + (u - 0.5) * lon_span;
+                let sample = match controller
+                    .terrain
+                    .get_elevation_status(lat, wrap_longitude_radians(lon))
+                {
+                    Ok(sample) => Some(sample),
+                    Err(TerrainError::TileNotLoaded(_, _)) => None,
+                    Err(_) => return Err(TerrainLodError::TerrainQueryFailed),
+                };
+                let height = sample
+                    .and_then(|sample| sample.elevation_meters)
+                    .filter(|value| value.is_finite() && value.abs() <= f64::from(f32::MAX));
+                has_unknown |= height.is_none();
+                heights.push(height);
+                let z = if controller.view_mode == "2D" {
+                    0.0
+                } else {
+                    height.unwrap_or(0.0) * f64::from(exaggeration)
+                };
+                let position = if controller.view_mode == "3D" {
+                    let ecef = olayer_core::geodesy::lla_to_ecef(
+                        &LatLon::new(lat, lon, z),
+                        &olayer_core::geodesy::ellipsoid::Ellipsoid::wgs84(),
+                    );
+                    [ecef.x, ecef.y, ecef.z]
+                } else {
+                    let (x, y) = controller
+                        .projection
+                        .project(&LatLon::new(lat, lon, 0.0))
+                        .map_err(|_| TerrainLodError::ProjectionFailed)?;
+                    [x, y, z]
+                };
+                if position
+                    .iter()
+                    .any(|value| !value.is_finite() || value.abs() > f64::from(f32::MAX))
+                {
+                    return Err(TerrainLodError::InvalidOptions);
+                }
+                positions.push(position);
+            }
+        }
+        let mut chosen = finest;
+        let mut observed = None;
+        let mut satisfied = false;
+        for candidate in candidates.iter().copied() {
+            let stride = grid / candidate;
+            let mut maximum: f64 = 0.0;
+            let mut comparable = true;
+            let mut has_probe = false;
+            for row in 0..=grid {
+                for column in 0..=grid {
+                    if row % stride == 0 && column % stride == 0 {
+                        continue;
+                    }
+                    let row = row as usize;
+                    let column = column as usize;
+                    let stride = stride as usize;
+                    let r0 = (row / stride * stride).min(grid as usize - stride);
+                    let c0 = (column / stride * stride).min(grid as usize - stride);
+                    let r1 = r0 + stride;
+                    let c1 = c0 + stride;
+                    let indices = [
+                        r0 * side + c0,
+                        r0 * side + c1,
+                        r1 * side + c0,
+                        r1 * side + c1,
+                    ];
+                    if indices.iter().any(|index| heights[*index].is_none())
+                        || heights[row * side + column].is_none()
+                    {
+                        comparable = false;
+                        continue;
+                    }
+                    has_probe = true;
+                    let tx = (column - c0) as f64 / stride as f64;
+                    let ty = (row - r0) as f64 / stride as f64;
+                    let [tl, tr, bl, br] = indices.map(|index| positions[index]);
+                    let interp: [f64; 3] = if tx + ty <= 1.0 {
+                        std::array::from_fn(|axis| {
+                            tl[axis] * (1.0 - tx - ty) + tr[axis] * tx + bl[axis] * ty
+                        })
+                    } else {
+                        std::array::from_fn(|axis| {
+                            br[axis] * (tx + ty - 1.0)
+                                + tr[axis] * (1.0 - ty)
+                                + bl[axis] * (1.0 - tx)
+                        })
+                    };
+                    let actual = positions[row * side + column];
+                    let error = (0..3)
+                        .map(|axis| (actual[axis] - interp[axis]).powi(2))
+                        .sum::<f64>()
+                        .sqrt();
+                    maximum = maximum.max(error);
+                }
+            }
+            if has_probe {
+                observed = Some(maximum);
+            }
+            chosen = candidate;
+            if has_probe && comparable && !has_unknown && maximum <= options.target_error_meters {
+                satisfied = true;
+                break;
+            }
+        }
+        let stride = grid / chosen;
+        let chosen_side =
+            usize::try_from(chosen + 1).map_err(|_| TerrainLodError::InvalidOptions)?;
+        let mut mesh = Vec::with_capacity(chosen as usize * chosen as usize * 6);
+        let spacing = (lat_span * 6_378_137.0 / f64::from(chosen)).max(1.0);
+        let vertex_at = |row: usize, column: usize| -> TerrainVertex {
+            let fine_row = row * stride as usize;
+            let fine_column = column * stride as usize;
+            let index = fine_row * side + fine_column;
+            let elevation = heights[index];
+            let center = elevation.unwrap_or(0.0);
+            let east = terrain_axis_slope(
+                column
+                    .checked_sub(1)
+                    .and_then(|left| heights[fine_row * side + (left * stride as usize)]),
+                column
+                    .checked_add(1)
+                    .filter(|right| *right <= chosen as usize)
+                    .and_then(|right| heights[fine_row * side + (right * stride as usize)]),
+                center,
+                spacing,
+            );
+            let north = row
+                .checked_sub(1)
+                .and_then(|north_row| heights[(north_row * stride as usize) * side + fine_column]);
+            let south = row
+                .checked_add(1)
+                .filter(|south_row| *south_row <= chosen as usize)
+                .and_then(|south_row| heights[(south_row * stride as usize) * side + fine_column]);
+            let south_slope = terrain_axis_slope(north, south, center, spacing);
+            let local_normal = [-east, south_slope, 1.0];
+            let normal_length = local_normal
+                .iter()
+                .map(|component| component * component)
+                .sum::<f64>()
+                .sqrt();
+            let lat =
+                controller.camera.center.lat + (0.5 - row as f64 / f64::from(chosen)) * lat_span;
+            let lon =
+                controller.camera.center.lon + (column as f64 / f64::from(chosen) - 0.5) * lon_span;
+            let normal = if controller.view_mode == "3D" {
+                local_normal_to_ecef(
+                    lat,
+                    lon,
+                    [
+                        local_normal[0] / normal_length,
+                        local_normal[1] / normal_length,
+                        local_normal[2] / normal_length,
+                    ],
+                )
+            } else {
+                [
+                    (local_normal[0] / normal_length) as f32,
+                    (local_normal[1] / normal_length) as f32,
+                    (local_normal[2] / normal_length) as f32,
+                ]
+            };
+            let position = positions[index].map(|value| value as f32);
+            TerrainVertex {
+                position,
+                normal,
+                elevation: center as f32,
+                slope: east.hypot(south_slope).atan().to_degrees() as f32,
+                terrain_known: if elevation.is_some() { 1.0 } else { 0.0 },
+            }
+        };
+        let mut vertices = Vec::with_capacity(chosen_side * chosen_side);
+        for row in 0..chosen_side {
+            for column in 0..chosen_side {
+                vertices.push(vertex_at(row, column));
+            }
+        }
+        for out_row in 0..chosen as usize {
+            for out_column in 0..chosen as usize {
+                let r = out_row * stride as usize;
+                let c = out_column * stride as usize;
+                let indices = [
+                    out_row * chosen_side + out_column,
+                    out_row * chosen_side + out_column + 1,
+                    (out_row + 1) * chosen_side + out_column,
+                    (out_row + 1) * chosen_side + out_column + 1,
+                ];
+                let mut known = indices.iter().all(|index| heights[*index].is_some());
+                // An unknown source sample anywhere inside the coarse cell must not be bridged.
+                for fine_row in r..=r + stride as usize {
+                    for fine_column in c..=c + stride as usize {
+                        if heights[fine_row * side + fine_column].is_none() {
+                            known = false;
+                        }
+                    }
+                }
+                let mut points = indices.map(|index| vertices[index]);
+                for point in &mut points {
+                    point.terrain_known = if known { 1.0 } else { 0.0 };
+                }
+                let [tl, tr, bl, br] = points;
+                mesh.extend_from_slice(&[tl, tr, bl, tr, br, bl]);
+            }
+        }
+        let samples = u32::try_from(heights.len()).map_err(|_| TerrainLodError::InvalidOptions)?;
+        let triangle_count =
+            u32::try_from(mesh.len() / 3).map_err(|_| TerrainLodError::InvalidOptions)?;
+        Ok((
+            mesh,
+            TerrainLodReport {
+                chosen_subdivisions: chosen,
+                triangle_count,
+                samples,
+                max_observed_error: observed,
+                threshold_satisfied: satisfied,
+                has_unknown,
+                budget_limited: finest < options.max_subdivisions
+                    || (!satisfied && chosen == finest),
+            },
+        ))
+    }
+
+    /// Selects the bounded sampled LOD path for subsequent terrain rebuilds.
+    /// Passing `None` restores the historical fixed 32-subdivision mesh.
+    pub fn set_terrain_lod(
+        &mut self,
+        options: Option<TerrainLodOptions>,
+    ) -> Result<(), TerrainLodError> {
+        if let Some(options) = options {
+            if !options.target_error_meters.is_finite()
+                || options.target_error_meters < 0.0
+                || options.max_subdivisions == 0
+                || options.max_subdivisions > 64
+                || !options.max_subdivisions.is_power_of_two()
+                || options.max_source_samples == 0
+                || options.max_source_samples < 4
+                || options.max_source_samples > 4_225
+            {
+                return Err(TerrainLodError::InvalidOptions);
+            }
+        }
+        self.terrain_lod_options = options;
+        self.terrain_lod_report = None;
+        self.terrain_cache_key = None;
+        Ok(())
+    }
+
+    /// Returns the last quality report from a successful adaptive terrain rebuild.
+    pub fn terrain_lod_report(&self) -> Option<TerrainLodReport> {
+        self.terrain_lod_report
+    }
+
+    /// Samples the retained CPU copy of the currently rendered terrain triangles.
+    /// Returns `None` for 2D mode, outside the local patch, or any cell containing unknown terrain.
+    /// No GPU readback or source-grid interpolation is performed.
+    pub fn terrain_mesh_height_at(&self, lat_rad: f64, lon_rad: f64) -> Option<f64> {
+        let footprint = self.terrain_footprint?;
+        sample_terrain_mesh_height(&self.terrain_cpu_vertices, footprint, lat_rad, lon_rad)
+    }
+
     pub fn rebuild_terrain_buffers(
         &mut self,
         controller: &NativeController,
@@ -938,15 +1422,29 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         exaggeration: f32,
     ) {
         self.two_d = controller.view_mode == "2D";
-        let key = TerrainCacheKey::new(controller, exaggeration);
+        let key = TerrainCacheKey::new(controller, exaggeration, self.terrain_lod_options);
         if self.terrain_cache_key.as_ref() == Some(&key) {
             return;
         }
-        let vertices = Self::generate_terrain_vertices(controller, exaggeration);
+        let (vertices, lod_report) = match self.terrain_lod_options {
+            Some(options) => {
+                match Self::generate_terrain_vertices_with_lod(controller, exaggeration, options) {
+                    Ok((vertices, report)) => (vertices, Some(report)),
+                    Err(_) => return,
+                }
+            }
+            None => (
+                Self::generate_terrain_vertices(controller, exaggeration),
+                None,
+            ),
+        };
         if vertices.is_empty() {
             self.terrain_vertex_buffer = None;
             self.terrain_vertices_len = 0;
+            self.terrain_cpu_vertices.clear();
+            self.terrain_footprint = None;
             self.terrain_cache_key = Some(key);
+            self.terrain_lod_report = lod_report;
             return;
         }
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -958,7 +1456,33 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         queue.write_buffer(&buffer, 0, bytemuck::cast_slice(&vertices));
         self.terrain_vertex_buffer = Some(buffer);
         self.terrain_vertices_len = vertices.len();
+        let subdivisions = lod_report.map_or(32, |report| report.chosen_subdivisions);
+        let span_meters = if controller.view_mode == "3D" {
+            30_000_000.0 / controller.camera.zoom
+        } else {
+            controller.camera.viewport_base_meters / controller.camera.zoom
+        };
+        let lat_span = (span_meters / 111_000.0 / 2.0)
+            .to_radians()
+            .min(60.0_f64.to_radians());
+        let lon_span = lat_span / controller.camera.center.lat.cos().abs().max(0.15);
+        self.terrain_cpu_vertices = vertices.clone();
+        self.terrain_footprint = Some(TerrainMeshFootprint {
+            center_lat: controller.camera.center.lat,
+            center_lon: controller.camera.center.lon,
+            lat_span,
+            lon_span,
+            subdivisions,
+            view_mode: if controller.view_mode == "3D" {
+                "3D"
+            } else if controller.view_mode == "2.5D" {
+                "2.5D"
+            } else {
+                "2D"
+            },
+        });
         self.terrain_cache_key = Some(key);
+        self.terrain_lod_report = lod_report;
     }
 
     pub fn invalidate_terrain_cache(&mut self) {
@@ -1396,6 +1920,326 @@ mod tests {
         assert!(vertices.iter().all(|vertex| vertex.terrain_known == 0.0));
     }
 
+    fn lod_options(target: f64, subdivisions: u32, samples: u32) -> TerrainLodOptions {
+        TerrainLodOptions {
+            target_error_meters: target,
+            max_subdivisions: subdivisions,
+            max_source_samples: samples,
+        }
+    }
+
+    fn controller_with_flat_terrain() -> NativeController {
+        let controller = NativeController::new(0.0, 0.0).expect("valid test controller center");
+        let grid = olayer_core::terrain::ElevationGrid::new(
+            olayer_core::terrain::ElevationGridCrs::Geographic,
+            [
+                -std::f64::consts::PI,
+                -std::f64::consts::FRAC_PI_2,
+                std::f64::consts::PI,
+                std::f64::consts::FRAC_PI_2,
+            ],
+            2,
+            2,
+            vec![0.0; 4].into_boxed_slice(),
+            None,
+        )
+        .expect("valid test elevation grid");
+        controller
+            .terrain
+            .load_elevation_grid("lod-test".to_string(), grid);
+        controller
+    }
+
+    fn controller_with_grid(samples: Vec<f64>, size: usize, zoom: f64) -> NativeController {
+        let mut controller = NativeController::new(0.0, 0.0).expect("valid test controller center");
+        controller.view_mode = "2.5D".to_string();
+        controller.camera.zoom = zoom;
+        controller.camera.viewport_base_meters = 1_000_000.0;
+        let grid = olayer_core::terrain::ElevationGrid::new(
+            olayer_core::terrain::ElevationGridCrs::Geographic,
+            [-0.1, -0.1, 0.1, 0.1],
+            size,
+            size,
+            samples.into_boxed_slice(),
+            None,
+        )
+        .expect("valid test elevation grid");
+        controller
+            .terrain
+            .load_elevation_grid("lod-test-grid".to_string(), grid);
+        controller
+    }
+
+    fn controller_with_nodata() -> NativeController {
+        let controller = NativeController::new(0.0, 0.0).expect("valid test controller center");
+        let grid = olayer_core::terrain::ElevationGrid::new(
+            olayer_core::terrain::ElevationGridCrs::Geographic,
+            [
+                -std::f64::consts::PI,
+                -std::f64::consts::FRAC_PI_2,
+                std::f64::consts::PI,
+                std::f64::consts::FRAC_PI_2,
+            ],
+            2,
+            2,
+            vec![-9999.0; 4].into_boxed_slice(),
+            Some(-9999.0),
+        )
+        .expect("valid test nodata grid");
+        controller
+            .terrain
+            .load_elevation_grid("lod-nodata".to_string(), grid);
+        controller
+    }
+
+    #[test]
+    fn lod_uses_selected_grid_and_reports_unknown_terrain() {
+        let controller = controller_with_flat_terrain();
+        let (mesh, report) = WgpuGpuPipeline::generate_terrain_vertices_with_lod(
+            &controller,
+            1.0,
+            lod_options(1_000_000_000.0, 16, 289),
+        )
+        .expect("bounded LOD generation");
+        assert_eq!(
+            mesh.len(),
+            report.chosen_subdivisions as usize * report.chosen_subdivisions as usize * 6
+        );
+        assert_eq!(report.samples, 289);
+        assert_eq!(report.chosen_subdivisions, 1);
+        assert!(!report.has_unknown);
+        assert!(report.threshold_satisfied);
+        assert!(mesh
+            .iter()
+            .all(|vertex| vertex.position.iter().all(|value| value.is_finite())));
+        assert!(mesh.iter().all(|vertex| vertex.terrain_known == 1.0));
+    }
+
+    #[test]
+    fn lod_keeps_an_affine_ramp_coarse_and_refines_a_sampled_ridge() {
+        let ramp = controller_with_grid(vec![0.0, 100.0, 100.0, 200.0], 2, 100.0);
+        let (_, ramp_report) = WgpuGpuPipeline::generate_terrain_vertices_with_lod(
+            &ramp,
+            1.0,
+            lod_options(0.1, 8, 81),
+        )
+        .expect("bounded ramp LOD");
+        assert_eq!(ramp_report.chosen_subdivisions, 1);
+        assert!(ramp_report.threshold_satisfied);
+
+        let ridge =
+            controller_with_grid(vec![0.0, 0.0, 0.0, 0.0, 100.0, 0.0, 0.0, 0.0, 0.0], 3, 1.0);
+        let (_, ridge_report) = WgpuGpuPipeline::generate_terrain_vertices_with_lod(
+            &ridge,
+            1.0,
+            lod_options(0.1, 8, 81),
+        )
+        .expect("bounded ridge LOD");
+        assert!(ridge_report.chosen_subdivisions > 1);
+        assert!(
+            ridge_report.max_observed_error.unwrap_or_default() > 0.1,
+            "report: {ridge_report:?}"
+        );
+        assert!(!ridge_report.threshold_satisfied);
+    }
+
+    #[test]
+    fn lod_wraps_elevation_queries_at_the_antimeridian() {
+        let mut controller = NativeController::new(0.0, std::f64::consts::PI - 0.01)
+            .expect("valid date-line camera");
+        controller.view_mode = "3D".to_string();
+        let grid = olayer_core::terrain::ElevationGrid::new(
+            olayer_core::terrain::ElevationGridCrs::Geographic,
+            [-std::f64::consts::PI, -1.0, std::f64::consts::PI, 1.0],
+            2,
+            2,
+            vec![100.0; 4].into_boxed_slice(),
+            None,
+        )
+        .unwrap();
+        controller
+            .terrain
+            .load_elevation_grid("world-grid".into(), grid);
+        let (_, report) = WgpuGpuPipeline::generate_terrain_vertices_with_lod(
+            &controller,
+            1.0,
+            lod_options(1_000_000.0, 16, 289),
+        )
+        .unwrap();
+        assert!(!report.has_unknown);
+        assert!(report.triangle_count > 0);
+    }
+
+    #[test]
+    fn lod_3d_mesh_places_camera_center_at_requested_ellipsoidal_height() {
+        let mut controller = controller_with_grid(vec![500.0; 9], 3, 20.0);
+        controller.view_mode = "3D".to_string();
+        let (mesh, report) = WgpuGpuPipeline::generate_terrain_vertices_with_lod(
+            &controller,
+            1.0,
+            lod_options(0.0, 64, 4_225),
+        )
+        .expect("bounded 3D terrain LOD");
+        assert_eq!(report.chosen_subdivisions, 64);
+        let center = [6_378_637.0_f64, 0.0, 0.0];
+        let error = mesh
+            .iter()
+            .map(|vertex| {
+                let [x, y, z] = vertex.position.map(f64::from);
+                ((x - center[0]).powi(2) + (y - center[1]).powi(2) + (z - center[2]).powi(2)).sqrt()
+            })
+            .fold(f64::INFINITY, f64::min);
+        assert!(error < 1.0, "center vertex positional error was {error} m");
+    }
+
+    #[test]
+    fn full_resolution_lod_positions_match_legacy_3d_mesh() {
+        let mut controller = controller_with_grid(vec![500.0; 4], 2, 20.0);
+        controller.view_mode = "3D".to_string();
+        let fixed = WgpuGpuPipeline::generate_terrain_vertices(&controller, 1.0);
+        let (adaptive, _) = WgpuGpuPipeline::generate_terrain_vertices_with_lod(
+            &controller,
+            1.0,
+            lod_options(0.0, 32, 1_089),
+        )
+        .unwrap();
+        assert_eq!(fixed.len(), adaptive.len());
+        for (fixed, adaptive) in fixed.iter().zip(adaptive) {
+            for (fixed_axis, adaptive_axis) in fixed.position.into_iter().zip(adaptive.position) {
+                assert!((f64::from(fixed_axis) - f64::from(adaptive_axis)).abs() < 1.0e-6);
+            }
+            assert_eq!(fixed.terrain_known, adaptive.terrain_known);
+        }
+    }
+
+    #[test]
+    fn mesh_height_provider_samples_the_rendered_triangle_and_preserves_unknown_holes() {
+        let mut vertices = vec![
+            TerrainVertex {
+                position: [0.0, 0.0, 0.0],
+                normal: [0.0, 0.0, 1.0],
+                elevation: 0.0,
+                slope: 0.0,
+                terrain_known: 1.0,
+            };
+            6
+        ];
+        vertices[0].position = [-1.0, 1.0, 0.0];
+        vertices[1].position = [1.0, 1.0, 1.0];
+        vertices[2].position = [-1.0, -1.0, 1.0];
+        vertices[3].position = [1.0, 1.0, 1.0];
+        vertices[4].position = [1.0, -1.0, 2.0];
+        vertices[5].position = [-1.0, -1.0, 1.0];
+        let footprint = TerrainMeshFootprint {
+            center_lat: 0.0,
+            center_lon: 0.0,
+            lat_span: 2.0,
+            lon_span: 2.0,
+            subdivisions: 1,
+            view_mode: "2.5D",
+        };
+        assert_eq!(
+            sample_terrain_mesh_height(&vertices, footprint, 0.0, 0.0),
+            Some(1.0)
+        );
+        assert_eq!(
+            sample_terrain_mesh_height(&vertices, footprint, 2.0, 0.0),
+            None
+        );
+        vertices[1].terrain_known = 0.0;
+        assert_eq!(
+            sample_terrain_mesh_height(&vertices, footprint, 0.0, 0.0),
+            None
+        );
+    }
+
+    #[test]
+    fn mesh_height_provider_converts_interpolated_ecef_triangle() {
+        let ellipsoid = olayer_core::geodesy::ellipsoid::Ellipsoid::wgs84();
+        let lat_lons = [
+            (-0.1, -0.1),
+            (-0.1, 0.1),
+            (0.1, -0.1),
+            (-0.1, 0.1),
+            (0.1, 0.1),
+            (0.1, -0.1),
+        ];
+        let vertices = lat_lons.map(|(lat, lon)| {
+            let position =
+                olayer_core::geodesy::lla_to_ecef(&LatLon::new(lat, lon, 100.0), &ellipsoid);
+            let to_gpu_float = |value: f64| {
+                assert!(value.is_finite() && value.abs() <= f64::from(f32::MAX));
+                // The test intentionally models the renderer's finite f32 vertex representation.
+                value as f32
+            };
+            TerrainVertex {
+                position: [
+                    to_gpu_float(position.x),
+                    to_gpu_float(position.y),
+                    to_gpu_float(position.z),
+                ],
+                normal: [0.0, 0.0, 1.0],
+                elevation: 100.0,
+                slope: 0.0,
+                terrain_known: 1.0,
+            }
+        });
+        let footprint = TerrainMeshFootprint {
+            center_lat: 0.0,
+            center_lon: 0.0,
+            lat_span: 0.2,
+            lon_span: 0.2,
+            subdivisions: 1,
+            view_mode: "3D",
+        };
+        let height = sample_terrain_mesh_height(&vertices, footprint, 0.0, 0.0).unwrap();
+        assert!(height.is_finite());
+        assert!(height < 100.0);
+    }
+
+    #[test]
+    fn lod_caps_source_samples_and_rejects_impossible_budget() {
+        let controller = controller_with_flat_terrain();
+        let (_, report) = WgpuGpuPipeline::generate_terrain_vertices_with_lod(
+            &controller,
+            1.0,
+            lod_options(0.0, 64, 81),
+        )
+        .expect("bounded LOD generation");
+        assert_eq!(report.samples, 81);
+        assert!(report.budget_limited);
+        assert!(matches!(
+            WgpuGpuPipeline::generate_terrain_vertices_with_lod(
+                &controller,
+                1.0,
+                lod_options(0.0, 64, 1)
+            ),
+            Err(TerrainLodError::InvalidOptions)
+        ));
+        assert!(matches!(
+            WgpuGpuPipeline::generate_terrain_vertices_with_lod(
+                &controller,
+                1.0,
+                lod_options(0.0, 48, 2_401)
+            ),
+            Err(TerrainLodError::InvalidOptions)
+        ));
+    }
+
+    #[test]
+    fn lod_nodata_prevents_threshold_claim_and_mesh_bridging() {
+        let controller = controller_with_nodata();
+        let (mesh, report) = WgpuGpuPipeline::generate_terrain_vertices_with_lod(
+            &controller,
+            1.0,
+            lod_options(0.0, 8, 81),
+        )
+        .expect("bounded LOD generation");
+        assert!(report.has_unknown);
+        assert!(!report.threshold_satisfied);
+        assert!(mesh.iter().all(|vertex| vertex.terrain_known == 0.0));
+    }
+
     #[test]
     fn flat_surface_normal_is_rotated_into_ecef() {
         let lat = 0.7;
@@ -1420,7 +2264,7 @@ mod tests {
     #[test]
     fn terrain_cache_key_uses_exact_camera_state() {
         let controller = NativeController::new(0.0, 0.0).expect("valid test controller center");
-        let original = TerrainCacheKey::new(&controller, 1.0);
+        let original = TerrainCacheKey::new(&controller, 1.0, None);
         let mut moved = NativeController::new(0.0, 0.0).expect("valid test controller center");
         moved.camera.center.lon = 0.000_000_001;
         let mut zoomed = NativeController::new(0.0, 0.0).expect("valid test controller center");
@@ -1428,9 +2272,24 @@ mod tests {
         let mut resized = NativeController::new(0.0, 0.0).expect("valid test controller center");
         resized.camera.aspect_ratio = 1.000_000_001;
 
-        assert_ne!(original, TerrainCacheKey::new(&moved, 1.0));
-        assert_ne!(original, TerrainCacheKey::new(&zoomed, 1.0));
-        assert_ne!(original, TerrainCacheKey::new(&resized, 1.0));
+        assert_ne!(original, TerrainCacheKey::new(&moved, 1.0, None));
+        assert_ne!(original, TerrainCacheKey::new(&zoomed, 1.0, None));
+        assert_ne!(original, TerrainCacheKey::new(&resized, 1.0, None));
+        let mut rolled = NativeController::new(0.0, 0.0).expect("valid test controller center");
+        rolled.camera.roll = 0.25;
+        assert_ne!(original, TerrainCacheKey::new(&rolled, 1.0, None));
+        assert_ne!(
+            original,
+            TerrainCacheKey::new(
+                &controller,
+                1.0,
+                Some(TerrainLodOptions {
+                    target_error_meters: 10.0,
+                    max_subdivisions: 32,
+                    max_source_samples: 1_089,
+                })
+            )
+        );
     }
 
     #[test]

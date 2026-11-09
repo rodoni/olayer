@@ -1,6 +1,6 @@
-/** Shared depth contract for terrain, imagery and features. Restores host GL state. */
+/** Shared depth contract for map and overlay layers. `writeDepth=false` is for ordered translucent fragments that must test, but not occlude later draws. Restores host GL state. */
 export function drawWithLayerDepth(
-  gl: WebGL2RenderingContext, mode: "2D" | "2.5D" | "3D", draw: () => void, imagery = false,
+  gl: WebGL2RenderingContext, mode: "2D" | "2.5D" | "3D", draw: () => void, imagery = false, writeDepth = true,
 ): void {
   const depth = gl.isEnabled(gl.DEPTH_TEST), blend = gl.isEnabled(gl.BLEND);
   const offset = gl.isEnabled(gl.POLYGON_OFFSET_FILL);
@@ -19,7 +19,7 @@ export function drawWithLayerDepth(
     gl.lineWidth(1);
     gl.depthRange(0, 1);
     gl.depthFunc(gl.LEQUAL);
-    gl.depthMask(mode !== "2D");
+    gl.depthMask(mode !== "2D" && writeDepth);
     if (mode === "2D") gl.disable(gl.DEPTH_TEST); else gl.enable(gl.DEPTH_TEST);
     if (imagery && mode !== "2D") {
       gl.enable(gl.POLYGON_OFFSET_FILL);

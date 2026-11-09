@@ -69,3 +69,147 @@ export function buildTerrainGrid(
   }
   return { vertices, indices: new Uint32Array(indices) };
 }
+
+export interface TerrainLodOptions {
+  readonly targetErrorMeters: number;
+  /** Maximum grid level; must be `baseSize * 2^n` and no greater than 64. */
+  readonly maxSubdivisions: number;
+  /** Total source lattice samples, capped at 4,225. */
+  readonly maxSourceSamples: number;
+}
+
+export interface TerrainLodResult {
+  readonly vertices: Float32Array;
+  readonly indices: Uint32Array;
+  readonly gridSize: number;
+  readonly triangleCount: number;
+  readonly sourceSamples: number;
+  readonly knownSamples: number;
+  readonly projectedSamples: number;
+  /** Maximum residual over valid probes performed at every candidate level; null if none were valid. */
+  readonly maxSampledErrorMeters: number | null;
+  readonly thresholdSatisfied: boolean;
+  readonly budgetLimited: boolean;
+  readonly unknownSamples: boolean;
+}
+
+function wrapLongitudeRadians(lon: number): number {
+  return ((lon + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
+}
+
+/** Selects a global power-of-two terrain level using sampled XYZ residuals only. */
+export function buildTerrainGridWithLod(
+  size: number, centerLat: number, centerLon: number, latSpan: number, lonSpan: number,
+  context: WmsMeshContext, exaggeration: number,
+  uv: (lat: number, lon: number) => readonly [number, number], options: TerrainLodOptions,
+): TerrainLodResult {
+  const { targetErrorMeters, maxSubdivisions, maxSourceSamples } = options;
+  if (!Number.isSafeInteger(size) || size < 1 || !Number.isFinite(targetErrorMeters) || targetErrorMeters < 0
+    || !Number.isSafeInteger(maxSubdivisions) || maxSubdivisions < size || maxSubdivisions > 64
+    || !Number.isInteger(maxSubdivisions / size) || !Number.isInteger(Math.log2(maxSubdivisions / size))
+    || !Number.isSafeInteger(maxSourceSamples) || maxSourceSamples < 1 || maxSourceSamples > 4225) {
+    throw new RangeError("Invalid terrain LOD size, error threshold, or sample budget");
+  }
+  let maximum = size;
+  while (maximum <= Math.floor(maxSubdivisions / 2)) maximum *= 2;
+  const sampleCount = (maximum + 1) * (maximum + 1);
+  if (!Number.isSafeInteger(sampleCount)) throw new RangeError("Terrain LOD lattice size is unsafe");
+  let allowed = maximum;
+  while (allowed > size && (allowed + 1) * (allowed + 1) > maxSourceSamples) allowed /= 2;
+  if ((allowed + 1) * (allowed + 1) > maxSourceSamples) throw new RangeError("Terrain LOD source sample budget is too small");
+
+  const elevations = new Float64Array((allowed + 1) * (allowed + 1));
+  const known = new Uint8Array(elevations.length);
+  const cache = new Map<string, number | null>();
+  const coordinate = (n: number, count: number): number => n / count;
+  const readElevation = (lat: number, lon: number): number | null => {
+    const queryLon = wrapLongitudeRadians(lon);
+    const key = `${lat},${queryLon}`;
+    if (cache.has(key)) return cache.get(key)!;
+    let value = Math.abs(lat) <= Math.PI / 2 ? context.elevation?.(lat, queryLon) ?? null : null;
+    if (value !== null && (!Number.isFinite(value) || Math.abs(value) > 3.4028234663852886e38)) value = null;
+    cache.set(key, value);
+    return value;
+  };
+  for (let row = 0; row <= allowed; row++) for (let col = 0; col <= allowed; col++) {
+    const lat = centerLat + (0.5 - coordinate(row, allowed)) * latSpan;
+    const lon = centerLon + (coordinate(col, allowed) - 0.5) * lonSpan;
+    const index = row * (allowed + 1) + col;
+    const value = readElevation(lat, lon);
+    if (value !== null) { elevations[index] = value; known[index] = 1; }
+  }
+  const xyz = new Float64Array(elevations.length * 3);
+  const valid = new Uint8Array(elevations.length);
+  for (let row = 0; row <= allowed; row++) for (let col = 0; col <= allowed; col++) {
+    const i = row * (allowed + 1) + col;
+    if (!known[i]) continue;
+    const lat = centerLat + (0.5 - row / allowed) * latSpan;
+    const lon = centerLon + (col / allowed - 0.5) * lonSpan;
+    const h = context.viewMode === "2D" ? 0 : elevations[i]! * exaggeration;
+    try {
+      const p = context.viewMode === "3D" ? lla_to_ecef(lat, lon, h) : context.project(lat, lon);
+      const x = p[0], y = p[1], z = context.viewMode === "3D" ? p[2] : h;
+      if (x === undefined || y === undefined || z === undefined || ![x, y, z].every(Number.isFinite)) continue;
+      xyz.set([x, y, z], i * 3); valid[i] = 1;
+    } catch { /* Invalid projection remains an unknown sample. */ }
+  }
+  let chosen = size, maxError: number | null = null, unknownSamples = known.some(value => value === 0) || valid.some(value => value === 0), thresholdSatisfied = false;
+  let budgetLimited = allowed < maximum;
+  for (let level = size; level <= allowed; level *= 2) {
+    let levelError = 0, levelUnknown = false;
+    let hasProbe = false;
+    if (level < allowed) {
+      const fineLevel = level * 2, stride = allowed / fineLevel, coarseStride = stride * 2;
+      for (let row = 0; row <= fineLevel; row++) for (let col = 0; col <= fineLevel; col++) {
+        if (row % 2 === 0 && col % 2 === 0) continue;
+        const fi = row * stride * (allowed + 1) + col * stride;
+        const cellRow = Math.min(Math.floor(row / 2), level - 1), cellCol = Math.min(Math.floor(col / 2), level - 1);
+        const a = cellRow * coarseStride * (allowed + 1) + cellCol * coarseStride;
+        const b = a + coarseStride * (allowed + 1);
+        const localU = (col - cellCol * 2) / 2, localV = (row - cellRow * 2) / 2;
+        const firstTriangle = localU + localV <= 1;
+        const tri = firstTriangle ? [a, a + coarseStride, b] : [a + coarseStride, b + coarseStride, b];
+        if (![fi, ...tri].every(i => valid[i] === 1)) { levelUnknown = true; continue; }
+        hasProbe = true;
+        const weights = firstTriangle ? [1 - localU - localV, localU, localV] : [1 - localV, localU + localV - 1, 1 - localU];
+        let error2 = 0;
+        for (let axis = 0; axis < 3; axis++) {
+          const predicted = weights[0]! * xyz[tri[0]! * 3 + axis]! + weights[1]! * xyz[tri[1]! * 3 + axis]! + weights[2]! * xyz[tri[2]! * 3 + axis]!;
+          const d = xyz[fi * 3 + axis]! - predicted; error2 += d * d;
+        }
+        levelError = Math.max(levelError, Math.sqrt(error2));
+      }
+    }
+    if (hasProbe) maxError = maxError === null ? levelError : Math.max(maxError, levelError);
+    unknownSamples ||= levelUnknown;
+    if (hasProbe && levelError <= targetErrorMeters && !unknownSamples) { chosen = level; thresholdSatisfied = true; break; }
+    chosen = Math.min(level * 2, allowed);
+    if (level >= allowed / 2) { budgetLimited = true; break; }
+  }
+  const cachedContext: WmsMeshContext = { ...context, elevation: readElevation };
+  const mesh = buildTerrainGrid(chosen, centerLat, centerLon, latSpan, lonSpan, cachedContext, exaggeration, uv);
+  if (unknownSamples) {
+    const stride = allowed / chosen, side = allowed + 1, outputSide = chosen + 1;
+    const indices: number[] = [];
+    for (let row = 0; row < chosen; row++) for (let col = 0; col < chosen; col++) {
+      let cellKnown = true;
+      for (let fineRow = row * stride; fineRow <= (row + 1) * stride && cellKnown; fineRow++) {
+        for (let fineCol = col * stride; fineCol <= (col + 1) * stride; fineCol++) {
+          const fineIndex = fineRow * side + fineCol;
+          if (known[fineIndex] !== 1 || valid[fineIndex] !== 1) { cellKnown = false; break; }
+        }
+      }
+      if (!cellKnown) continue;
+      const a = row * outputSide + col, b = a + outputSide;
+      indices.push(a, a + 1, b, a + 1, b + 1, b);
+    }
+    const knownSamples = known.reduce((count, value) => count + value, 0);
+    const projectedSamples = valid.reduce((count, value) => count + value, 0);
+    return { ...mesh, indices: new Uint32Array(indices), gridSize: chosen, triangleCount: indices.length / 3, sourceSamples: cache.size,
+      knownSamples, projectedSamples, maxSampledErrorMeters: maxError, thresholdSatisfied: false, budgetLimited, unknownSamples };
+  }
+  return { ...mesh, gridSize: chosen, triangleCount: mesh.indices.length / 3, sourceSamples: cache.size,
+    knownSamples: known.reduce((count, value) => count + value, 0),
+    projectedSamples: valid.reduce((count, value) => count + value, 0),
+    maxSampledErrorMeters: maxError, thresholdSatisfied, budgetLimited, unknownSamples };
+}

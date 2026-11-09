@@ -186,6 +186,6 @@ Managed via Cargo in `Cargo.toml`:
 
 Use [getting started](README.md) for the single maintained build sequence and [testing](../guides/testing.md) for unit, browser, GPU and benchmark commands. Build WASM before installing the local TypeScript dependency. Exclude the desktop demo from headless workspace operations.
 
-The runtime floor above follows the current dependency engines: jsdom 29 requires Node 22.13+ in the 22.x line or 24+, while Puppeteer 25 requires at least 22.12. The current CI configuration still selects Node 20 and needs alignment before claiming an engine-compatible clean install. Rust is built on stable in CI; the old 1.75 minimum was not maintained and is not an MSRV guarantee.
+The runtime floor above follows the current dependency engines: jsdom 29 requires Node 22.13+ in the 22.x line or 24+, while Puppeteer 25 requires at least 22.12. CI selects Node 24 to match these requirements. Rust is built on stable in CI; the old 1.75 minimum was not maintained and is not an MSRV guarantee.
 
 Package manifests/lockfiles are authoritative for dependencies. The platform package recipes above are setup examples; this documentation cleanup does not certify every distribution/toolchain combination.

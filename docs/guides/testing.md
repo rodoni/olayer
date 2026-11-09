@@ -48,7 +48,7 @@ From the repository root, with a headless WGPU adapter available:
 cargo test -p olayer-native -- --ignored --nocapture
 ```
 
-The explicitly ignored native GPU checks cover WMS, WFS outlines, polygon fills/holes and shared terrain/imagery/feature depth. Mesa software rendering can supply the adapter. These are distinct from the ordinary headless unit-test run.
+The explicitly ignored native GPU checks cover WMS, WFS outlines, polygon fills/holes, per-feature WFS paint snapshots, shared terrain/imagery/feature depth, and translucent volumetric depth participation. Mesa software rendering can supply the adapter. These are distinct from the ordinary headless unit-test run.
 
 With `sdk/ts` as the working directory:
 
@@ -57,9 +57,11 @@ npm run test:wms:browser
 npm run test:wfs:browser
 npm run test:wfs-fill:browser
 npm run test:depth:browser
+npm run test:volumetric:browser
+npm run test:package
 ```
 
-These commands start a local Vite server and headless Chrome through Puppeteer. They use local assets under [the shared fixtures](../../tests/fixtures), not a live GeoServer. They need permission to open a local port and launch a browser. See the [map guides](maps/README.md) for each scenario and its limits.
+The `test:*:browser` commands start a local Vite server and headless Chrome through Puppeteer. They use local assets under [the shared fixtures](../../tests/fixtures), not a live GeoServer. `test:package` packs and installs the SDK in an isolated consumer, checks generated types and exercises ESM/CommonJS WASM initialization. Browser tests need permission to open a local port and launch a browser. See the [map guides](maps/README.md) for each scenario and its limits.
 
 ## Symbols and performance
 
@@ -85,4 +87,4 @@ Record toolchain, hardware and scenarios alongside benchmark results. Historical
 python3 tools/check-docs.py
 ```
 
-This checks local paths, Markdown heading anchors and documents reachable from the [documentation index](../README.md). It does not fetch external URLs or execute code snippets. The [CI workflow](../../.github/workflows/ci.yml) is the source for configured CI jobs; its current Node 20 selection needs alignment with the newer dependency-engine requirements documented in [setup requirements](../getting-started/requirements.md).
+This checks local paths, Markdown heading anchors and documents reachable from the [documentation index](../README.md). It does not fetch external URLs or execute code snippets. The [CI workflow](../../.github/workflows/ci.yml) is the source for configured CI jobs; it uses Node 24 and checks Rust formatting, TypeScript contracts and SDK declaration/bundle generation alongside tests.

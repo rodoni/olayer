@@ -1106,4 +1106,73 @@ int olayer_declutter_solve_labels(const struct C_LabelTarget *targets,
                                   uintptr_t max_placements,
                                   uintptr_t *out_placements_count);
 
+/**
+ * Builds a map request URL from JSON into caller-owned storage.
+ *
+ * Returns 0 on success, 1 if capacity is insufficient (including a null/zero
+ * capacity size query), -1 for invalid ABI arguments, -2 for MapError, and -3
+ * for a caught panic. Optional `error_code` receives the exact 1..=12 MapError
+ * suffix on -2 and is zero otherwise; `required_length` is mandatory.
+ *
+ * # Safety
+ * `input` must be readable and aligned for `input_len` bytes when nonempty;
+ * `input_len` must not exceed 1 MiB. A non-null `output` must be aligned and
+ * writable for `output_capacity` bytes. `required_length` must be non-null,
+ * aligned, and writable for one `usize`; non-null `error_code` must be aligned
+ * and writable for one `c_int`. Input/output/output locations must not overlap;
+ * ranges must fit the address space and remain valid for this call.
+ */
+int olayer_map_build_request_json(const uint8_t *input,
+                                  uintptr_t input_len,
+                                  uint8_t *output,
+                                  uintptr_t output_capacity,
+                                  uintptr_t *required_length,
+                                  int *error_code);
+
+/**
+ * Parses OGC capabilities XML into caller-owned versioned JSON storage.
+ *
+ * Returns 0 on success, 1 if capacity is insufficient (including a null/zero
+ * capacity size query), -1 for invalid ABI arguments, -2 for MapError, and -3
+ * for a caught panic. Optional `error_code` receives the exact 1..=12 MapError
+ * suffix on -2 and is zero otherwise; `required_length` is mandatory.
+ *
+ * # Safety
+ * `input` must be readable and aligned for `input_len` bytes when nonempty;
+ * `input_len` must not exceed 1 MiB. A non-null `output` must be aligned and
+ * writable for `output_capacity` bytes. `required_length` must be non-null,
+ * aligned, and writable for one `usize`; non-null `error_code` must be aligned
+ * and writable for one `c_int`. Input/output/output locations must not overlap;
+ * ranges must fit the address space and remain valid for this call.
+ */
+int olayer_map_parse_capabilities_json(const uint8_t *input,
+                                       uintptr_t input_len,
+                                       uint8_t *output,
+                                       uintptr_t output_capacity,
+                                       uintptr_t *required_length,
+                                       int *error_code);
+
+/**
+ * Validates a versioned map model JSON document into caller-owned JSON storage.
+ *
+ * Returns 0 on success, 1 if capacity is insufficient (including a null/zero
+ * capacity size query), -1 for invalid ABI arguments, -2 for MapError, and -3
+ * for a caught panic. Optional `error_code` receives the exact 1..=12 MapError
+ * suffix on -2 and is zero otherwise; `required_length` is mandatory.
+ *
+ * # Safety
+ * `input` must be readable and aligned for `input_len` bytes when nonempty;
+ * `input_len` must not exceed 1 MiB. A non-null `output` must be aligned and
+ * writable for `output_capacity` bytes. `required_length` must be non-null,
+ * aligned, and writable for one `usize`; non-null `error_code` must be aligned
+ * and writable for one `c_int`. Input/output/output locations must not overlap;
+ * ranges must fit the address space and remain valid for this call.
+ */
+int olayer_map_validate_model_json(const uint8_t *input,
+                                   uintptr_t input_len,
+                                   uint8_t *output,
+                                   uintptr_t output_capacity,
+                                   uintptr_t *required_length,
+                                   int *error_code);
+
 #endif /* OLAYER_NATIVE_H */

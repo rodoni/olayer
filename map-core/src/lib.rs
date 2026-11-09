@@ -6,6 +6,7 @@ pub mod crs;
 pub mod dimensions;
 pub mod errors;
 pub mod format;
+pub mod interop;
 pub mod request;
 pub mod tile;
 pub mod wcs;

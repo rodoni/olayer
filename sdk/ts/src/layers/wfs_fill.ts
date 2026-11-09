@@ -1,5 +1,5 @@
-import { createWfsTransform, paths, triangulateWfsPolygon } from "./wfs_mesh";
-import type { Position, WfsMeshOptions } from "./wfs_mesh";
+import { appendWfsRange, chargeWfsMesh, createWfsTransform, paths, triangulateWfsPolygon } from "./wfs_mesh";
+import type { Position, WfsMeshOptions, WfsGeometry, WfsMeshBudget, WfsRangedMesh, WfsDrawRange } from "./wfs_mesh";
 import type { WmsMeshContext } from "./wms_mesh";
 import type { WfsFeatureCollection } from "../map_provider/ogc_client";
 
@@ -12,24 +12,39 @@ export function buildWfsFillMesh(collection: WfsFeatureCollection, crs: string, 
 
 export function prepareWfsFillTriangles(collection: WfsFeatureCollection, crs: string, options: WfsMeshOptions): Float64Array[] {
   if (!options.fillPolygons) return [];
-  const triangles: Float64Array[] = [];
+  return prepareTaggedWfsFillTriangles(paths(collection, crs), options).map(chunk => chunk.vertices);
+}
+
+export interface WfsPreparedFill { readonly vertices: Float64Array; readonly featureIndex: number }
+export function prepareTaggedWfsFillTriangles(geometry: WfsGeometry, options: WfsMeshOptions): WfsPreparedFill[] {
+  const tagged: WfsPreparedFill[] = [];
   let vertices = 0;
+  let topologyWork = 0;
   const n = options.subdivisions ?? 16;
-  for (const rings of paths(collection, crs).polygons) {
-    const prepared = triangulateWfsPolygon(rings);
+  for (const polygon of geometry.polygons) {
+    const nodes = polygon.rings.reduce((sum, ring) => sum + ring.length, 0);
+    topologyWork += nodes * nodes;
+    if (topologyWork > 8_000_000) throw new RangeError("WFS aggregate topology limit exceeded");
+    const prepared = triangulateWfsPolygon(polygon.rings);
     vertices += prepared.length / 3;
     if (vertices * n * n > 1_000_000) throw new RangeError("WFS fill work limit exceeded");
-    triangles.push(prepared);
+    tagged.push({ vertices: prepared, featureIndex: polygon.featureIndex });
   }
-  return triangles;
+  return tagged;
 }
 
 export function buildPreparedWfsFillMesh(triangles: readonly Float64Array[], context: WmsMeshContext, options: WfsMeshOptions): Float32Array {
+  return buildTaggedWfsFillMesh(triangles.map(vertices => ({ vertices, featureIndex: 0 })), context, options).vertices;
+}
+
+export function buildTaggedWfsFillMesh(triangles: readonly WfsPreparedFill[], context: WmsMeshContext, options: WfsMeshOptions, budget: WfsMeshBudget = { work: 0, vertices: 0 }): WfsRangedMesh {
   const { project, visibility, subdivisions: n } = createWfsTransform(context, options);
   const output: number[] = [];
+  const ranges: WfsDrawRange[] = [];
   let work = 0;
   const emit = (triangle: Position[]): void => {
     work += 3;
+    chargeWfsMesh(budget, 3, 0);
     if (work > 1_000_000) throw new RangeError("WFS fill work limit exceeded");
     const points = triangle.map(project);
     if (points.some(p => p === null)) return;
@@ -46,9 +61,12 @@ export function buildPreparedWfsFillMesh(triangles: readonly Float64Array[], con
     for (let i = 1; i + 1 < polygon.length; i++) {
       if (output.length / 3 + 3 > 1_000_000) throw new RangeError("WFS fill vertex limit exceeded");
       output.push(...polygon[0]!, ...polygon[i]!, ...polygon[i + 1]!);
+      chargeWfsMesh(budget, 0, 3);
     }
   };
-  for (const vertices of triangles) {
+  for (const chunk of triangles) {
+    const { vertices } = chunk;
+    const first = output.length / 3;
     for (let k = 0; k < vertices.length; k += 9) {
       const a = Array.from(vertices.slice(k, k + 3)) as Position;
       const b = Array.from(vertices.slice(k + 3, k + 6)) as Position;
@@ -59,8 +77,9 @@ export function buildPreparedWfsFillMesh(triangles: readonly Float64Array[], con
         if (i + j + 1 < n) emit([point(i + 1, j), point(i + 1, j + 1), point(i, j + 1)]);
       }
     }
+    appendWfsRange(ranges, chunk.featureIndex, first, output.length / 3 - first);
   }
   const result = new Float32Array(output);
   if (!result.every(Number.isFinite)) throw new RangeError("WFS fill exceeds GPU precision");
-  return result;
+  return { vertices: result, ranges };
 }

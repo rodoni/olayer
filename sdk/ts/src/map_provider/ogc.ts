@@ -33,7 +33,7 @@ export interface WcsCoverageRequestOptions {
 }
 
 function encode(value: string): string {
-  return encodeURIComponent(value);
+  return encodeURIComponent(value).replace(/[!'()*]/g, (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
 }
 
 function validateEndpoint(endpoint: string): void {
@@ -47,16 +47,19 @@ function validateBounds(bounds: OgcBounds): void {
 }
 
 function validateDimensions(width: number, height: number): void {
-  if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) {
-    throw new RangeError("OGC dimensions must be positive integers");
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0 || width > 0xffff_ffff || height > 0xffff_ffff) {
+    throw new RangeError("OGC dimensions must be positive u32 integers");
   }
 }
 
 function queryUrl(endpoint: string, entries: ReadonlyArray<readonly [string, string]>): string {
   validateEndpoint(endpoint);
   const query = entries.map(([key, value]) => `${key}=${encode(value)}`).join("&");
-  const separator = endpoint.includes("?") ? (endpoint.endsWith("?") || endpoint.endsWith("&") ? "" : "&") : "?";
-  return `${endpoint}${separator}${query}`;
+  const fragmentIndex = endpoint.indexOf("#");
+  const base = fragmentIndex < 0 ? endpoint : endpoint.slice(0, fragmentIndex);
+  const fragment = fragmentIndex < 0 ? "" : endpoint.slice(fragmentIndex);
+  const separator = base.includes("?") ? (base.endsWith("?") || base.endsWith("&") ? "" : "&") : "?";
+  return `${base}${separator}${query}${fragment}`;
 }
 
 /** Builds a deterministic WMS 1.3.0 GetMap URL. */
@@ -64,6 +67,9 @@ export function buildWmsGetMapUrl(options: WmsMapRequestOptions): string {
   validateBounds(options.bounds);
   validateDimensions(options.width, options.height);
   if (options.layers.length === 0 || options.crs.length === 0) throw new TypeError("WMS layers and CRS are required");
+  const bbox = options.crs.toUpperCase() === "EPSG:4326"
+    ? [options.bounds[1], options.bounds[0], options.bounds[3], options.bounds[2]]
+    : options.bounds;
   return queryUrl(options.endpoint, [
     ["SERVICE", "WMS"],
     ["REQUEST", "GetMap"],
@@ -71,9 +77,7 @@ export function buildWmsGetMapUrl(options: WmsMapRequestOptions): string {
     ["LAYERS", options.layers],
     ["STYLES", options.styles ?? ""],
     ["CRS", options.crs],
-    ["BBOX", (options.crs === "EPSG:4326"
-      ? [options.bounds[1], options.bounds[0], options.bounds[3], options.bounds[2]]
-      : options.bounds).join(",")],
+    ["BBOX", bbox.join(",")],
     ["WIDTH", String(options.width)],
     ["HEIGHT", String(options.height)],
     ["FORMAT", options.format ?? "image/png"],

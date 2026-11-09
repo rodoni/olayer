@@ -3,6 +3,11 @@ use crate::{QueryParameter, UrlParts};
 use quick_xml::events::Event;
 use quick_xml::Reader;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
+
+const MAX_XML_BYTES: usize = 1024 * 1024;
+const MAX_XML_DEPTH: usize = 64;
+const MAX_IDENTIFIERS: usize = 4096;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ServiceType {
@@ -60,60 +65,145 @@ impl Capabilities {
         }
     }
 
+    /// Parses a capabilities summary without resolving DTDs or external entities.
+    ///
+    /// # Errors
+    /// Returns `INVALID_CAPABILITIES` for malformed or incomplete XML, DTDs,
+    /// unsupported roots, missing title/version, or resource limits exceeding
+    /// 1 MiB of UTF-8 input, 64 nested elements, or 4,096 identifiers.
+    /// This is a summary parser, not OGC schema or namespace validation.
     pub fn parse_xml(xml: &[u8]) -> Result<Self, MapError> {
+        if xml.len() > MAX_XML_BYTES {
+            return Err(invalid("capabilities XML exceeds 1 MiB"));
+        }
+        std::str::from_utf8(xml).map_err(|_| invalid("capabilities XML must be UTF-8"))?;
         let mut reader = Reader::from_reader(xml);
-        reader.trim_text(true);
+        reader.check_end_names(true);
+        reader.check_comments(true);
         let mut buffer = Vec::new();
-        let mut stack: Vec<String> = Vec::new();
+        let mut stack: Vec<Element> = Vec::new();
         let mut service = None;
         let mut version = String::new();
         let mut title = String::new();
         let mut layers = Vec::new();
+        let mut declaration_seen = false;
 
         loop {
-            match reader.read_event_into(&mut buffer) {
-                Ok(Event::Start(event)) => {
-                    let name = local_name(event.name().as_ref());
-                    if stack.is_empty() {
-                        service = service_from_root(&name);
-                        version = event
-                            .attributes()
-                            .flatten()
-                            .find(|attribute| local_name(attribute.key.as_ref()) == "version")
-                            .and_then(|attribute| attribute.decode_and_unescape_value(&reader).ok())
-                            .map(|value| value.into_owned())
-                            .unwrap_or_default();
+            let position = reader.buffer_position();
+            let event = reader
+                .read_event_into(&mut buffer)
+                .map_err(|error| invalid(error.to_string()))?;
+            if matches!(event, Event::Start(_) | Event::Empty(_) | Event::End(_))
+                && reader
+                    .buffer_position()
+                    .checked_sub(1)
+                    .and_then(|last| xml.get(last))
+                    != Some(&b'>')
+            {
+                return Err(invalid("unterminated XML element"));
+            }
+            let empty = matches!(event, Event::Empty(_));
+            match event {
+                Event::Start(event) | Event::Empty(event) => {
+                    if stack.len() >= MAX_XML_DEPTH {
+                        return Err(invalid("capabilities XML exceeds depth 64"));
                     }
-                    stack.push(name);
+                    let name = std::str::from_utf8(event.name().as_ref())
+                        .map_err(|_| invalid("invalid XML element name"))?
+                        .to_owned();
+                    if stack.is_empty() {
+                        if service.is_some() {
+                            return Err(invalid("capabilities XML has multiple root elements"));
+                        }
+                        service = Some(
+                            service_from_root(local_name(&name))
+                                .ok_or_else(|| invalid("unsupported capabilities root element"))?,
+                        );
+                    }
+                    // Validate every attribute, including empty/non-root elements.
+                    // Do not discard malformed, duplicate, or unescaped attributes.
+                    // quick-xml's default duplicate scan is quadratic in the
+                    // number of attributes. Keep duplicate rejection bounded
+                    // to ordered-set lookups even for attribute-heavy input.
+                    let mut attribute_names = BTreeSet::new();
+                    for attribute in event.attributes().with_checks(false) {
+                        let attribute = attribute.map_err(|error| invalid(error.to_string()))?;
+                        if !attribute_names.insert(attribute.key.as_ref().to_owned()) {
+                            return Err(invalid("duplicate XML attribute"));
+                        }
+                        let value = attribute
+                            .decode_and_unescape_value(&reader)
+                            .map_err(|error| invalid(error.to_string()))?;
+                        if stack.is_empty() && attribute.key.as_ref() == b"version" {
+                            version = value.into_owned();
+                        }
+                    }
+                    let element = Element {
+                        name,
+                        text: String::new(),
+                    };
+                    if empty {
+                        finish_element(element, &stack, &mut title, &mut layers)?;
+                    } else {
+                        stack.push(element);
+                    }
                 }
-                Ok(Event::Text(text)) => {
+                Event::Text(text) => {
                     let value = text
                         .unescape()
-                        .map_err(|error| MapError::new(INVALID_CAPABILITIES, error.to_string()))?
-                        .trim()
-                        .to_owned();
-                    if value.is_empty() {
-                        buffer.clear();
-                        continue;
-                    }
-                    if stack.last().map(String::as_str) == Some("Title") && title.is_empty() {
-                        title = value;
-                    } else if (stack.last().map(String::as_str) == Some("Name")
-                        && stack
-                            .iter()
-                            .any(|name| name == "Layer" || name == "FeatureType"))
-                        || (stack.last().map(String::as_str) == Some("Identifier")
-                            && stack.iter().any(|name| name == "Layer"))
-                    {
-                        layers.push(value);
+                        .map_err(|error| invalid(error.to_string()))?;
+                    if let Some(element) = stack.last_mut() {
+                        element.text.push_str(&value);
+                    } else if !value.trim().is_empty() {
+                        return Err(invalid("text outside capabilities root element"));
                     }
                 }
-                Ok(Event::End(_)) => {
-                    stack.pop();
+                Event::CData(text) => {
+                    let value = std::str::from_utf8(text.as_ref())
+                        .map_err(|_| invalid("CDATA must be UTF-8"))?;
+                    let element = stack
+                        .last_mut()
+                        .ok_or_else(|| invalid("CDATA outside capabilities root element"))?;
+                    element.text.push_str(value);
                 }
-                Ok(Event::Eof) => break,
-                Err(error) => {
-                    return Err(MapError::new(INVALID_CAPABILITIES, error.to_string()));
+                Event::End(event) => {
+                    let element = stack
+                        .pop()
+                        .ok_or_else(|| invalid("unexpected closing element"))?;
+                    if element.name.as_bytes() != event.name().as_ref() {
+                        return Err(invalid("mismatched closing element"));
+                    }
+                    finish_element(element, &stack, &mut title, &mut layers)?;
+                }
+                Event::DocType(_) => return Err(invalid("DTDs are not supported")),
+                Event::Decl(declaration) => {
+                    if service.is_some() || declaration_seen {
+                        return Err(invalid("misplaced XML declaration"));
+                    }
+                    declaration
+                        .version()
+                        .map_err(|error| invalid(error.to_string()))?;
+                    if let Some(encoding) = declaration.encoding() {
+                        let encoding = encoding.map_err(|error| invalid(error.to_string()))?;
+                        if !encoding.eq_ignore_ascii_case(b"UTF-8") {
+                            return Err(invalid("capabilities XML must declare UTF-8"));
+                        }
+                    }
+                    declaration_seen = true;
+                }
+                Event::Eof => {
+                    if !stack.is_empty() {
+                        return Err(invalid("truncated capabilities XML"));
+                    }
+                    // quick-xml 0.31 can report EOF after consuming a lone '<'.
+                    // EOF must not silently discard a partial markup token.
+                    let remaining = xml
+                        .get(position..)
+                        .ok_or_else(|| invalid("truncated XML markup"))?;
+                    if remaining.iter().any(|byte| !byte.is_ascii_whitespace()) {
+                        return Err(invalid("truncated XML markup"));
+                    }
+                    break;
                 }
                 _ => {}
             }
@@ -136,15 +226,52 @@ impl Capabilities {
     }
 }
 
-fn local_name(name: &[u8]) -> String {
-    let name = String::from_utf8_lossy(name);
-    name.rsplit(':').next().unwrap_or_default().to_owned()
+struct Element {
+    name: String,
+    text: String,
+}
+
+fn invalid(message: impl Into<String>) -> MapError {
+    MapError::new(INVALID_CAPABILITIES, message)
+}
+
+fn local_name(name: &str) -> &str {
+    name.rsplit(':').next().unwrap_or_default()
+}
+
+fn finish_element(
+    element: Element,
+    ancestors: &[Element],
+    title: &mut String,
+    identifiers: &mut Vec<String>,
+) -> Result<(), MapError> {
+    let value = element.text.trim();
+    if value.is_empty() {
+        return Ok(());
+    }
+    let name = local_name(&element.name);
+    if name == "Title" && title.is_empty() {
+        *title = value.to_owned();
+    } else if ancestors.iter().any(|parent| {
+        matches!(
+            (local_name(&parent.name), name),
+            ("Layer" | "FeatureType", "Name")
+                | ("Layer" | "CoverageSummary", "Identifier")
+                | ("CoverageSummary", "CoverageId")
+        )
+    }) {
+        if identifiers.len() >= MAX_IDENTIFIERS {
+            return Err(invalid("capabilities XML exceeds 4096 identifiers"));
+        }
+        identifiers.push(value.to_owned());
+    }
+    Ok(())
 }
 
 fn service_from_root(root: &str) -> Option<ServiceType> {
     match root {
-        "WMS_Capabilities" => Some(ServiceType::Wms),
-        "WMT_MS_Capabilities" | "Capabilities" => Some(ServiceType::Wmts),
+        "WMS_Capabilities" | "WMT_MS_Capabilities" => Some(ServiceType::Wms),
+        "Capabilities" => Some(ServiceType::Wmts),
         "WFS_Capabilities" => Some(ServiceType::Wfs),
         "WCS_Capabilities" => Some(ServiceType::Wcs),
         _ => None,

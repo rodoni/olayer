@@ -2,6 +2,254 @@ use crate::geodesy::coords::LatLon;
 use crate::terrain::engine::{MsawState, TerrainEngine, TileKey, UnknownTerrainPolicy};
 use crate::terrain::errors::TerrainError;
 
+mod altitude_contract {
+    use super::*;
+    use crate::terrain::{resolve_altitude, AltitudeMode, AltitudeUnknownPolicy};
+
+    const POLICIES: [AltitudeUnknownPolicy; 3] = [
+        AltitudeUnknownPolicy::Reject,
+        AltitudeUnknownPolicy::UseAbsolute,
+        AltitudeUnknownPolicy::UseZero,
+    ];
+
+    fn assert_altitude_error(result: Result<f64, TerrainError>) {
+        assert!(matches!(result, Err(TerrainError::AltitudeError(_))));
+    }
+
+    #[test]
+    fn explicit_mesh_needs_no_terrain_under_every_policy() {
+        let engine = TerrainEngine::new();
+        for policy in POLICIES {
+            assert_eq!(
+                engine.resolve_altitude(
+                    0.0,
+                    0.0,
+                    12.0,
+                    AltitudeMode::RelativeToMesh,
+                    policy,
+                    Some(80.0)
+                ),
+                Ok(92.0)
+            );
+            // Invalid coordinates prove the mesh path does not sample terrain.
+            assert_eq!(
+                engine.resolve_altitude(
+                    f64::NAN,
+                    f64::INFINITY,
+                    12.0,
+                    AltitudeMode::RelativeToMesh,
+                    policy,
+                    Some(80.0)
+                ),
+                Ok(92.0)
+            );
+            assert_eq!(
+                resolve_altitude(
+                    12.0,
+                    Some(f64::NAN),
+                    Some(80.0),
+                    AltitudeMode::RelativeToMesh,
+                    policy
+                ),
+                Ok(92.0)
+            );
+        }
+    }
+
+    #[test]
+    fn absent_mesh_preserves_ground_fallback() -> Result<(), TerrainError> {
+        let mut engine = TerrainEngine::new();
+        engine.load_tile(&create_mock_dted0("230000S", "0480000W", 121, 121))?;
+        let lat = (-22.5_f64).to_radians();
+        let lon = (-47.5_f64).to_radians();
+        for policy in POLICIES {
+            let ground = engine.get_elevation_status(lat, lon)?.elevation_meters;
+            assert_eq!(ground, Some(660.0));
+            assert_eq!(
+                engine.resolve_altitude(lat, lon, 12.0, AltitudeMode::RelativeToMesh, policy, None),
+                Ok(672.0)
+            );
+            assert_eq!(
+                engine.resolve_altitude(
+                    lat,
+                    lon,
+                    12.0,
+                    AltitudeMode::RelativeToMesh,
+                    policy,
+                    Some(80.0)
+                ),
+                Ok(92.0)
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn missing_and_nodata_terrain_apply_policies_without_mesh() -> Result<(), TerrainError> {
+        let empty = TerrainEngine::new();
+        let mut nodata = TerrainEngine::new();
+        nodata.load_tile(&create_mock_dted0_with_null(
+            "230000S", "0480000W", 121, 121,
+        ))?;
+        let lat = (-22.5_f64).to_radians();
+        let lon = (-47.5_f64).to_radians();
+        for engine in [&empty, &nodata] {
+            for mode in [
+                AltitudeMode::ClampToGround,
+                AltitudeMode::RelativeToGround,
+                AltitudeMode::RelativeToMesh,
+            ] {
+                let rejected = engine.resolve_altitude(
+                    lat,
+                    lon,
+                    12.0,
+                    mode,
+                    AltitudeUnknownPolicy::Reject,
+                    None,
+                );
+                if std::ptr::eq(engine, &empty) {
+                    assert!(matches!(rejected, Err(TerrainError::TileNotLoaded(_, _))));
+                } else {
+                    assert_altitude_error(rejected);
+                }
+                assert_eq!(
+                    engine.resolve_altitude(
+                        lat,
+                        lon,
+                        12.0,
+                        mode,
+                        AltitudeUnknownPolicy::UseAbsolute,
+                        None
+                    ),
+                    Ok(12.0)
+                );
+                let expected = if mode == AltitudeMode::ClampToGround {
+                    0.0
+                } else {
+                    12.0
+                };
+                assert_eq!(
+                    engine.resolve_altitude(
+                        lat,
+                        lon,
+                        12.0,
+                        mode,
+                        AltitudeUnknownPolicy::UseZero,
+                        None
+                    ),
+                    Ok(expected)
+                );
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn selected_nonfinite_heights_are_errors_not_missing_samples() {
+        let engine = TerrainEngine::new();
+        for policy in POLICIES {
+            for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+                assert_altitude_error(engine.resolve_altitude(
+                    0.0,
+                    0.0,
+                    12.0,
+                    AltitudeMode::RelativeToMesh,
+                    policy,
+                    Some(invalid),
+                ));
+                assert_altitude_error(resolve_altitude(
+                    12.0,
+                    Some(80.0),
+                    Some(invalid),
+                    AltitudeMode::RelativeToMesh,
+                    policy,
+                ));
+                for mode in [
+                    AltitudeMode::ClampToGround,
+                    AltitudeMode::RelativeToGround,
+                    AltitudeMode::RelativeToMesh,
+                ] {
+                    assert_altitude_error(resolve_altitude(
+                        12.0,
+                        Some(invalid),
+                        None,
+                        mode,
+                        policy,
+                    ));
+                }
+                for mode in [
+                    AltitudeMode::Absolute,
+                    AltitudeMode::ClampToGround,
+                    AltitudeMode::RelativeToGround,
+                    AltitudeMode::RelativeToMesh,
+                ] {
+                    assert_altitude_error(resolve_altitude(
+                        invalid,
+                        Some(80.0),
+                        Some(80.0),
+                        mode,
+                        policy,
+                    ));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn relative_addition_overflow_is_rejected() {
+        let engine = TerrainEngine::new();
+        for policy in POLICIES {
+            for height in [f64::MAX, -f64::MAX] {
+                for mode in [AltitudeMode::RelativeToGround, AltitudeMode::RelativeToMesh] {
+                    assert_altitude_error(resolve_altitude(
+                        height,
+                        Some(height),
+                        None,
+                        mode,
+                        policy,
+                    ));
+                }
+                assert_altitude_error(engine.resolve_altitude(
+                    0.0,
+                    0.0,
+                    height,
+                    AltitudeMode::RelativeToMesh,
+                    policy,
+                    Some(height),
+                ));
+            }
+        }
+    }
+
+    #[test]
+    fn absolute_ignores_surfaces_and_coordinates() {
+        let engine = TerrainEngine::new();
+        for policy in POLICIES {
+            assert_eq!(
+                engine.resolve_altitude(
+                    f64::NAN,
+                    f64::INFINITY,
+                    12.0,
+                    AltitudeMode::Absolute,
+                    policy,
+                    Some(f64::NAN)
+                ),
+                Ok(12.0)
+            );
+            assert_eq!(
+                resolve_altitude(
+                    12.0,
+                    Some(f64::NAN),
+                    Some(f64::INFINITY),
+                    AltitudeMode::Absolute,
+                    policy
+                ),
+                Ok(12.0)
+            );
+        }
+    }
+}
+
 fn create_mock_dted0(
     origin_lat: &str,
     origin_lon: &str,

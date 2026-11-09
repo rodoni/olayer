@@ -14,6 +14,7 @@ async function run(): Promise<string[]> {
   const controller = new OlayerController({ glCanvas: document.querySelector<HTMLCanvasElement>("#map")!, canvas2D: document.querySelector<HTMLCanvasElement>("#overlay")!,
     projection: WasmProjection.new_stereographic(0, 0), initialCenterLatRad: 0, initialCenterLonRad: 0, viewportBaseMeters: scene.viewportBaseMeters });
   const terrain = new TerrainLayer("terrain", 32);
+  terrain.setLod({ targetErrorMeters: 5, maxSubdivisions: 64, maxSourceSamples: 4_225 });
   const client = new OgcHttpClient({ maxRetries: 0 });
   const grid = (height: number) => new WcsTerrainSource("terrain", controller.terrainEngine, new WcsRasterSource(client, {
     endpoint: `/fixture-wcs?height=${height}`, coverageId: "elevation", crs: "EPSG:4326", bounds: scene.bounds, width: 2, height: 2,
@@ -29,12 +30,17 @@ async function run(): Promise<string[]> {
   const results: string[] = [];
   try {
     await known.load();
+    const sourceSample = controller.terrainEngine.get_elevation_status(0, 0).elevation_meters;
+    if (sourceSample !== scene.terrainHeight) throw new Error(`Unexpected WCS installed sample: ${sourceSample}`);
     for (const layer of features) await layer.load();
     for (const layer of imagery) await layer.load(gl);
     for (const mode of ["2D", "2.5D", "3D"] as ViewMode[]) {
       controller.setViewMode(mode);
       controller.setPitch(mode === "2.5D" ? 0.4 : 0);
       controller.setZoom(mode === "3D" ? 20 : 1);
+      await known.load();
+      const modeSample = controller.terrainEngine.get_elevation_status(0, 0).elevation_meters;
+      if (modeSample !== scene.terrainHeight) throw new Error(`${mode}: WCS reload did not restore center terrain: ${modeSample}`);
       const camera = controller.getCameraState();
       const raw = mode === "3D" ? controller.projection.get_3d_view_proj_matrix(camera)
         : mode === "2.5D" ? controller.projection.get_25d_view_proj_matrix(camera) : controller.projection.get_view_proj_matrix(camera);
@@ -48,6 +54,19 @@ async function run(): Promise<string[]> {
         gl.disable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ZERO); gl.blendEquation(gl.FUNC_REVERSE_SUBTRACT);
         const layers = reverse ? [feature, image] : [image, feature];
         for (const layer of layers) layer.renderStatic(gl, matrix, { controller });
+        if (image === terrain && mode !== "2D") {
+          const lod = terrain.getLodReport();
+          if (!lod || (!lod.unknownSamples && lod.triangleCount === 0) || lod.sourceSamples > 4_225 || lod.gridSize < 32 || lod.gridSize > 64) {
+            throw new Error(`TerrainLayer did not expose bounded triangles: ${JSON.stringify(lod)}`);
+          }
+          const meshHeight = terrain.getMeshHeightAt(0, 0);
+          if (lod.triangleCount === 0 && meshHeight !== null) {
+            throw new Error(`${mode}: empty terrain LOD reported a mesh height`);
+          }
+          if (lod.triangleCount > 0 && (meshHeight === null || Math.abs(meshHeight - scene.terrainHeight) > 20)) {
+            throw new Error(`${mode}: rendered-mesh altitude sample is invalid: ${meshHeight}; LOD=${JSON.stringify(terrain.getLodReport())}`);
+          }
+        }
         if (gl.isEnabled(gl.DEPTH_TEST) || gl.getParameter(gl.DEPTH_FUNC) !== gl.GREATER || gl.getParameter(gl.DEPTH_WRITEMASK)
           || gl.isEnabled(gl.BLEND) || gl.getParameter(gl.BLEND_EQUATION_RGB) !== gl.FUNC_REVERSE_SUBTRACT) throw new Error("Layer leaked host GL state");
       };
@@ -75,10 +94,15 @@ async function run(): Promise<string[]> {
         // Same camera: the terrain revision must replace the cached known surface with holes.
         await missing.load();
         draw(features[index]!, terrain, true);
+        if (mode !== "2D" && terrain.getMeshHeightAt(0, 0) !== null) {
+          throw new Error(`${mode}: rendered-mesh altitude provider bridged nodata`);
+        }
         if (!visible(height)) throw new Error(`${mode}: nodata replacement left an occluding terrain mesh`);
         draw(features[index]!, imagery[1]!, true);
         if (visible(height) !== (mode !== "2D")) throw new Error(`${mode}: incorrect nodata imagery behavior`);
         await known.load();
+        const restoredSample = controller.terrainEngine.get_elevation_status(0, 0).elevation_meters;
+        if (restoredSample !== scene.terrainHeight) throw new Error(`WCS failed to restore terrain after nodata: ${restoredSample}`);
       }
       if (gl.getError() !== gl.NO_ERROR) throw new Error(`${mode}: WebGL error`);
       results.push(`${mode}: shared terrain/WMS/WFS depth, both draw orders, transparency, nodata and GL state verified`);

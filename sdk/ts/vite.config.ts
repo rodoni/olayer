@@ -19,7 +19,7 @@ export default defineConfig({
     topLevelAwait()
   ],
   build: {
-    emptyOutDir: false,
+    emptyOutDir: true,
     lib: {
       entry: resolve(__dirname, "src/index.ts"),
       name: "Olayer",

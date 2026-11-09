@@ -174,22 +174,16 @@ pub fn decode_wcs_raster_coverage(
     let image = reader
         .decode()
         .map_err(|error| NativeMapDataError::OgcDecode(error.to_string()))?;
-    let samples: Vec<f64> = match sample_type {
-        CoverageSampleType::UInt8 => image
-            .to_luma8()
-            .into_raw()
-            .into_iter()
-            .map(f64::from)
-            .collect(),
-        CoverageSampleType::UInt16 | CoverageSampleType::Int16 => image
-            .to_luma16()
-            .into_raw()
-            .into_iter()
-            .map(f64::from)
-            .collect(),
-        CoverageSampleType::Float32 | CoverageSampleType::Float64 => {
+    let samples: Vec<f64> = match (sample_type, image) {
+        (CoverageSampleType::UInt8, image::DynamicImage::ImageLuma8(image)) => {
+            image.into_raw().into_iter().map(f64::from).collect()
+        }
+        (CoverageSampleType::UInt16, image::DynamicImage::ImageLuma16(image)) => {
+            image.into_raw().into_iter().map(f64::from).collect()
+        }
+        _ => {
             return Err(NativeMapDataError::OgcDecode(
-                "floating-point raster decoding requires a scientific-grid payload".into(),
+                "WCS image samples must match a single-band UInt8 or UInt16 raster; signed, floating-point, multiband and converted samples are unsupported".into(),
             ));
         }
     };
@@ -212,6 +206,11 @@ pub fn decode_wcs_json_coverage(
     sample_type: CoverageSampleType,
     nodata: Option<f64>,
 ) -> Result<Coverage, NativeMapDataError> {
+    if bytes.len() > 64 * 1024 * 1024 {
+        return Err(NativeMapDataError::OgcDecode(
+            "WCS JSON exceeds the 64 MiB decode budget".into(),
+        ));
+    }
     let document: Value = serde_json::from_slice(bytes)
         .map_err(|error| NativeMapDataError::OgcDecode(error.to_string()))?;
     let object = document
@@ -227,6 +226,12 @@ pub fn decode_wcs_json_coverage(
         .and_then(Value::as_u64)
         .and_then(|value| u32::try_from(value).ok())
         .ok_or_else(|| NativeMapDataError::OgcDecode("WCS height is invalid".into()))?;
+    let cell_count = width
+        .checked_mul(height)
+        .filter(|count| *count > 0 && *count <= 16_777_216)
+        .ok_or_else(|| {
+            NativeMapDataError::OgcDecode("WCS grid exceeds the nonzero sample budget".into())
+        })?;
     let metadata_nodata =
         match object.get("nodata") {
             None | Some(Value::Null) => None,
@@ -244,12 +249,39 @@ pub fn decode_wcs_json_coverage(
         .get("samples")
         .and_then(Value::as_array)
         .ok_or_else(|| NativeMapDataError::OgcDecode("WCS samples must be an array".into()))?;
+    if usize::try_from(cell_count).ok() != Some(samples.len()) {
+        return Err(NativeMapDataError::OgcDecode(
+            "WCS sample count does not match dimensions".into(),
+        ));
+    }
     let samples: Vec<f64> = samples
         .iter()
         .map(|value| {
-            value
+            let sample = value
                 .as_f64()
-                .ok_or_else(|| NativeMapDataError::OgcDecode("WCS sample is not numeric".into()))
+                .filter(|sample| sample.is_finite())
+                .ok_or_else(|| {
+                    NativeMapDataError::OgcDecode("WCS sample must be finite numeric data".into())
+                })?;
+            let valid = match sample_type {
+                CoverageSampleType::UInt8 => {
+                    sample.fract() == 0.0 && (0.0..=255.0).contains(&sample)
+                }
+                CoverageSampleType::UInt16 => {
+                    sample.fract() == 0.0 && (0.0..=65_535.0).contains(&sample)
+                }
+                CoverageSampleType::Int16 => {
+                    sample.fract() == 0.0 && (-32_768.0..=32_767.0).contains(&sample)
+                }
+                CoverageSampleType::Float32 => sample.abs() <= f64::from(f32::MAX),
+                CoverageSampleType::Float64 => true,
+            };
+            if !valid {
+                return Err(NativeMapDataError::OgcDecode(
+                    "WCS sample does not fit the declared sample type".into(),
+                ));
+            }
+            Ok(sample)
         })
         .collect::<Result<_, _>>()?;
     Coverage {
@@ -333,5 +365,97 @@ mod tests {
         let coverage =
             decode_wcs_raster_coverage(&bytes, bounds, CoverageSampleType::UInt8, None).unwrap();
         assert_eq!(coverage.samples.len(), 2);
+    }
+
+    #[test]
+    fn wcs_raster_rejects_signed_labels_and_multiband_conversion() {
+        let bounds = BoundingBox::new(
+            0.0,
+            0.0,
+            1.0,
+            1.0,
+            CoordinateReferenceSystem::epsg(4326).unwrap(),
+        )
+        .unwrap();
+        for (image, sample_type) in [
+            (
+                image::DynamicImage::new_luma16(1, 1),
+                CoverageSampleType::Int16,
+            ),
+            (
+                image::DynamicImage::new_rgb8(1, 1),
+                CoverageSampleType::UInt8,
+            ),
+            (
+                image::DynamicImage::new_luma8(1, 1),
+                CoverageSampleType::UInt16,
+            ),
+        ] {
+            let mut bytes = Cursor::new(Vec::new());
+            image
+                .write_to(&mut bytes, image::ImageOutputFormat::Png)
+                .unwrap();
+            assert!(matches!(
+                decode_wcs_raster_coverage(bytes.get_ref(), bounds, sample_type, None),
+                Err(NativeMapDataError::OgcDecode(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn wcs_raster_preserves_unsigned_sixteen_bit_values() {
+        let pixels = image::ImageBuffer::from_raw(2, 1, vec![0_u16, 65_535]).unwrap();
+        let mut bytes = Cursor::new(Vec::new());
+        image::DynamicImage::ImageLuma16(pixels)
+            .write_to(&mut bytes, image::ImageOutputFormat::Png)
+            .unwrap();
+        let bounds = BoundingBox::new(
+            0.0,
+            0.0,
+            1.0,
+            1.0,
+            CoordinateReferenceSystem::epsg(4326).unwrap(),
+        )
+        .unwrap();
+        let coverage = decode_wcs_raster_coverage(
+            bytes.get_ref(),
+            bounds,
+            CoverageSampleType::UInt16,
+            Some(65_535.0),
+        )
+        .unwrap();
+        assert_eq!(coverage.samples.as_ref(), &[0.0, 65_535.0]);
+        assert_eq!(coverage.nodata, Some(65_535.0));
+    }
+
+    #[test]
+    fn wcs_json_rejects_over_budget_dimensions_and_mislabeled_samples() {
+        let bounds = BoundingBox::new(
+            0.0,
+            0.0,
+            1.0,
+            1.0,
+            CoordinateReferenceSystem::epsg(4326).unwrap(),
+        )
+        .unwrap();
+        for payload in [
+            br#"{"width":4294967295,"height":4294967295,"samples":[]}"#.as_slice(),
+            br#"{"width":1,"height":1,"samples":[256]}"#.as_slice(),
+            br#"{"width":1,"height":1,"samples":[-1]}"#.as_slice(),
+            br#"{"width":1,"height":1,"samples":[1.5]}"#.as_slice(),
+        ] {
+            assert!(matches!(
+                decode_wcs_json_coverage(payload, bounds, CoverageSampleType::UInt8, None),
+                Err(NativeMapDataError::OgcDecode(_))
+            ));
+        }
+        let valid = decode_wcs_json_coverage(
+            br#"{"width":2,"height":1,"samples":[-32768,32767]}"#,
+            bounds,
+            CoverageSampleType::Int16,
+            None,
+        )
+        .unwrap();
+        assert_eq!(valid.samples.as_ref(), &[-32_768.0, 32_767.0]);
     }
 }

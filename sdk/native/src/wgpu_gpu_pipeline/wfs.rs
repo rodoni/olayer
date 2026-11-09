@@ -51,15 +51,19 @@ fn invalid(message: &str) -> WfsRenderError {
     WfsRenderError(message.into())
 }
 
+#[derive(Debug, Clone)]
 struct Path {
     positions: Vec<[f64; 3]>,
     point: bool,
 }
+#[derive(Debug, Clone)]
 struct Decoder {
     crs: u32,
     count: usize,
     paths: Vec<Path>,
     polygons: Vec<Vec<Vec<[f64; 3]>>>,
+    feature_ranges: Vec<(std::ops::Range<usize>, std::ops::Range<usize>)>,
+    objects: usize,
 }
 impl Decoder {
     fn array<'a>(&self, value: &'a Value) -> Result<&'a Vec<Value>, WfsRenderError> {
@@ -143,6 +147,10 @@ impl Decoder {
         Ok(())
     }
     fn geometry(&mut self, value: &Value, depth: usize) -> Result<(), WfsRenderError> {
+        self.objects += 1;
+        if self.objects > 100_000 {
+            return Err(invalid("WFS geometry object limit exceeded"));
+        }
         if value.is_null() {
             return Ok(());
         }
@@ -193,6 +201,9 @@ impl Decoder {
 }
 
 fn paths(collection: &FeatureCollection) -> Result<Decoder, WfsRenderError> {
+    if collection.features.len() > 100_000 {
+        return Err(invalid("WFS feature limit exceeded"));
+    }
     let crs = collection.crs.epsg_code();
     if !matches!(crs, 4326 | 3857 | 900913) {
         return Err(invalid("unsupported WFS CRS"));
@@ -202,9 +213,16 @@ fn paths(collection: &FeatureCollection) -> Result<Decoder, WfsRenderError> {
         count: 0,
         paths: Vec::new(),
         polygons: Vec::new(),
+        feature_ranges: Vec::new(),
+        objects: 0,
     };
     for f in &collection.features {
+        let start = (decoder.paths.len(), decoder.polygons.len());
         decoder.geometry(&f.geometry, 0)?;
+        decoder.feature_ranges.push((
+            start.0..decoder.paths.len(),
+            start.1..decoder.polygons.len(),
+        ));
     }
     Ok(decoder)
 }
@@ -307,6 +325,14 @@ pub fn build_wfs_mesh(
     controller: &NativeController,
     options: WfsMeshOptions,
 ) -> Result<Vec<[f32; 3]>, WfsRenderError> {
+    build_path_mesh(&paths(collection)?.paths, controller, options)
+}
+
+fn build_path_mesh(
+    paths: &[Path],
+    controller: &NativeController,
+    options: WfsMeshOptions,
+) -> Result<Vec<[f32; 3]>, WfsRenderError> {
     let transform = WfsTransform::new(controller, options)?;
     let globe = controller.view_mode == "3D";
     let project = |p| transform.project(p);
@@ -347,7 +373,7 @@ pub fn build_wfs_mesh(
         }
         Ok(())
     };
-    for path in paths(collection)?.paths {
+    for path in paths {
         if path.point {
             let [lat, lon, _] = path.positions[0];
             let Some(center) = project(path.positions[0])? else {
@@ -396,6 +422,7 @@ pub struct WgpuWfsPipeline {
     fill_pipeline_2d: wgpu::RenderPipeline,
     uniform: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
+    bind_group_layout: wgpu::BindGroupLayout,
 }
 impl WgpuWfsPipeline {
     pub fn new(
@@ -505,6 +532,7 @@ struct Uniforms { matrix: mat4x4<f32>, color: vec4<f32>, fill_color: vec4<f32> }
             fill_pipeline_2d,
             uniform,
             bind_group,
+            bind_group_layout: layout,
         }
     }
     /// Update before submitting a pass. Color is normalized RGBA.
@@ -662,7 +690,7 @@ mod tests {
             CoordinateReferenceSystem::epsg(4326).unwrap(),
         )
     }
-    fn controller() -> NativeController {
+    pub(super) fn controller() -> NativeController {
         let c = NativeController::new(0.0, 0.0).unwrap();
         install_wcs_terrain(
             &c.terrain,
@@ -1276,3 +1304,10 @@ mod tests {
 
 mod fill;
 pub use fill::build_wfs_fill_mesh;
+mod style;
+pub use style::{
+    WfsMatchPriority, WfsPaint, WfsPredicate, WfsRgba, WfsScalar, WfsStyleRule, WfsStyleSheet,
+    WfsVisibility,
+};
+mod styled;
+pub use styled::{PreparedWfsFeatures, WfsFeatureIndex, WgpuWfsDraw};

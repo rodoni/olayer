@@ -21,7 +21,10 @@ async function run(): Promise<string[]> {
   const originalLoad = source.load.bind(source);
   let loaded: WfsFeatureCollection | undefined;
   source.load = async signal => { loaded = await originalLoad(signal); return loaded; };
-  const layer = new WfsLayer("features", source, { altitudeMode: "relative-to-ground", color: [1, 1, 1, 1], fillColor: [0, 1, 0, 1], fillPolygons: true });
+  const layer = new WfsLayer("features", source, { altitudeMode: "relative-to-ground", style: {
+    defaultPaint: { visibility: "visible", stroke: [1, 1, 1, 1], fill: [1, 0, 0, 1] },
+    rules: [{ predicate: { kind: "equals", property: "kind", value: "island" }, paint: { visibility: "visible", stroke: [1, 1, 1, 1], fill: [0, 1, 0, 1] } }],
+  } });
   const terrain = new WcsTerrainSource("terrain", controller.terrainEngine, new WcsRasterSource(new OgcHttpClient({ maxRetries: 0 }), {
     endpoint: "/fixture-wcs", coverageId: "elevation", crs: "EPSG:4326", bounds: [-2, -1, 2, 1], width: 3, height: 3,
   }));
@@ -58,7 +61,8 @@ async function run(): Promise<string[]> {
       gl.clearColor(0, 0, 0, 1);
       gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
       controller.layerManager.renderStaticLayers(gl, new Float32Array(matrix), { controller });
-      for (const [lon, lat, filled] of [[0, -0.5, true], [-1, -0.5, false], [-0.2, 0.5, false], [1, 0.5, true], [-1.2, 0.6, true]] as const) {
+      for (const [lon, lat, expectedColor] of [[0, -0.5, "red"], [-1, -0.5, "blue"], [-0.2, 0.5, "blue"], [1, 0.5, "red"], [-1.2, 0.6, "green"]] as const) {
+        const filled = expectedColor !== "blue";
         const height = mode === "2D" ? 0 : filled ? 750 : 500;
         const position = mode === "3D" ? lla_to_ecef(lat * Math.PI / 180, lon * Math.PI / 180, height)
           : [...controller.projection.project(lat * Math.PI / 180, lon * Math.PI / 180, 0), height];
@@ -68,7 +72,7 @@ async function run(): Promise<string[]> {
         const ny = (matrix[1]! * x! + matrix[5]! * y! + matrix[9]! * zValue! + matrix[13]!) / w;
         const pixel = new Uint8Array(4);
         gl.readPixels(Math.floor((nx + 1) * 128), Math.floor((ny + 1) * 128), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
-        const expected = filled ? [0, 255, 0] : [0, 0, 255];
+        const expected = expectedColor === "red" ? [255, 0, 0] : expectedColor === "green" ? [0, 255, 0] : [0, 0, 255];
         if (expected.some((v, i) => Math.abs(v - pixel[i]!) > 35)) throw new Error(`${mode}: incorrect polygon interior at ${lon},${lat}: ${pixel}`);
       }
       gl.depthMask(true);

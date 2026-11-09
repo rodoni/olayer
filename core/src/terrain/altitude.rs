@@ -10,7 +10,8 @@ pub enum AltitudeMode {
     ClampToGround,
     /// Interpret the input as an offset above the sampled ground surface.
     RelativeToGround,
-    /// Interpret the input as an offset above the effective rendered mesh.
+    /// Interpret the input as an offset above an explicitly supplied effective mesh
+    /// height, falling back to sampled ground when the mesh height is absent.
     RelativeToMesh,
 }
 
@@ -24,9 +25,16 @@ pub enum AltitudeUnknownPolicy {
 
 /// Resolves an object's final height without applying a projection or vertical exaggeration.
 ///
+/// `Absolute` ignores both surface heights. `RelativeToMesh` selects an explicit
+/// mesh height before ground, even if that mesh height is nonfinite (and rejected).
+/// Only an absent mesh height falls back to ground for compatibility. The unknown
+/// policy applies only when the selected surface is absent: `Reject` errors,
+/// `UseAbsolute` returns the input, and `UseZero` uses a zero base (so clamping
+/// returns zero and relative modes return the input). Unselected heights are ignored.
+///
 /// # Errors
 /// Returns an error when the input or selected terrain height is not finite, or when the
-/// unknown-terrain policy rejects a missing sample.
+/// unknown-terrain policy rejects a missing sample, or relative addition overflows.
 pub fn resolve_altitude(
     input_height: f64,
     ground_height: Option<f64>,

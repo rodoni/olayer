@@ -22,5 +22,6 @@ fn main() {
     // Re-run build script if source files change
     println!("cargo:rerun-if-changed=src/lib.rs");
     println!("cargo:rerun-if-changed=src/c_ffi_bridge/mod.rs");
+    println!("cargo:rerun-if-changed=src/c_ffi_bridge/map.rs");
     println!("cargo:rerun-if-changed=cbindgen.toml");
 }

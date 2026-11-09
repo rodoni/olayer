@@ -105,6 +105,9 @@ impl WfsRequestBuilder {
         if self.type_name.is_empty() {
             return Err(MapError::new(INVALID_WFS, "type name is empty"));
         }
+        if self.count == Some(0) {
+            return Err(MapError::new(INVALID_WFS, "count must be non-zero"));
+        }
         let crs = self
             .crs
             .ok_or_else(|| MapError::new(INVALID_WFS, "CRS is required"))?;

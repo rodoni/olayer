@@ -2,6 +2,13 @@ import { describe, expect, it } from "vitest";
 import { buildWmtsTileUrl } from "./wmts";
 
 describe("buildWmtsTileUrl", () => {
+  it("preserves endpoint fragments after canonical query parameters", () => {
+    const url = buildWmtsTileUrl({ endpoint: "https://example.test/wmts?tenant=one#map", layer: "a(b)!" }, { x: 0, y: 0, z: 0 });
+    expect(url).toContain("?tenant=one&SERVICE=WMTS");
+    expect(url).toContain("LAYER=a%28b%29%21");
+    expect(url.endsWith("#map")).toBe(true);
+  });
+
   it("builds deterministic escaped WMTS requests", () => {
     const url = buildWmtsTileUrl(
       { endpoint: "https://example.test/wmts", layer: "roads & water", style: "" },

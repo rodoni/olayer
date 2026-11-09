@@ -46,6 +46,12 @@ controller.terrain.unload_elevation_grid("elevation");
 
 `fetch_json` now requests JSON instead of TIFF. JSON nodata metadata is preserved; conflicting configured/response sentinels, mismatched request/bounds CRS and mismatched dimensions are rejected. Failed installation leaves the existing grid intact.
 
+The native image-backed coverage decoder preserves exact single-band UInt8/UInt16 samples only. It rejects signed/floating-point requests, RGB/alpha-bearing multiband images and sample-width conversions rather than silently converting luminance into scientific values. PNG/TIFF container recognition is not a claim of arbitrary GeoTIFF band, datum or sample-format support. Use the explicit JSON scalar-grid adapter for signed/floating-point values until a sample-preserving scientific codec is available.
+
+`WcsTerrainSource` accepts an optional explicit interpretation: `registration: "node" | "cell-center"`, `unit: "metre" | "international-foot" | "us-survey-foot"`, and `verticalReference: "ellipsoidal" | "orthometric"`. The default remains north-up node samples, metres and ellipsoidal height. Cell-center registration shifts multi-sample grid bounds inward by half a cell; one-sample axes remain constant over the declared extent. Orthometric values require an injected synchronous geoid provider returning undulation `N` in metres; conversion is `h = H + N`. Missing/nonfinite correction or conversion failure rejects the load before replacing the installed grid. Nodata sentinels remain unscaled and unknown.
+
+The native adapter exposes the equivalent `CoverageTerrainInterpretation` and `GeoidUndulationProvider` through `install_wcs_terrain_with_interpretation`. Both integrations keep the scientific `Coverage` DTO unchanged and perform vertical adaptation only at the explicit terrain-install boundary. They do not infer units or datums from format strings or metadata labels.
+
 The generated C header exposes `olayer_terrain_engine_load_elevation_grid` and `olayer_terrain_engine_unload_elevation_grid`. Load takes an EPSG code, four bounds, width/height, north-up f64 samples and an optional finite nodata sentinel. It returns 0 on success, -1 for invalid pointer/length inputs and -2 for invalid grid data. WASM exposes the equivalent `load_elevation_grid`/`unload_elevation_grid` methods; status queries serialize unknown height as `null`.
 
 ## Verification and remaining work

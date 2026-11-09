@@ -16,7 +16,27 @@ export interface WfsMeshOptions {
 }
 
 export type Position = [number, number, number];
-interface Path { readonly positions: Position[]; readonly point: boolean }
+export interface WfsPath { readonly positions: Position[]; readonly point: boolean; readonly featureIndex: number }
+export interface WfsPolygon { readonly rings: Position[][]; readonly featureIndex: number }
+export interface WfsGeometry { readonly paths: readonly WfsPath[]; readonly polygons: readonly WfsPolygon[] }
+export interface WfsDrawRange { readonly featureIndex: number; readonly first: number; readonly count: number }
+export interface WfsMeshBudget { work: number; vertices: number }
+export interface WfsRangedMesh { readonly vertices: Float32Array; readonly ranges: readonly WfsDrawRange[] }
+export function chargeWfsMesh(budget: WfsMeshBudget, work: number, vertices: number): void {
+  budget.work += work;
+  budget.vertices += vertices;
+  if (budget.work > MAX_VERTICES || budget.vertices > MAX_VERTICES) throw new RangeError("WFS aggregate mesh limit exceeded");
+}
+export function appendWfsRange(ranges: WfsDrawRange[], featureIndex: number, first: number, count: number): void {
+  if (!count) return;
+  const previous = ranges[ranges.length - 1];
+  if (previous?.featureIndex === featureIndex && previous.first + previous.count === first) {
+    ranges[ranges.length - 1] = { featureIndex, first: previous.first, count: previous.count + count };
+  } else {
+    if (ranges.length >= 8192) throw new RangeError("WFS draw range limit exceeded");
+    ranges.push({ featureIndex, first, count });
+  }
+}
 const A = 6378137, B = 6356752.314245179;
 const MAX_VERTICES = 1_000_000;
 
@@ -27,18 +47,21 @@ function record(value: unknown): value is Record<string, unknown> {
 /** Validates the complete geometry before installation; properties remain on the collection. */
 export function validateWfsGeometry(collection: WfsFeatureCollection, crs: string, fillPolygons = false): void {
   const geometry = paths(collection, crs);
-  if (fillPolygons) for (const rings of geometry.polygons) triangulateWfsPolygon(rings);
+  if (fillPolygons) for (const polygon of geometry.polygons) triangulateWfsPolygon(polygon.rings);
 }
 
 export function triangulateWfsPolygon(rings: Position[][]): Float64Array {
   return triangulate_polygon_rings(new Float64Array(rings.flat(2)), new Uint32Array(rings.map(ring => ring.length)));
 }
 
-export function paths(collection: WfsFeatureCollection, crs: string): { paths: Path[]; polygons: Position[][][] } {
+export function paths(collection: WfsFeatureCollection, crs: string): WfsGeometry {
   if (!["EPSG:4326", "EPSG:3857", "EPSG:900913"].includes(crs)) throw new RangeError(`Unsupported WFS CRS: ${crs}`);
   if (collection.crs !== undefined && collection.crs !== crs) throw new RangeError("WFS collection CRS conflicts with placement");
-  const output: Path[] = [];
-  const polygons: Position[][][] = [];
+  const output: WfsPath[] = [];
+  const polygons: WfsPolygon[] = [];
+  let featureIndex = 0;
+  let objects = 0;
+  if (collection.features.length > 100_000) throw new RangeError("WFS feature limit exceeded");
   let count = 0;
   const position = (raw: unknown): Position => {
     if (!Array.isArray(raw) || raw.length < 2 || raw.length > 3 || !raw.every(v => typeof v === "number" && Number.isFinite(v))) {
@@ -65,20 +88,21 @@ export function paths(collection: WfsFeatureCollection, crs: string): { paths: P
     for (let i = 1; i < positions.length; i++) {
       if (Math.abs(positions[i]![1] - positions[i - 1]![1]) > Math.PI) throw new RangeError("Split WFS paths at the antimeridian");
     }
-    output.push({ positions, point: false });
+    output.push({ positions, point: false, featureIndex });
     return positions;
   };
   const polygon = (raw: unknown): void => {
     const rings = array(raw).map(ring => line(ring, true));
-    if (rings.length > 0) polygons.push(rings);
+    if (rings.length > 0) polygons.push({ rings, featureIndex });
   };
   const geometry = (raw: unknown, depth = 0): void => {
+    if (++objects > 100_000) throw new RangeError("WFS geometry object limit exceeded");
     if (raw === null) return;
     if (depth > 16 || !record(raw)) throw new TypeError("Invalid WFS geometry or nesting limit");
     const coordinates = raw["coordinates"];
     switch (raw["type"]) {
-      case "Point": output.push({ positions: [position(coordinates)], point: true }); break;
-      case "MultiPoint": for (const p of array(coordinates)) output.push({ positions: [position(p)], point: true }); break;
+      case "Point": output.push({ positions: [position(coordinates)], point: true, featureIndex }); break;
+      case "MultiPoint": for (const p of array(coordinates)) output.push({ positions: [position(p)], point: true, featureIndex }); break;
       case "LineString": line(coordinates); break;
       case "MultiLineString": for (const p of array(coordinates)) line(p); break;
       case "Polygon": polygon(coordinates); break;
@@ -87,7 +111,7 @@ export function paths(collection: WfsFeatureCollection, crs: string): { paths: P
       default: throw new TypeError("Unsupported WFS geometry type");
     }
   };
-  for (const feature of collection.features) geometry(feature.geometry);
+  for (const feature of collection.features) { geometry(feature.geometry); featureIndex++; }
   return { paths: output, polygons };
 }
 
@@ -121,11 +145,18 @@ export function createWfsTransform(context: WmsMeshContext, options: WfsMeshOpti
 
 /** Packed line-list vertices. Unknown terrain breaks segments, never joins across gaps. */
 export function buildWfsMesh(collection: WfsFeatureCollection, crs: string, context: WmsMeshContext, options: WfsMeshOptions = {}): Float32Array {
+  return buildPreparedWfsMesh(paths(collection, crs), context, options).vertices;
+}
+
+/** Transform all paths together so limits cannot reset at feature boundaries. */
+export function buildPreparedWfsMesh(geometry: WfsGeometry, context: WmsMeshContext, options: WfsMeshOptions = {}, budget: WfsMeshBudget = { work: 0, vertices: 0 }): WfsRangedMesh {
   const { project, visibility, globe, subdivisions, radius } = createWfsTransform(context, options);
   const output: number[] = [];
+  const ranges: WfsDrawRange[] = [];
   let work = 0;
   const emit = (a: Position | null, b: Position | null): void => {
     work += 2;
+    chargeWfsMesh(budget, 2, 0);
     if (work > MAX_VERTICES) throw new RangeError("WFS mesh vertex limit exceeded");
     if (!a || !b) return;
     const va = visibility(a), vb = visibility(b);
@@ -137,8 +168,10 @@ export function buildWfsMesh(collection: WfsFeatureCollection, crs: string, cont
     }
     if (output.length / 3 + 2 > MAX_VERTICES) throw new RangeError("WFS mesh vertex limit exceeded");
     output.push(...a, ...b);
+    chargeWfsMesh(budget, 0, 2);
   };
-  for (const path of paths(collection, crs).paths) {
+  for (const path of geometry.paths) {
+    const first = output.length / 3;
     if (path.point) {
       const geo = path.positions[0]!;
       const center = project(geo);
@@ -159,8 +192,9 @@ export function buildWfsMesh(collection: WfsFeatureCollection, crs: string, cont
         }
       }
     }
+    appendWfsRange(ranges, path.featureIndex, first, output.length / 3 - first);
   }
   const result = new Float32Array(output);
   if (!result.every(Number.isFinite)) throw new RangeError("WFS mesh exceeds GPU precision");
-  return result;
+  return { vertices: result, ranges };
 }

@@ -22,6 +22,35 @@ fn coded_js_error(code: ErrorCode, message: impl Display) -> JsValue {
     value
 }
 
+fn coded_map_js_error(error: olayer_map_core::MapError) -> JsValue {
+    let js_error = js_sys::Error::new(&format!("{}: {}", error.code, error.message));
+    let value: JsValue = js_error.into();
+    let _ = js_sys::Reflect::set(&value, &"code".into(), &error.code.as_str().into());
+    let _ = js_sys::Reflect::set(&value, &"module".into(), &"MAP".into());
+    value
+}
+
+/// Builds a versioned, transport-free OGC request URL from a validated JSON DTO.
+///
+/// Input and output are bounded by the Map Core wire contract. The returned URL
+/// is caller-owned JavaScript memory; this function performs no network request.
+#[wasm_bindgen]
+pub fn map_build_request_json(input: &str) -> Result<String, JsValue> {
+    olayer_map_core::interop::build_request_json(input).map_err(coded_map_js_error)
+}
+
+/// Parses a bounded OGC capabilities XML document into a versioned summary DTO.
+#[wasm_bindgen]
+pub fn map_parse_capabilities_json(xml: &[u8]) -> Result<String, JsValue> {
+    olayer_map_core::interop::parse_capabilities_json(xml).map_err(coded_map_js_error)
+}
+
+/// Validates a versioned scalar coverage or feature-envelope JSON DTO.
+#[wasm_bindgen]
+pub fn map_validate_model_json(input: &str) -> Result<String, JsValue> {
+    olayer_map_core::interop::validate_model_json(input).map_err(coded_map_js_error)
+}
+
 /// WASM compatible wrapper for LatLon geodetic coordinates.
 #[wasm_bindgen]
 pub struct WasmLatLon {
@@ -185,7 +214,9 @@ impl WasmTerrainEngine {
         reject_unknown: bool,
     ) -> Result<JsValue, JsValue> {
         let route: Vec<LatLon> = route_coords
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .map(|c| LatLon::from_degrees(c[0], c[1], c[2]))
             .collect();
         let policy = if reject_unknown {
@@ -236,7 +267,9 @@ impl WasmTerrainEngine {
         step_meters: f64,
     ) -> Result<Vec<f64>, JsValue> {
         let route: Vec<LatLon> = route_coords
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .map(|c| LatLon::from_degrees(c[0], c[1], c[2]))
             .collect();
 
@@ -1051,7 +1084,9 @@ impl WasmGeodesicPolygon {
     #[wasm_bindgen(constructor)]
     pub fn new(coords: &[f64]) -> WasmGeodesicPolygon {
         let vertices: Vec<LatLon> = coords
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .map(|c| LatLon::new(c[0], c[1], c[2]))
             .collect();
         WasmGeodesicPolygon {

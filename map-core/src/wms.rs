@@ -9,6 +9,8 @@ pub struct WmsGetMapRequest {
     pub endpoint: UrlParts,
     pub layers: String,
     pub styles: String,
+    /// Canonical source-CRS x/y bounds (longitude/latitude degrees for EPSG:4326).
+    /// Only URL serialization changes these to WMS 1.3.0 wire axis order.
     pub bounds: BoundingBox,
     pub width: NonZeroU32,
     pub height: NonZeroU32,
@@ -16,6 +18,7 @@ pub struct WmsGetMapRequest {
     pub transparent: bool,
 }
 impl WmsGetMapRequest {
+    /// Serializes WMS 1.3.0, swapping EPSG:4326 axes on the wire only.
     pub fn url(&self) -> String {
         // Bounds use x/y internally; WMS 1.3.0 follows EPSG axis order on the wire.
         let bounds = if self.bounds.crs.epsg_code() == 4326 {

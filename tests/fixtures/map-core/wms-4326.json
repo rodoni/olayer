@@ -1,0 +1,1 @@
+{"version":1,"operation":{"kind":"wms","endpoint":{"base":"https://example.test","path":"/ows?tenant=one#map"},"layers":"roads","styles":"","bounds":{"epsg":4326,"min_x":10,"min_y":20,"max_x":30,"max_y":40},"width":256,"height":128,"format":"image/png","transparency":"transparent"}}

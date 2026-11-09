@@ -435,10 +435,14 @@ impl TerrainEngine {
 
     /// Resolves an object's height against the sampled terrain. Vertical
     /// exaggeration is intentionally not applied here because it is visual-only.
+    /// `Absolute` and `RelativeToMesh` with a supplied mesh height do not query
+    /// terrain or validate coordinates. An absent mesh height falls back to
+    /// sampled ground for compatibility; it does not infer the rendered mesh.
     ///
     /// # Errors
     /// Returns [`TerrainError`] when terrain is unavailable under the selected policy or an
-    /// input height is invalid.
+    /// input/selected height is nonfinite or relative addition overflows. A supplied
+    /// nonfinite mesh height is an error, not a missing sample subject to policy.
     pub fn resolve_altitude(
         &self,
         lat_rad: f64,
@@ -448,7 +452,9 @@ impl TerrainEngine {
         unknown_policy: AltitudeUnknownPolicy,
         mesh_height: Option<f64>,
     ) -> Result<f64, TerrainError> {
-        if mode == AltitudeMode::Absolute {
+        if mode == AltitudeMode::Absolute
+            || (mode == AltitudeMode::RelativeToMesh && mesh_height.is_some())
+        {
             return resolve_altitude(input_height, None, mesh_height, mode, unknown_policy);
         }
 

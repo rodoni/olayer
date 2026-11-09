@@ -172,6 +172,13 @@ fn terrain_and_imagery_occlude_wfs_in_shared_depth() {
             wgpu::TextureFormat::Rgba8Unorm,
             Some(wgpu::TextureFormat::Depth32Float),
         );
+        raster
+            .set_terrain_lod(Some(TerrainLodOptions {
+                target_error_meters: 0.0,
+                max_subdivisions: 32,
+                max_source_samples: 1_089,
+            }))
+            .unwrap();
         let lines = WgpuWfsPipeline::new(
             &device,
             wgpu::TextureFormat::Rgba8Unorm,
@@ -189,16 +196,40 @@ fn terrain_and_imagery_occlude_wfs_in_shared_depth() {
             crs,
         )
         .unwrap();
+        let terrain_height = scene["terrainHeight"].as_f64().unwrap();
         for mode in ["2D", "2.5D", "3D"] {
             controller.view_mode = mode.into();
             controller.camera.pitch = if mode == "2.5D" { 0.4 } else { 0.0 };
             controller.camera.zoom = if mode == "3D" { 20.0 } else { 1.0 };
-            install(
-                &controller,
-                bounds,
-                scene["terrainHeight"].as_f64().unwrap(),
-            );
+            install(&controller, bounds, terrain_height);
+            if mode == "3D" {
+                let fixed = WgpuGpuPipeline::generate_terrain_vertices(&controller, 1.0);
+                let (adaptive, _) = WgpuGpuPipeline::generate_terrain_vertices_with_lod(
+                    &controller,
+                    1.0,
+                    TerrainLodOptions {
+                        target_error_meters: 0.0,
+                        max_subdivisions: 32,
+                        max_source_samples: 1_089,
+                    },
+                )
+                .unwrap();
+                assert_eq!(fixed.len(), adaptive.len());
+                for (fixed, adaptive) in fixed.iter().zip(&adaptive) {
+                    assert_eq!(fixed.position, adaptive.position);
+                    assert_eq!(fixed.terrain_known, adaptive.terrain_known);
+                }
+            }
             raster.rebuild_terrain_buffers(&controller, &device, &queue, 1.0);
+            let report = raster.terrain_lod_report().expect("adaptive mesh report");
+            assert_eq!(report.chosen_subdivisions, 32);
+            assert!(report.samples <= 1_089 && report.budget_limited);
+            let mesh_height = raster.terrain_mesh_height_at(0.0, 0.0);
+            if mode == "2D" {
+                assert!(mesh_height.is_none());
+            } else {
+                assert!(mesh_height.is_some_and(|height| (height - terrain_height).abs() < 50.0));
+            }
             let matrix = match mode {
                 "3D" => controller.camera.get_3d_view_proj_matrix().unwrap(),
                 "2.5D" => controller
@@ -290,6 +321,10 @@ fn terrain_and_imagery_occlude_wfs_in_shared_depth() {
                 // An all-nodata replacement must invalidate the terrain mesh and never occlude.
                 install(&controller, bounds, -9999.0);
                 raster.rebuild_terrain_buffers(&controller, &device, &queue, 1.0);
+                assert!(raster.terrain_mesh_height_at(0.0, 0.0).is_none());
+                let nodata_report = raster.terrain_lod_report().expect("nodata LOD report");
+                assert!(nodata_report.has_unknown);
+                assert!(!nodata_report.threshold_satisfied);
                 let pixels = frame(
                     &device,
                     &queue,

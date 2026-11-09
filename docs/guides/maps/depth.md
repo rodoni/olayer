@@ -30,11 +30,15 @@ WMS and WFS retain their current display dimension during creation/rebuild. Thei
 
 Raster depth bias is negative one constant unit, with zero slope bias, for coplanar surface imagery. The host owns attachments, resize handling, clearing and pass order. Existing demos/hosts using `new` must explicitly adopt the depth attachment contract. UI pipelines without depth can render in a subsequent color-only pass that loads the existing color attachment.
 
+The native desktop demo uses `with_depth` with a retained, single-sample `Depth32Float` attachment, recreated on nonzero surface resize and cleared to 1 for every map pass. Terrain, raster tiles and grid share that pass. A subsequent color-only pass loads the map color and draws egui, including radar targets and HUD panels, as screen overlays without terrain occlusion. Zero-sized windows skip redraws.
+
+`WgpuVolumetricPipeline::new` remains depthless for compatibility. Its opt-in `with_depth` variant accepts the host depth format, remaps clip Z to WGPU's 0..1 range, tests with `LessEqual`, and disables depth writes. Browser `VolumetricAirspaceLayer` similarly tests against depth, disables depth writes and restores host GL state; it renders only in 3D and uses the caller's layer order. These are ordered alpha blending paths, not order-independent transparency, and do not solve cyclic/intersecting transparent geometry.
+
 ## Terrain updates and compatibility
 
 `TerrainEngine::revision()` changes on successful terrain loads, removals, cache clearing and capacity changes. It is a wrapping u32 invalidation token, not a globally unique version or timestamp. WASM exposes `revision()` and the generated C header exposes `olayer_terrain_engine_revision`. Invalid loads leave the installed data/revision unchanged. Native/browser sampled terrain caches include this token, so replacing a WCS grid or removing terrain updates occlusion without moving the camera.
 
-Browser terrain mesh keys now use exact camera values instead of rounded values. Globe terrain extents in both SDKs use the camera's 15,000-km/zoom distance scale (a 30,000-km/zoom sampling span before conversion), rather than the unrelated planar viewport width. The local extent is still capped at 60 degrees; these are sampled local patches, not a complete globe terrain LOD system. Unknown coverage remains a hole. Flat terrain normals are rotated into ECEF for browser globe lighting.
+Browser terrain mesh keys now use exact camera values instead of rounded values. Globe terrain extents in both SDKs use the camera's 15,000-km/zoom distance scale (a 30,000-km/zoom sampling span before conversion), rather than the unrelated planar viewport width. The local extent is still capped at 60 degrees; these are sampled local patches, not a complete tiled-globe terrain system. Opt-in bounded LOD reports sampled residuals only and cannot guarantee discovery of off-lattice ridges or nodata. Unknown coverage remains a hole. Flat terrain normals are rotated into ECEF for browser globe lighting.
 
 Compatibility changes include actual unknown-terrain holes instead of sea-level/purple placeholders, opaque terrain by default, corrected native depth mapping, and depth participation of browser imagery and tiles in 2.5D. Native hosts can continue without a depth attachment via `new`, or migrate explicitly via `with_depth`.
 
@@ -45,6 +49,7 @@ Compatibility changes include actual unknown-terrain holes instead of sea-level/
 ```sh
 cargo test --workspace --exclude olayer-desktop-demo
 cargo test -p olayer-native terrain_and_imagery_occlude_wfs_in_shared_depth -- --ignored --nocapture
+cargo test -p olayer-native translucent_volumetric_mesh_tests_depth_without_writing_it -- --ignored --nocapture
 cd sdk/ts
 npm run test:run
 npm run typecheck
@@ -55,4 +60,4 @@ Both GPU checks are included in CI. Geometry tests cover missing-cell indexing, 
 
 ## Remaining limits
 
-Occlusion follows the sampled meshes and reference ellipsoid. Adaptive terrain tessellation, complete globe terrain coverage, arbitrary ridge/overhang production scenes and production manual visual checks remain. Partially transparent surfaces still require appropriate host ordering; there is no order-independent transparency. Other visualization pipelines, such as volumetric rendering and screen overlays, need their own compatible depth/pass choices. Visual exaggeration should remain consistent across geometry; these integration checks use exaggeration 1. GPU resource creation/destruction remains owned by the existing layer/handle lifecycle.
+Occlusion follows the sampled meshes and reference ellipsoid. Terrain LOD is opt-in, bounded and reports sampled residuals only; it is not a global error guarantee. Complete tiled-globe terrain coverage, shared adaptive LOD across overlays, arbitrary ridge/overhang production scenes and production manual visual checks remain. Partially transparent surfaces still require appropriate host ordering; there is no order-independent transparency. Browser/native volumetric depth paths cover their current airspace/mesh pipelines only; other visualizations need their own explicit depth/pass choices. Visual exaggeration should remain consistent across geometry; these integration checks use exaggeration 1. GPU resource creation/destruction remains owned by the existing layer/handle lifecycle.

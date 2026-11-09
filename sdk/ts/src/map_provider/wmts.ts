@@ -18,12 +18,15 @@ const DEFAULT_FORMAT = "image/png";
 const MAX_ZOOM = 31;
 
 function encodeQueryValue(value: string): string {
-  return encodeURIComponent(value);
+  return encodeURIComponent(value).replace(/[!'()*]/g, (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
 }
 
 function appendQuery(endpoint: string, query: string): string {
-  const separator = endpoint.includes("?") ? (endpoint.endsWith("?") || endpoint.endsWith("&") ? "" : "&") : "?";
-  return `${endpoint}${separator}${query}`;
+  const fragmentIndex = endpoint.indexOf("#");
+  const base = fragmentIndex < 0 ? endpoint : endpoint.slice(0, fragmentIndex);
+  const fragment = fragmentIndex < 0 ? "" : endpoint.slice(fragmentIndex);
+  const separator = base.includes("?") ? (base.endsWith("?") || base.endsWith("&") ? "" : "&") : "?";
+  return `${base}${separator}${query}${fragment}`;
 }
 
 /**

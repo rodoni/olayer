@@ -38,11 +38,32 @@ pub struct WgpuVolumetricPipeline {
 
 impl WgpuVolumetricPipeline {
     pub fn new(device: &wgpu::Device, config_format: wgpu::TextureFormat) -> Self {
+        Self::with_depth(device, config_format, None)
+    }
+
+    /// Creates translucent volumetric pipelines that test against a host depth attachment
+    /// without writing depth. Callers using this variant must bind the configured attachment.
+    pub fn with_depth(
+        device: &wgpu::Device,
+        config_format: wgpu::TextureFormat,
+        depth_format: Option<wgpu::TextureFormat>,
+    ) -> Self {
+        let depth_state = || {
+            depth_format.map(|format| wgpu::DepthStencilState {
+                format,
+                depth_write_enabled: false,
+                depth_compare: wgpu::CompareFunction::LessEqual,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            })
+        };
+        let clip_depth_remap = if depth_format.is_some() {
+            "out.clip_position.z = (out.clip_position.z + out.clip_position.w) * 0.5;"
+        } else {
+            ""
+        };
         // 1. Airspace Shader with Fresnel edge glow
-        let airspace_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Volumetric Airspace Shader"),
-            source: wgpu::ShaderSource::Wgsl(
-                r#"
+        let airspace_source = r#"
 struct Uniforms {
     view_proj: mat4x4<f32>,
     base_color: vec4<f32>,
@@ -70,6 +91,7 @@ struct VertexOutput {
 fn vs_airspace(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
     out.clip_position = uniforms.view_proj * vec4<f32>(in.position, 1.0);
+    /*CLIP_DEPTH_REMAP*/
     out.normal = in.normal;
     out.height_ratio = in.height_ratio;
     out.is_edge = in.is_edge;
@@ -78,21 +100,18 @@ fn vs_airspace(in: VertexInput) -> VertexOutput {
 
 @fragment
 fn fs_airspace(in: VertexOutput) -> @location(0) vec4<f32> {
-    // Normal-based fresnel glow and height gradient
     let glow = in.is_edge * 0.4;
-    let color = mix(uniforms.base_color, uniforms.edge_color, in.height_ratio * 0.3 + glow);
-    return color;
+    return mix(uniforms.base_color, uniforms.edge_color, in.height_ratio * 0.3 + glow);
 }
 "#
-                .into(),
-            ),
+        .replace("/*CLIP_DEPTH_REMAP*/", clip_depth_remap);
+        let airspace_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Volumetric Airspace Shader"),
+            source: wgpu::ShaderSource::Wgsl(airspace_source.into()),
         });
 
         // 2. Trajectory Ribbon Shader with scalar altitude gradient
-        let ribbon_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Trajectory Ribbon Shader"),
-            source: wgpu::ShaderSource::Wgsl(
-                r#"
+        let ribbon_source = r#"
 struct Uniforms {
     view_proj: mat4x4<f32>,
     base_color: vec4<f32>,
@@ -119,6 +138,7 @@ struct VertexOutput {
 fn vs_ribbon(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
     out.clip_position = uniforms.view_proj * vec4<f32>(in.position, 1.0);
+    /*CLIP_DEPTH_REMAP*/
     out.uv = in.uv;
     out.scalar = in.scalar;
     return out;
@@ -126,16 +146,16 @@ fn vs_ribbon(in: VertexInput) -> VertexOutput {
 
 @fragment
 fn fs_ribbon(in: VertexOutput) -> @location(0) vec4<f32> {
-    // Continuous gradient interpolation between base color (low) and edge color (high)
     let ramp_color = mix(uniforms.base_color, uniforms.edge_color, in.scalar);
-    // Subtle edge border along lateral boundary (u = 0, u = 1)
     let edge_dist = min(in.uv.x, 1.0 - in.uv.x);
     let edge_boost = smoothstep(0.0, 0.15, edge_dist);
     return vec4<f32>(ramp_color.rgb * (0.7 + 0.3 * edge_boost), ramp_color.a);
 }
 "#
-                .into(),
-            ),
+        .replace("/*CLIP_DEPTH_REMAP*/", clip_depth_remap);
+        let ribbon_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Trajectory Ribbon Shader"),
+            source: wgpu::ShaderSource::Wgsl(ribbon_source.into()),
         });
 
         let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -222,7 +242,7 @@ fn fs_ribbon(in: VertexOutput) -> @location(0) vec4<f32> {
                 cull_mode: None, // Render both front and back faces for translucent prisms
                 ..Default::default()
             },
-            depth_stencil: None,
+            depth_stencil: depth_state(),
             multisample: wgpu::MultisampleState::default(),
             multiview: None,
         });
@@ -275,7 +295,7 @@ fn fs_ribbon(in: VertexOutput) -> @location(0) vec4<f32> {
                 cull_mode: None,
                 ..Default::default()
             },
-            depth_stencil: None,
+            depth_stencil: depth_state(),
             multisample: wgpu::MultisampleState::default(),
             multiview: None,
         });
@@ -373,5 +393,145 @@ fn fs_ribbon(in: VertexOutput) -> @location(0) vec4<f32> {
         uniform_bytes.extend_from_slice(bytemuck::cast_slice(&base_color));
         uniform_bytes.extend_from_slice(bytemuck::cast_slice(&edge_color));
         queue.write_buffer(&self.uniform_buffer, 0, &uniform_bytes);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[ignore = "requires a headless WGPU adapter; run explicitly with --ignored"]
+    fn translucent_volumetric_mesh_tests_depth_without_writing_it() {
+        pollster::block_on(async {
+            let instance = wgpu::Instance::default();
+            let adapter = instance
+                .request_adapter(&wgpu::RequestAdapterOptions::default())
+                .await
+                .expect("headless adapter");
+            let (device, queue) = adapter
+                .request_device(&wgpu::DeviceDescriptor::default(), None)
+                .await
+                .unwrap();
+            let pipeline = WgpuVolumetricPipeline::with_depth(
+                &device,
+                wgpu::TextureFormat::Rgba8Unorm,
+                Some(wgpu::TextureFormat::Depth32Float),
+            );
+            let mut uniforms = [0.0_f32; 32];
+            for index in [0, 5, 10, 15] {
+                uniforms[index] = 1.0;
+            }
+            uniforms[16..20].copy_from_slice(&[1.0, 0.0, 0.0, 0.5]);
+            uniforms[20..24].copy_from_slice(&[1.0, 0.0, 0.0, 0.5]);
+            queue.write_buffer(&pipeline.uniform_buffer, 0, bytemuck::cast_slice(&uniforms));
+            let vertex = |x, y, z| GpuVolumetricVertex {
+                position: [x, y, z],
+                normal: [0.0, 0.0, 1.0],
+                height_ratio: 0.0,
+                is_edge: 0.0,
+            };
+            let vertices = [
+                vertex(-1.0, -1.0, -0.2),
+                vertex(3.0, -1.0, -0.2),
+                vertex(-1.0, 3.0, -0.2),
+                vertex(-1.0, -1.0, 0.0),
+                vertex(3.0, -1.0, 0.0),
+                vertex(-1.0, 3.0, 0.0),
+            ];
+            let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("volumetric depth fixture"),
+                contents: bytemuck::cast_slice(&vertices),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+            let size = wgpu::Extent3d {
+                width: 4,
+                height: 4,
+                depth_or_array_layers: 1,
+            };
+            let color = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("volumetric color"),
+                size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
+            });
+            let depth = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("pre-existing opaque depth"),
+                size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Depth32Float,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
+            });
+            let color_view = color.create_view(&Default::default());
+            let depth_view = depth.create_view(&Default::default());
+            let mut encoder = device.create_command_encoder(&Default::default());
+            {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("translucent volumes over opaque depth"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &color_view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: &depth_view,
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(0.6),
+                            store: wgpu::StoreOp::Store,
+                        }),
+                        stencil_ops: None,
+                    }),
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+                pass.set_pipeline(&pipeline.airspace_pipeline);
+                pass.set_bind_group(0, &pipeline.bind_group, &[]);
+                pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+                pass.draw(0..6, 0..1);
+            }
+            let readback = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("volumetric readback"),
+                size: 256 * 4,
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            });
+            encoder.copy_texture_to_buffer(
+                color.as_image_copy(),
+                wgpu::ImageCopyBuffer {
+                    buffer: &readback,
+                    layout: wgpu::ImageDataLayout {
+                        offset: 0,
+                        bytes_per_row: Some(256),
+                        rows_per_image: Some(4),
+                    },
+                },
+                size,
+            );
+            queue.submit(Some(encoder.finish()));
+            let (send, receive) = std::sync::mpsc::channel();
+            readback
+                .slice(..)
+                .map_async(wgpu::MapMode::Read, move |result| {
+                    let _ = send.send(result);
+                });
+            device.poll(wgpu::Maintain::Wait);
+            receive.recv().unwrap().unwrap();
+            let bytes = readback.slice(..).get_mapped_range();
+            let center_red = bytes[256 + 4];
+            assert!(
+                center_red > 170,
+                "both translucent layers should blend without depth writes; got {center_red}"
+            );
+        });
     }
 }
